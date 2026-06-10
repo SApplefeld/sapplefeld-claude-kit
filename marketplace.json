@@ -1,0 +1,16 @@
+{
+  "name": "applefeld",
+  "owner": {
+    "name": "Scott Applefeld",
+    "email": "scott@applefeld.com"
+  },
+  "plugins": [
+    {
+      "name": "claude-kit",
+      "source": "./",
+      "description": "Scott Applefeld's personal Claude Code kit: workflow skills, review agents, style guides, and compaction-recovery hooks.",
+      "version": "1.0.0",
+      "author": "Scott Applefeld"
+    }
+  ]
+}

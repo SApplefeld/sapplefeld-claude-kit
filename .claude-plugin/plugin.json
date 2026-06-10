@@ -1,0 +1,9 @@
+{
+  "name": "claude-kit",
+  "description": "Scott Applefeld's personal Claude Code kit: brainstorm/execute/finish workflow skills, four review agents, C# and T-SQL style guides, and compaction-recovery hooks.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Scott Applefeld",
+    "email": "scott@applefeld.com"
+  }
+}

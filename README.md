@@ -66,6 +66,12 @@ Brainstorming produces a spec in `docs/plans/<project>_spec_v1.md` with a record
 
 Compaction recovery is deterministic: the SessionStart hook fires on startup, resume, and after every compaction, finds in-progress plans, and instructs the session to re-read them — Chapters included — before any work proceeds.
 
+## MODEL TIERING
+
+Token cost concentrates in implementation, so the kit splits roles by model. The main session (the strongest model, highest effort) does the thinking: brainstorming, spec writing, debugging, orchestration, and all reviews. Implementation of each Section of Work dispatches to a tiered agent — `implementer-sonnet` for mechanical, sibling-pattern work; `implementer-opus` for multi-file or nuanced sections; tier `fable` stays in the main thread for novel or security-sensitive work. The brainstorming skill assigns the tier per section at planning time; the executing-work skill dispatches, enforces a NEEDS_CONTEXT/BLOCKED escalation protocol (implementers ask instead of guessing), and takes a section over in the main thread after two failed review rounds at its tier.
+
+Quality is protected by three things, none of which is the implementer's model: spec precision (a section only earns a cheap tier if a context-free implementer can build it from the section text alone), fresh-context adversarial review by the strong model, and the final whole-changeset review in finishing-work. The cost profile inverts the naive approach: the expensive model reads diffs and writes specs; the cheap models write the bulk of the code.
+
 ## CONVENTIONS
 
 - Specs and plans: `docs/plans/` in each project, named `<project>_<content-type>_v1.md`, versions increment, never overwrite.

@@ -17,9 +17,13 @@ Read the plan doc in full, **including all Chapters**. The Chapters are the stat
 
 For each Section of Work, in order:
 
-1. **Implement** per the spec. Follow the csharp-style and sql-style skills for all code. Surgical changes only — touch what the section requires.
+1. **Implement** per the section's model tier:
+   - **Tier `fable` (or no tier recorded):** implement in the main thread. Follow the csharp-style and sql-style skills. Surgical changes only.
+   - **Tier `sonnet` / `opus`:** dispatch the matching `implementer-sonnet` / `implementer-opus` agent with a complete brief: spec path and section name, files in scope, acceptance criteria, the file paths of the style skills (the agent does not inherit skills — paths are mandatory), and the build/test commands. The orchestrator stays lean: do not pre-read the files for it, do not re-implement its work, do not read its full diff unless adjudicating.
+   - **Handle the implementer's status:** NEEDS_CONTEXT — answer from the spec or conversation context and re-dispatch; escalate to Scott only if the question is material and uncovered. BLOCKED — fix the environment, re-dispatch. DONE_WITH_CONCERNS — pass the concerns verbatim to the reviewer in step 3.
+   - **Tier escalation:** if a dispatched section fails review twice with Critical findings, or returns NEEDS_CONTEXT twice on the same question, take the section over in the main thread. Never re-dispatch a third time at the same tier, and never downgrade a tier mid-effort. Record the escalation in the Chapter — repeated escalations on a spec mean the sections were under-specified, which is a brainstorming lesson, not an implementer failure.
 
-2. **Verify.** Build must pass. Run targeted tests; if none cover the change, use the temporary repro-script discipline from the global rules.
+2. **Verify.** Build must pass (run it yourself even when an implementer reported DONE — trust but verify is one cheap command). Run targeted tests; if none cover the change, use the temporary repro-script discipline from the global rules.
 
 3. **Review.** Dispatch the `adversarial-reviewer` agent with the spec path and the base git ref (or list of changed files). If the section touched input handling, authentication/authorization, SQL construction, secrets/configuration, or an external boundary, also dispatch the `security-reviewer` agent. Dispatch both in parallel when both apply.
 
@@ -40,6 +44,7 @@ Append to the `## Chapters` section of the plan doc:
 ```markdown
 ### Chapter N — YYYY-MM-DD
 Completed: <section name>
+Implemented By: <main thread | implementer-sonnet | implementer-opus, + escalations if any>
 Decisions / Surprises: <anything resolved or discovered; "none" is acceptable>
 Review Findings: <Critical/Major addressed; Majors justified; Minors noted>
 Next: <next section, or "finishing-work">

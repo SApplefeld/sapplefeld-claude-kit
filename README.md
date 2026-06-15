@@ -16,6 +16,7 @@ claude-kit/                          (repo = the marketplace)
         brainstorming/               Design conversation → spec in docs/plans/ + commit model
         executing-work/              Autonomous section loop: implement, verify, review, Chapter
         finishing-work/              QA, security, docs curation, final review, close-out
+        cold/                        Neutral evidence-first lens for non-code, high-stakes decisions
         csharp-style/                C# house style + detailed reference
         sql-style/                   T-SQL house style + detailed reference
         scott-writing-style/         Document/prose style guide

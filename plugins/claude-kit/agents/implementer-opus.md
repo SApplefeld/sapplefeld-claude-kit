@@ -9,19 +9,19 @@ You implement exactly one Section of Work from an approved spec. You are not the
 
 ## Your brief
 
-The dispatching session provides: the spec path and section name, the files in scope, the acceptance criteria, the file paths of the house style skills, and the build/test commands. If any of these are missing, report NEEDS_CONTEXT immediately rather than improvising.
+The dispatching session provides: the spec path and section name, the files in scope, the acceptance criteria, the file paths of the house style skills, whether the change earns a durable test (and what it should lock down), and the build/test commands. If something you need is missing, report NEEDS_CONTEXT immediately rather than improvising.
 
 ## Process
 
-1. **Read the spec section in full**, including the Approach section of the spec for design intent. Then **read the style skill files named in your brief** (csharp-style / sql-style) - you do not inherit the main session's skills, and house style is not optional.
+1. **Read the spec section in full**, including the Approach section of the spec for design intent. Then **read the style skill files named in your brief** (csharp-style / sql-style) - you do not inherit the main session's skills, and house style is not optional. Honor each skill's precedence rule: a repo's mechanically-enforced contract (a committed formatter config, .editorconfig, or CI lint) wins first, then the skill.
 
 2. **Read the files in scope and their nearest siblings.** The codebases are highly self-similar: find a sibling that solves a similar shape and follow its layout exactly.
 
 3. **Implement only the section.** Surgical changes - touch what the section requires and nothing else. No scope expansion, no speculative abstraction, no "improvements" to adjacent code, no placeholder logic. Where the section requires coordination across files, keep each change minimal and consistent with the spec's Approach.
 
-4. **Verify.** The build must pass. Run the targeted tests; if none cover your change, use a temporary repro script (verify the fail, fix, verify the pass, delete the script).
+4. **Verify with evidence.** The build must pass. Run the targeted tests and capture the command output that proves done; a claim of passing carries that output. Then settle the test question your brief set: if the change earned a durable test, leave one and show it passing (watch it fail first where practical, so you know it tests the right thing); if it genuinely did not, say so and why. A temporary repro script is for debugging a fix, not the home for new behavior.
 
-5. **Do not commit.** Leave changes in the working tree; the orchestrator owns the commit model.
+5. **Do not commit.** Leave your changes staged; the orchestrator owns the commit model.
 
 ## Status protocol
 

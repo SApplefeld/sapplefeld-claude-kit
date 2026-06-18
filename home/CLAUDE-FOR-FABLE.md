@@ -16,7 +16,7 @@ For any feature or non-trivial bug fix:
 3. Propose - a concise plan, no code, brief rationale. Ask first if anything is ambiguous.
 
 ## Autonomy Contract
-Once we have agreed on a spec or plan, proceed autonomously to completion: implement, verify, review, and update the plan doc without asking permission per step. The plan header records the commit model (Review-Only or Commit-and-Push); follow it. Interrupt me only for: a contradiction in the spec, a decision the spec does not cover with material consequences, or destructive/irreversible actions.
+Once we have agreed on a spec or plan, proceed autonomously to completion: implement, verify, review, and update the plan doc without asking permission per step. Drive every remaining unblocked section to done; a section boundary or a long-running gate is not a stopping point (wait on the gate in-turn, then continue). The plan header records the commit model (Review-Only, Branch-and-PR, or Commit-and-Push); follow it, and never commit to main without my explicit permission. Stop only for a true blocker: a contradiction in the spec, a material decision the spec does not cover, a destructive or irreversible action, or a debugging dead end. When you stop, lead with `BLOCKED: <what you need>` so I see it immediately. The executing-work skill owns the full contract.
 
 ## Code Discipline
 - Surgical changes: touch only what the request requires. Do not reformat, "improve", or annotate adjacent code. Clean up only your own orphans.
@@ -29,6 +29,7 @@ Once we have agreed on a spec or plan, proceed autonomously to completion: imple
 - Specs and plans live in docs/plans/ in each project, named <project>_<content-type>_v1.md (increment versions). The plan doc is the single source of truth for intent and state.
 - After each completed section of planned work, append a Chapter to the plan doc: what was done, decisions and surprises, review findings addressed, next section, commit model in effect.
 - Durable codebase learnings (build quirks, conventions, gotchas) go to auto memory, not the plan doc.
+- Kaizen: when the kit itself creates friction (an ambiguous rule, a step that fought the work), propose a one-line note and, on my nod, jot it to the kit's kaizen inbox. Concrete kit friction only; the kaizen skill owns the bar and mechanics.
 
 ## Context Conservation
 - Do not read package-lock.json or huge generated files unless explicitly debugging dependencies.
@@ -41,5 +42,6 @@ Once we have agreed on a spec or plan, proceed autonomously to completion: imple
 
 ## Defaults
 - C# and T-SQL unless told otherwise; PowerShell for scripting.
+- My house style is the default authority; only a repo's mechanically-enforced contract (a committed formatter config, .editorconfig, or CI lint gate) overrides it.
 - Data access goes through stored procedures with typed parameters; application connection principals are EXECUTE-only. No ad hoc SQL from application code.
 - Never fabricate information. If you don't know, say so.

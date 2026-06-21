@@ -1,0 +1,3 @@
+# Ephemeral kit scratch: subagent reports, captured diffs, repro artifacts.
+# Working artifacts are never committed; the plan's Chapter is the durable record.
+.kit/

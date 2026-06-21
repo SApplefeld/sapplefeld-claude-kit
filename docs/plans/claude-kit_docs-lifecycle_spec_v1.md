@@ -58,6 +58,11 @@ Model: fable
 A `Stop` hook (`stop-docs-hygiene.js`) that, when a `Status: Complete` plan still sits in `docs/plans/` at turn end, blocks once with a reason to run `curating-docs` now, in the session that finished the work, rather than waiting for the next SessionStart nudge. Gated on the same rare predicate as the SessionStart backstop, so it is silent on every normal turn. Honors `stop_hook_active` to block at most once, and exits 0 on any failure so it can never trap the session. Registered under the `Stop` event in `hooks.json`.
 Acceptance: no completed-unarchived plan emits nothing (the turn ends normally); one present emits `{"decision":"block","reason":...}`; a payload with `stop_hook_active: true` emits nothing.
 
+### 9. Subagent report hygiene (follow-on, added 2026-06-19)
+Model: fable
+Day-of-use feedback: subagent reports were landing in `docs/plans/_impl_reports/` and getting committed, bloating the curated library and history. Root cause: `executing-work` told the orchestrator to have each subagent write its full report to a named file but named no location, so the orchestrator improvised a path under `docs/plans/`, and the repo had no `.gitignore`. Fix: reports return inline and are distilled into the Chapter, `docs/` is reserved for curated content, and bulky handoffs go to a gitignored `.kit/` scratch path. Changes: `executing-work` dispatch guidance, two `home/CLAUDE.md` rules, and a repo `.gitignore`.
+Acceptance: no kit instruction tells a subagent to write a report into `docs/`; `.kit/` is gitignored; `docs/` scope is documented as curated-only.
+
 ## Out of Scope
 
 - Auto-generating `architecture.md` for the kit itself. `docs-curator` already owns code-to-docs drift; this effort is about the library lifecycle, not content.
@@ -82,4 +87,20 @@ Implemented By: main session (fable).
 Decisions / Surprises: Scott opted into the Stop variant, so it moved from Out of Scope to Section 8. Confirmed the Claude Code Stop-hook contract with the claude-code-guide agent before writing: block via `{"decision":"block","reason":...}`, allow by exit 0 with no output, loop-guard on `stop_hook_active`. Kept the predicate scan duplicated in the new hook rather than refactoring the resume-critical `session-start.js` to share a helper: the blast radius of touching the resume hook outweighs the DRY win for a ten-line scan. Logged a backlog item to extract a shared helper if the predicate ever grows.
 Review Findings: Verification covered node --check on the hook, three Stop fixtures (silent, block, loop-guard), and a hooks.json parse check.
 Next: same as Chapter 1. Scott reviews and commits.
+Commit Model: Review-Only.
+
+### Chapter 3 - 2026-06-19
+Completed: Section 9, subagent report hygiene.
+Implemented By: main session (fable).
+Decisions / Surprises: Surfaced by Scott after a day of real use. Chose inline-return-plus-Chapter over relocating reports to retained scratch, per Scott: the durable record comes from the main session. Kept a gitignored `.kit/` escape hatch for genuinely bulky handoffs. Did not edit the per-agent files: grep confirmed no agent specifies a report path, so the dispatch guidance in `executing-work` is the root fix, and the reviewers already return findings inline by charter. Scott declined cleanup of reports already committed in his main project, so that is his to run.
+Review Findings: Verification: grep confirming no kit instruction routes a subagent report into `docs/`, a `.gitignore` content check, and an em-dash scan.
+Next: Scott reviews and commits. Backlog follow-up: a RED/GREEN baseline-test of the new `executing-work` wording using Scott's exported transcript as the RED case.
+Commit Model: Review-Only.
+
+### Chapter 4 - 2026-06-19
+Completed: Section 9 refinement after reviewing the exported RED transcript.
+Implemented By: main session (fable).
+Decisions / Surprises: Scott exported the NEO close-out session. Confirmed the root cause: the orchestrator, following executing-work's report-to-file instruction, improvised two docs/ locations: `docs/reviews/_rev_sp4_s<n>_<lens>.md` for reviewer findings and `docs/plans/_impl_reports/sp<n>_qa.md` for QA reports, then committed and pushed them. The reviewer and implementer agents themselves are clean (reviewers already return verdict, counts, and top finding inline by charter; no agent file names a path), so the dispatch guidance in executing-work is the only lever, as expected. Sharpened the executing-work wording with a red-flag naming the exact observed phrasing, and clarified that the summary-plus-file economy pattern is fine as long as the file lands in `.kit/`, not docs/.
+Review Findings: Verification: file-tool read confirms the refined wording; em-dash scan.
+Next: Scott reviews and commits. A full RED/GREEN baseline-test of orchestrator dispatch behavior remains a backlog item (the RED phrasing is now recorded there).
 Commit Model: Review-Only.

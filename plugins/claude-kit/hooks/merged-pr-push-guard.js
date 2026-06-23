@@ -38,12 +38,19 @@ function targetBranch(cmd, cwd) {
     const c = String(cmd || '');
     if (!/(?:^|&&|;|\|)\s*git\s+push\b/.test(c)) return null;
     const after = c.replace(/^[\s\S]*?\bgit\s+push\b/, '').trim();
+    // A branch deletion (git push --delete / -d, or a `:branch` / `+:branch` refspec)
+    // removes a merged branch: correct cleanup, the inverse of stranding. Never guard it.
+    if (/(?:^|\s)(?:--delete|-d)\b/.test(after)) return null;
     const toks = after.split(/\s+/).filter((t) => t && !t.startsWith('-'));
     // toks[0] = remote (if present), toks[1] = refspec (if present).
     let ref = toks.length >= 2 ? toks[1] : null;
     let branch = null;
     if (ref) {
-        if (ref.includes(':')) ref = ref.split(':').pop(); // src:dst -> dst
+        if (ref.includes(':')) {
+            const parts = ref.split(':');
+            if (parts[0] === '' || parts[0] === '+') return null; // :dst or +:dst = deletion
+            ref = parts[parts.length - 1]; // src:dst -> dst
+        }
         branch = ref;
     }
     if (!branch || branch === 'HEAD') {

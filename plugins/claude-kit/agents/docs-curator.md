@@ -23,6 +23,7 @@ The spec/plan path in docs/plans/, and the project root. Read the spec (includin
 
 2. **Update the living docs:**
    - `docs/architecture.md` - create if absent: system overview, major components and responsibilities, data flow, external integrations. Update only the parts this effort changed.
+   - **Every other about-the-solution doc in `docs/` root that already exists** - the security model (`docs/security-model.md`), a structure or layout doc, and any sibling. Update the parts this effort's changes affect. Do not create these if absent (whether a project keeps them is its choice, not curation), but never let an existing one silently rot: if it drifted in an area this effort did not touch, do not rewrite it, flag it in the Drift Report. The point is that architecture.md is not the only about-doc you own; you own all of them that exist.
    - Feature/component docs under docs/ for the areas this effort built or modified: what it does, how it behaves at the boundaries, how it fails, how to operate it (deployment scripts, configuration, jobs).
    - A handoff reader should be able to understand, run, and safely modify the feature from these docs alone.
 

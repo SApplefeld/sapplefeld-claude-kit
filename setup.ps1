@@ -37,4 +37,14 @@ $json = $data | ConvertTo-Json
 [System.IO.File]::WriteAllText($signpost, $json, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Recorded kaizen signpost at $signpost"
 
+# Wire Git Hooks. Points this clone at .githooks so the pre-commit hook rebuilds
+# plugins/claude-kit.zip whenever a commit changes the plugin sources.
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    & git -C $PSScriptRoot config core.hooksPath .githooks
+    Write-Host "Configured git core.hooksPath -> .githooks"
+}
+else {
+    Write-Warning "git not found; skipped hook wiring. Run later: git config core.hooksPath .githooks"
+}
+
 Write-Host "Next: /plugin marketplace add <your-github-username>/claude-kit ; /plugin install claude-kit@applefeld (user scope)"

@@ -37,4 +37,15 @@ MACHINE=$(hostname 2>/dev/null || echo unknown)
 printf '{\n  "kitRepoPath": "%s",\n  "machine": "%s"\n}\n' "$SCRIPT_DIR" "$MACHINE" > "$SIGNPOST"
 echo "Recorded kaizen signpost at $SIGNPOST"
 
+# Wire Git Hooks. Make the hook + build script executable and point this clone at
+# .githooks so the pre-commit hook rebuilds plugins/claude-kit.zip when plugin
+# sources change.
+if command -v git >/dev/null 2>&1; then
+    chmod +x "$SCRIPT_DIR/.githooks/pre-commit" "$SCRIPT_DIR/build.sh" 2>/dev/null || true
+    git -C "$SCRIPT_DIR" config core.hooksPath .githooks
+    echo "Configured git core.hooksPath -> .githooks"
+else
+    echo "git not found; skipped hook wiring. Run later: git config core.hooksPath .githooks" >&2
+fi
+
 echo "Next: /plugin marketplace add <your-github-username>/claude-kit ; /plugin install claude-kit@applefeld (user scope)"

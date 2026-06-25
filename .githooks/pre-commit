@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+# pre-commit - keep the installable plugin zip in sync with committed sources.
+#
+# When a commit touches plugins/claude-kit/, rebuild plugins/claude-kit.zip so
+# the artifact you upload to Cowork/Chat always matches HEAD. The zip is
+# gitignored, so this only refreshes the local file - nothing is staged.
+#
+# Wired via:  git config core.hooksPath .githooks  (done by setup.ps1 / setup.sh)
+
+set -eu
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+# Only rebuild when plugin sources are part of this commit.
+if ! git diff --cached --name-only -- 'plugins/claude-kit/' | grep -q .; then
+    exit 0
+fi
+
+echo "[pre-commit] plugin sources changed - rebuilding plugins/claude-kit.zip"
+
+# Prefer PowerShell on Windows (no 'zip' in stock Git Bash); fall back to build.sh.
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File ./build.ps1
+elif command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -ExecutionPolicy Bypass -File ./build.ps1
+elif command -v zip >/dev/null 2>&1; then
+    ./build.sh
+else
+    echo "[pre-commit] WARNING: neither PowerShell nor 'zip' found; skipping zip rebuild." >&2
+fi

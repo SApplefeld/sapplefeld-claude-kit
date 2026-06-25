@@ -40,7 +40,9 @@ claude-kit/                          (repo = the marketplace)
   home/CLAUDE.md                     Versioned user-level CLAUDE.md (installed by setup script)
   home/CLAUDE-FOR-FABLE.md           Leaner user-level CLAUDE.md variant for the Fable model
   settings/settings.recommended.json Permission rules + acceptEdits starting point
-  setup.ps1 / setup.sh               Per-machine CLAUDE.md install + kaizen signpost (~/.claude/claude-kit.local.json)
+  setup.ps1 / setup.sh               Per-machine CLAUDE.md install + kaizen signpost (~/.claude/claude-kit.local.json) + git hook wiring
+  build.ps1 / build.sh               Package plugins/claude-kit -> plugins/claude-kit.zip (claude-kit/ at archive root) for manual upload
+  .githooks/pre-commit               Rebuilds the zip on commit when plugin sources change (wired via core.hooksPath)
 ```
 
 The catalog at `.claude-plugin/marketplace.json` points to the plugin with `"source": "./plugins/claude-kit"` - relative paths resolve against the repo root and work because the marketplace is added via git. Additional plugins later: add a folder under `plugins/` and a second entry in the catalog.
@@ -69,6 +71,14 @@ The catalog at `.claude-plugin/marketplace.json` points to the plugin with `"sou
 5. Merge `settings/settings.recommended.json` into `~/.claude/settings.json` (review the allow-list first - it includes `git push` for the Commit-and-Push model; remove it if you want pushes gated).
 
 Updating: commit and push here, then `/plugin update claude-kit` on each machine. Because `plugin.json` omits `version`, every commit is a new version - no version bumping required. For private-repo background auto-updates, set `GITHUB_TOKEN` in your environment.
+
+### Installing where GitHub isn't reachable (zip upload)
+
+Some environments - for example a work Cowork/Chat account that can't reach this private GitHub - can't add the marketplace by repo. For those, upload the packaged plugin zip instead:
+
+- `build.ps1` (Windows, canonical) or `build.sh` (Linux/macOS) packages `plugins/claude-kit/` into `plugins/claude-kit.zip` with `claude-kit/` at the archive root - the layout the zip-upload flow expects. The build is deterministic (sorted entries, fixed timestamps).
+- The pre-commit hook rebuilds the zip automatically whenever a commit changes plugin sources, so the artifact stays current. It's wired by the setup script via `git config core.hooksPath .githooks`; on a fresh clone, run `setup.ps1`/`setup.sh` (or set that config by hand) to activate it. Run `build.ps1`/`build.sh` directly anytime you want a fresh zip without committing.
+- The zip is gitignored - it's a local build artifact you carry by hand, not something committed.
 
 ## THE WORKFLOW
 

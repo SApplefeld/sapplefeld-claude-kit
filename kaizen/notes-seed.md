@@ -1,2 +1,0 @@
-2026-06-17  session-mining  finishing-work and docs: recurring need to separate open vs historical across long efforts; clarify how to retire or archive completed plan docs and keep memory legible  (repo: NEO)
-2026-06-17  session-mining  resume-confidence: state explicitly that compaction plus the SessionStart resume hook is lossless, and when a fresh session adds value over continuing  (repo: NEO)

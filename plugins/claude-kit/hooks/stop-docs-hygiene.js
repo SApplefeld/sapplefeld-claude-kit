@@ -26,8 +26,10 @@ function findCompletedUnarchived(cwd) {
     const plansDir = path.join(cwd, 'docs', 'plans');
     const files = [];
     try {
+        // The index README documents the phrase "Status: Complete"; it is not a plan.
         const entries = fs.readdirSync(plansDir)
             .filter((f) => f.toLowerCase().endsWith('.md'))
+            .filter((f) => f.toLowerCase() !== 'readme.md')
             .slice(0, 50);
         for (const file of entries) {
             try {

@@ -74,7 +74,12 @@ The catalog at `.claude-plugin/marketplace.json` points to the plugin with `"sou
    - Claude Code (once per machine): add `@claude-kit-doctrine.md` to `~/.claude/CLAUDE.md`. The `doctrine-refresh` hook rewrites that imported file from the installed skill each session, so the doctrine loads always-on and stays current; the hook offers to add the line if it is missing.
    - Cowork / Chat (once per account): add to your account personal preferences: `Before any non-trivial task, consult the operating-instructions skill.` Plugins cannot write account preferences and Cowork/Chat do not read `~/.claude`, so this one line is the only manual step there.
 
-Updating: commit and push here, then `/plugin update claude-kit` on each machine. Because `plugin.json` omits `version`, every commit is a new version - no version bumping required. For private-repo background auto-updates, set `GITHUB_TOKEN` in your environment. The doctrine updates with the plugin too - no setup re-run needed: Code picks it up via the import + `doctrine-refresh` hook, Cowork/Chat via the skill.
+Updating. Commit and push here first. The plugin's version is the git commit SHA (`plugin.json` omits `version`), so every commit is a new version with no version bumping. How you pull that update differs by surface, and the surfaces are SEPARATE installs:
+
+- **Desktop app (Chat, Cowork, and Code share one install).** There is no update button on the plugin card itself, and `/plugin` slash commands do not work in the Desktop chat. Open the plugin Directory (Customize) -> Plugins -> Personal -> open the plugin's marketplace (its blue marketplace link, or the Local uploads entry) -> the `...` menu -> Check for updates (it shows the latest synced commit). Then go back to the plugin and its Update button lights up; updating propagates to Chat, Cowork, and Code at once. The same `...` menu has a Sync automatically toggle, off by default for a personal marketplace, so turn it on to skip this dance on future commits.
+- **Terminal CLI is a separate install** and does not share the Desktop app's plugin copy: `/plugin marketplace update applefeld` then `/plugin update claude-kit` updates the CLI only. Updating one surface family does not update the other.
+
+The README and docs are repo-level, not plugin payload, so they need no plugin update. The doctrine rides the plugin and updates with it (no setup re-run): Code via the import + `doctrine-refresh` hook, Cowork/Chat via the skill.
 
 ### Installing where GitHub isn't reachable (zip upload)
 

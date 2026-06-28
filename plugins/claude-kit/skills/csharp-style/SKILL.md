@@ -60,6 +60,7 @@ The comments alone tell the story of the method. That is the goal.
 - ❌ Block-scoped namespaces in *new* files - file-scoped (`namespace X;`) for new code; leave existing block-scoped files alone
 - ❌ `ILogger<T>` injection - static `Log` from Serilog
 - ❌ Apologetic/explanatory comments ("This handles the case where...") - comments are imperative section labels
+- ❌ Change-narrative comments ("Updated to...", "Now we...", "per the new spec") - the doctrine's current-state rule applies: a comment states what the code does now, never the session, the change, or the prior version
 - ❌ Section comments without a terminating period - `// Save Services` is wrong; `// Save Services.` is correct
 - ❌ `Task<T>` methods without the `Async` suffix
 - ❌ `CancellationToken` anywhere but last in the parameter list

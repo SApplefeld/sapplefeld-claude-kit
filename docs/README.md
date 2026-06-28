@@ -20,7 +20,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-None active at present. Completed plans are in `archive/` (most recently `claude-kit_doctrine-delivery_spec_v1.md`, the operating-doctrine delivery effort, shipped in `c800e05`).
+None active at present. Completed plans are in `archive/` (most recent: `claude-kit_doc-closeout-discipline_spec_v1.md`, the doc-close-out discipline and current-state record effort).
 
 ## Archive
 

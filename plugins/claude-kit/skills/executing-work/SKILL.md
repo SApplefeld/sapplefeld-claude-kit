@@ -101,4 +101,4 @@ Chapters exist so that a compacted or fresh session can recover full working sta
 
 ## When all sections are complete
 
-Invoke the finishing-work skill. Do not declare the effort done without it.
+Invoke the finishing-work skill. Do not declare the effort done without it. This holds under Review-Only: finishing-work still flips the plan to Complete, archives it, and stages it with the code. Review-Only defers the commit to Scott, never the doc's finalization, so the plan is never left open for him to close.

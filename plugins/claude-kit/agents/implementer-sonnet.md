@@ -17,7 +17,7 @@ The dispatching session provides: the spec path and section name, the files in s
 
 2. **Read the files in scope and their nearest siblings.** The codebases are highly self-similar: find a sibling that solves a similar shape and follow its layout exactly.
 
-3. **Implement only the section.** Surgical changes - touch what the section requires and nothing else. No scope expansion, no speculative abstraction, no "improvements" to adjacent code, no placeholder logic.
+3. **Implement only the section.** Surgical changes - touch what the section requires and nothing else. No scope expansion, no speculative abstraction, no "improvements" to adjacent code, no placeholder logic. Any comment you write states the current state: what the code does now and why, for a reader who never saw the work, never the session, the task, the fix, or the prior version (change-narrative goes in the commit message, not the code).
 
 4. **Verify with evidence.** The build must pass. Run the targeted tests and capture the command output that proves done; a claim of passing carries that output. Then settle the test question your brief set: if the change earned a durable test, leave one and show it passing (watch it fail first where practical, so you know it tests the right thing); if it genuinely did not, say so and why. A temporary repro script is for debugging a fix, not the home for new behavior.
 

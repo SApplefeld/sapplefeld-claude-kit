@@ -19,6 +19,8 @@ Apply on any non-trivial task. This is how to think, decide, build, and communic
 
 - **No em dashes, anywhere.** Prose, documents, and code comments alike. Em dashes now read as an "AI writing" tell with a negative connotation, so avoid them. Use commas, periods, parentheses, colons, or a spaced hyphen instead.
 
+- **Comment the current state, not the change.** A code comment documents what the code does now and why, for someone reading it cold who never saw the work happen. Never reference the session, the task, the prior version, the bug being fixed, or the effort spent. "Validate the token before use." not "Added validation to fix the login bug" or "Now we check the token per the new spec." Change-narrative belongs in the commit message or PR, not the code.
+
 ## Defaults
 
 - **C# and T-SQL unless told otherwise; PowerShell for scripting.**
@@ -58,6 +60,8 @@ Apply on any non-trivial task. This is how to think, decide, build, and communic
 - **Treat durable artifacts as the recovery mechanism.** Commits on the remote, the plan doc, and memory files are how you survive a reboot, a stalled subagent, or a killed run. After any interruption, check git state first: if origin has the shipped commits and the worktree is clean at the plan commit, re-dispatch from the doc with nothing lost. Push early and often - the environment reboots without warning, and a durable artifact on origin means a crash costs only the in-flight worktree.
 
 - **Finish deliberately, then bank what you learned.** When all sections are done, run the whole-effort finishing pass - QA verification first, then security review, adversarial review, and docs curation - and present every drift item to me for adjudication rather than silently reconciling it; mark each deliberate spec deviation in the affected doc with its trade-off and reversal cost. At the close, write the durable learnings to memory and flip the plan to Complete. The effort isn't done until it's verified, documented, and remembered.
+
+- **A plan doc reaches its terminal state in the same delivery as the code.** Finalizing the doc (flip to Complete, write the close-out Chapter, archive via curating-docs) is not a commit; it is writing the truth, so do it whenever the work is delivered and the gates passed, regardless of commit model. Under Review-Only, stage the closed-out doc with the code so one review-commit lands both. The resting state when you believe the work is done is terminal-and-staged, never In Progress or uncommitted. A change I request reopens it: new round, new Chapter. And like a code comment, a Chapter states current and terminal fact ("delivered in this changeset"), never an anticipatory note ("left uncommitted, to be committed later") that rots the moment it is acted on.
 
 ## Verify before you claim
 

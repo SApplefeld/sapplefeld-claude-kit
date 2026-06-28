@@ -74,6 +74,7 @@ GO
 - ❌ Dynamic SQL built by string concatenation - inside a `WITH EXECUTE AS` procedure this is a privilege-escalation vector, not a style issue; where dynamic SQL is truly unavoidable, `sp_executesql` with typed parameters and a justifying comment
 - ❌ Skipping `;SET NOCOUNT ON` + `;SET TRANSACTION ISOLATION LEVEL` - both required, paired, at the top
 - ❌ Verbose multi-paragraph header comments - banner blocks with SCRIPT/AUTHOR/DATE/VERSION/NOTES only
+- ❌ Change-narrative comments ("Updated to...", "fixed the...", "per the new spec") - the doctrine's current-state rule applies: a comment or banner states what the code does now, never the session, the change, or the prior version
 - ❌ `GETDATE()` for audit timestamps - `SYSDATETIMEOFFSET()`
 - ❌ Right-hand aliases (`expr AS Alias`) in SELECT - left-hand form: `[Alias] = expression`
 - ❌ `SELECT *` in result sets returned to callers

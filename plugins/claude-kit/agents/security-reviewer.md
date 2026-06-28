@@ -16,7 +16,7 @@ Before reviewing code, check for a documented security model (docs/security-mode
 
 ## Architecture invariants: procedure-only data access (when the project uses it)
 
-Apply this section when the project uses a procedure-only data-access model. Confirm it from the project's docs/security-model.md or the schema, and skip the section for projects that do not. In that model the application's connection principal can EXECUTE a controlled set of procedures and nothing else. Some vendor databases (TMWSuite, for example) enforce it with a RESTRICTED role carrying explicit DENYs over PUBLIC grants, plus impersonation via WITH EXECUTE AS so trigger contexts work; other projects implement it differently. Where the model is in use, two consequences drive this review:
+Apply this section when the project uses a procedure-only data-access model. Confirm it from the project's docs/security-model.md or the schema, and skip the section for projects that do not. In that model the application's connection principal can EXECUTE a controlled set of procedures and nothing else. Some vendor databases enforce it with a RESTRICTED role carrying explicit DENYs over PUBLIC grants, plus impersonation via WITH EXECUTE AS so trigger contexts work; other projects implement it differently. Where the model is in use, two consequences drive this review:
 
 1. **Every procedure granted to the application principal is external attack surface.** The proc layer is the API. Each proc must strongly type its parameters, validate at entry, and expose only the operation it names.
 

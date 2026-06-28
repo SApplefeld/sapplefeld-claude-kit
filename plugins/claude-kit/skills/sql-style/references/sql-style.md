@@ -1,6 +1,6 @@
-# SQL Style (modeled on ASR.Eleos.Database.Deployment)
+# SQL Style (modeled on a procedure-only deployment database)
 
-This is the detailed pattern reference for writing SQL in Scott's style. The canonical examples are modeled on `D:\source\repos\EleosCore\ASR.Eleos\ASR.Eleos.Database.Deployment`. The patterns are what transfer: the `ELEOS` schema, the `usp_AuditError` logger, and `WITH EXECUTE AS 'ELEOS'` are this codebase's own names, so substitute the project's schema and proc names rather than copying them literally. Inside an ASR.Eleos repo, open a sibling file in that library and follow its layout exactly.
+This is the detailed pattern reference for writing SQL in my style. The canonical examples are modeled on a numbered-folder, deployment-script database library. The patterns are what transfer: the `<schema>` schema, the `usp_AuditError` logger, and `WITH EXECUTE AS '<schema_owner>'` are a project's own names, so substitute the project's schema and proc names rather than copying them literally. Inside such a repo, open a sibling file in that library and follow its layout exactly.
 
 ## Table of contents
 
@@ -39,14 +39,14 @@ The library uses numeric prefixes to enforce execution order during deployment:
 | `4-Functions` | `udf_*` user-defined functions | Functions are dependencies of procedures |
 | `5-Procedures` | `usp_*` stored procedures | Main business logic - runs after dependencies exist |
 | `9-System` | System / TMS-specific procedures | Runs last; depends on full schema being present |
-| `Database` | Bootstrap install scripts (TMWSuite, LoadMaster, TL2000) | One-time database creation scripts |
+| `Database` | Bootstrap install scripts (a vendor database, LoadMaster, TL2000) | One-time database creation scripts |
 
 Folder gaps (1, 2, 6, 7, 8) are reserved for potential future categories - leave them open.
 
 **File naming:** Each file is named `<schema>.<object>.sql`:
-- `ELEOS.usp_GetBackgroundMessages.sql`
-- `ELEOS.udf_DocumentFields.sql`
-- `ELEOS.ApiCalls.sql` (tables omit a prefix)
+- `<schema>.usp_GetBackgroundMessages.sql`
+- `<schema>.udf_DocumentFields.sql`
+- `<schema>.ApiCalls.sql` (tables omit a prefix)
 
 Variant procedures use suffixes: `_Default`, `_Maintenance`, `_Trailers`, `_TMS`, `_Debug`, `_Custom_*`. Helper sub-procedures of a parent use `_Data`, `_Sort`, `_Stops`, `_Trips`.
 
@@ -58,14 +58,14 @@ The exact pattern:
 
 ```sql
 -- CREATE A SHELL PROCEDURE IF NONE EXISTS.
-;IF OBJECT_ID('ELEOS.usp_GetBackgroundMessages') IS NULL
-  EXEC ('CREATE PROCEDURE ELEOS.usp_GetBackgroundMessages AS RETURN 0;')
+;IF OBJECT_ID('<schema>.usp_GetBackgroundMessages') IS NULL
+  EXEC ('CREATE PROCEDURE <schema>.usp_GetBackgroundMessages AS RETURN 0;')
 GO
 
 -- ALTER THE UPDATED PROCEDURE DEFINITION.
-;ALTER PROCEDURE ELEOS.usp_GetBackgroundMessages
+;ALTER PROCEDURE <schema>.usp_GetBackgroundMessages
     -- ... parameters ...
-WITH EXECUTE AS 'ELEOS'
+WITH EXECUTE AS '<schema_owner>'
 AS
 BEGIN	-- PROCEDURE
     -- ... body ...
@@ -75,8 +75,8 @@ GO
 
 Key details:
 - The shell `EXEC` line is indented 2 spaces (not a tab).
-- `WITH EXECUTE AS 'ELEOS'` appears before `AS` only where the project uses owner-impersonation (as the ELEOS codebase does, for a vendor-driven security constraint); there the delegated security model runs every proc and scalar or multi-statement function as the schema owner. Drop the clause entirely where the codebase does not impersonate. It is invalid on inline table-valued functions (`RETURNS TABLE ... AS RETURN`), which run under ownership chaining - never put it there.
-- `BEGIN	-- PROCEDURE` has a tab between `BEGIN` and the trailing inline label comment. This is a signature pattern of Scott's style.
+- `WITH EXECUTE AS '<schema_owner>'` appears before `AS` only where the project uses owner-impersonation (as the project's codebase does, for a vendor-driven security constraint); there the delegated security model runs every proc and scalar or multi-statement function as the schema owner. Drop the clause entirely where the codebase does not impersonate. It is invalid on inline table-valued functions (`RETURNS TABLE ... AS RETURN`), which run under ownership chaining - never put it there.
+- `BEGIN	-- PROCEDURE` has a tab between `BEGIN` and the trailing inline label comment. This is a signature pattern of my style.
 - The file ends with `GO` after the `END`.
 
 ## 3. Function deployment idiom
@@ -84,11 +84,11 @@ Key details:
 Functions use **drop-and-recreate** (different from procedures because functions can't be ALTERed in the same way and the drop-recreate is faster than the shell pattern):
 
 ```sql
-;IF OBJECT_ID('ELEOS.udf_DocumentFields') IS NOT NULL
-  EXEC ('DROP FUNCTION ELEOS.udf_DocumentFields;')
+;IF OBJECT_ID('<schema>.udf_DocumentFields') IS NOT NULL
+  EXEC ('DROP FUNCTION <schema>.udf_DocumentFields;')
 GO
 
-;CREATE FUNCTION ELEOS.udf_DocumentFields
+;CREATE FUNCTION <schema>.udf_DocumentFields
 (
     -- ... parameters ...
 )
@@ -109,16 +109,16 @@ Tables use a **defensive existence check on `sys.schemas` joined to `sys.tables`
 
 ```sql
 /*********************************************************************************
-	TABLE: ELEOS.ApiCalls
+	TABLE: <schema>.ApiCalls
 *********************************************************************************/
 ;IF NOT EXISTS(	SELECT	NULL
 				FROM	sys.schemas S
 						LEFT JOIN sys.tables T
 							ON S.[schema_id] = T.[schema_id]
-				WHERE	S.[name] = 'ELEOS'
+				WHERE	S.[name] = '<schema>'
 						AND T.[name] = 'ApiCalls'  )
 BEGIN 
-	;CREATE TABLE ELEOS.ApiCalls (
+	;CREATE TABLE <schema>.ApiCalls (
 		 [ApiCallId]				BIGINT			NOT NULL	IDENTITY(1,1)
 		
 		/* Request Fields */
@@ -171,11 +171,11 @@ Indexes go in the same file as the table they support. Each index gets its own `
 -- Check for and Create IX_ApiCalls_RequestUriDate.
 ;IF NOT EXISTS(	SELECT	NULL
 				FROM	sys.indexes I
-				WHERE	I.[object_id] = OBJECT_ID('ELEOS.ApiCalls')
+				WHERE	I.[object_id] = OBJECT_ID('<schema>.ApiCalls')
 						AND I.[name] = 'IX_ApiCalls_RequestUriDate' )
 BEGIN
 	;CREATE NONCLUSTERED INDEX IX_ApiCalls_RequestUriDate
-		ON ELEOS.ApiCalls (  [RequestUri]
+		ON <schema>.ApiCalls (  [RequestUri]
 							,[RequestDt]	)
 END
 GO
@@ -195,12 +195,12 @@ The exact format:
 ```sql
     /********************************************************************************************
     *********************************************************************************************
-        SCRIPT:		ELEOS.usp_GetBackgroundMessages
-        AUTHOR:		Scott Applefeld
+        SCRIPT:		<schema>.usp_GetBackgroundMessages
+        AUTHOR:		<Author Name>
         DATE:		February 16th, 2025
         VERSION:	v1.0
     *********************************************************************************************
-        NOTES:		v1.0 - 02/16/2025 - SCOTT APPLEFELD - ASR SOLUTIONS
+        NOTES:		v1.0 - 02/16/2025 - <AUTHOR NAME> - <COMPANY>
                             Procedure to return background messages ready for re-processing into
                             the documents library or email outputs.
     *********************************************************************************************
@@ -213,7 +213,7 @@ Banner conventions:
 - One asterisk line separates the metadata from the NOTES section.
 - DATE uses the **ordinal English format** ("February 16th, 2025", not "2025-02-16").
 - Each NOTES entry leads with `vN.N - MM/DD/YYYY - AUTHOR NAME - COMPANY` then the body indented underneath.
-- AUTHOR can be `Scott Applefeld` or `Scott Applefeld / ASR Solutions`.
+- AUTHOR can be the author's name alone or the author's name with company (`<Author Name>` or `<Author Name> / <Company>`).
 - When you bump the version, **add** a new note line above the previous - do not rewrite history.
 
 ## 7. Parameter declarations
@@ -221,7 +221,7 @@ Banner conventions:
 After the procedure name, parameters are declared inside parentheses (procedures only - older procs sometimes omit the parentheses). The first row inside is a comment row showing the column headings:
 
 ```sql
-;ALTER PROCEDURE ELEOS.usp_AuditApiCall
+;ALTER PROCEDURE <schema>.usp_AuditApiCall
 (
     /*********************************************************************************************
      PARAMETER NAME		DATATYPE	        DEFAULT	   
@@ -233,7 +233,7 @@ After the procedure name, parameters are declared inside parentheses (procedures
     ,@p_RequestDt       DATETIMEOFFSET	    = NULL
     ,@p_ResponseCode    INT				    = NULL
 )
-WITH EXECUTE AS 'ELEOS'
+WITH EXECUTE AS '<schema_owner>'
 AS
 BEGIN	-- PROCEDURE
 ```
@@ -244,8 +244,8 @@ Conventions:
 - Tab-align name column → type column → default column.
 - Defaults: `= NULL` is the dominant default; `= 0` for counts/numerics; `= 1` for flags meaning "on".
 - `OUTPUT` parameters are rare; when used they go at the end of the parameter list.
-- Table-valued parameters use `READONLY`: `@p_FormData ELEOS.FormFieldType READONLY`.
-- The closing `)` and the `WITH EXECUTE AS 'ELEOS'` are at the procedure-signature column.
+- Table-valued parameters use `READONLY`: `@p_FormData <schema>.FormFieldType READONLY`.
+- The closing `)` and the `WITH EXECUTE AS '<schema_owner>'` are at the procedure-signature column.
 
 For procedures that have no parameter wrapper (older style - see `usp_GetBackgroundMessages`), parameters appear directly after the procedure name with the same comment row, no parentheses, no `(`/`)`. Either style is acceptable; **match the surrounding files**.
 
@@ -319,7 +319,7 @@ For sub-sections inside a banner (smaller groupings), use a single-line `/* Sub-
 
 ```sql
         /* Make Table to Track the Messages to Resend. */
-        ;CREATE TABLE #ASR_ResendMessages (
+        ;CREATE TABLE #ResendMessages (
 ```
 
 ## 11. TRY/CATCH and error logging
@@ -338,11 +338,11 @@ Every non-trivial procedure wraps its main logic in a `BEGIN TRY` / `BEGIN CATCH
             ;UPDATE C   
             SET     [RequestMethod]     = COALESCE(@p_RequestMethod, C.[RequestMethod])
                     -- ...
-            FROM    ELEOS.APICalls C
+            FROM    <schema>.APICalls C
             WHERE   C.[ApiCallId] = @p_ApiCallId
         END ELSE BEGIN
             /* Insert a New Audit Record. */
-            ;INSERT INTO ELEOS.APICalls ( ... )
+            ;INSERT INTO <schema>.APICalls ( ... )
             SELECT ...
 
             /* Get Identity for Insert. */
@@ -351,15 +351,15 @@ Every non-trivial procedure wraps its main logic in a `BEGIN TRY` / `BEGIN CATCH
     END TRY
     BEGIN CATCH
         /* Audit and Report Error. */
-        ;IF ( OBJECT_ID('ELEOS.usp_AuditError') IS NOT NULL )
-            EXECUTE ELEOS.usp_AuditError @p_ErrorData = @p_ApiCallId
+        ;IF ( OBJECT_ID('<schema>.usp_AuditError') IS NOT NULL )
+            EXECUTE <schema>.usp_AuditError @p_ErrorData = @p_ApiCallId
     END CATCH
 ```
 
 Key details:
 - `;BEGIN TRY` and `END TRY` and `BEGIN CATCH` and `END CATCH` keywords on their own lines.
-- The `IF (OBJECT_ID('ELEOS.usp_AuditError') IS NOT NULL)` guard is defensive - protects against deployments where the error logger isn't yet present.
-- `END ELSE BEGIN` on a single line is a Scott signature pattern - note the spacing (one space on each side of `ELSE`).
+- The `IF (OBJECT_ID('<schema>.usp_AuditError') IS NOT NULL)` guard is defensive - protects against deployments where the error logger isn't yet present.
+- `END ELSE BEGIN` on a single line is a signature pattern of my style - note the spacing (one space on each side of `ELSE`).
 - `THROW` may be used inside nested CATCHes when the error genuinely needs to propagate, but is rare.
 
 ## 12. Leading commas and tab alignment
@@ -397,18 +397,18 @@ For SQL Server bracket syntax, **always wrap column names in `[...]`** even when
   ```
 - Tables in FROM/JOIN are aliased with a short identifier - no `AS`:
   ```sql
-  FROM ELEOS.DocumentHistory H
-       LEFT JOIN ELEOS.DocumentFields F
+  FROM <schema>.DocumentHistory H
+       LEFT JOIN <schema>.DocumentFields F
            ON H.[DocumentId] = F.[DocumentId]
   ```
 - Aliases are usually single letters (`H`, `F`, `D`, `S`) but multi-letter mnemonics are fine when there's a collision (`LD` for Loads, `ST` for Stops).
 
-**Never use `SELECT *`** in production SELECTs that return result sets to callers. SELECT * is allowed only for `SELECT * INTO #TempTable FROM ELEOS.udf_X(...)` cases where the source schema is controlled.
+**Never use `SELECT *`** in production SELECTs that return result sets to callers. SELECT * is allowed only for `SELECT * INTO #TempTable FROM <schema>.udf_X(...)` cases where the source schema is controlled.
 
 **INSERT:**
 
 ```sql
-;INSERT INTO ELEOS.APICalls ( 
+;INSERT INTO <schema>.APICalls ( 
      [RequestMethod]
     ,[RequestUri]
     ,[RequestBody]
@@ -433,7 +433,7 @@ SELECT   [RequestMethod]    = COALESCE(@p_RequestMethod, '')
 SET      [RequestMethod]    = COALESCE(@p_RequestMethod, C.[RequestMethod])
         ,[RequestUri]       = COALESCE(@p_RequestUri, C.[RequestUri])
         ,[UpdatedDt]        = SYSDATETIMEOFFSET()
-FROM    ELEOS.APICalls C
+FROM    <schema>.APICalls C
 WHERE   C.[ApiCallId] = @p_ApiCallId
 ```
 
@@ -449,7 +449,7 @@ WHERE   C.[ApiCallId] = @p_ApiCallId
 - `LEFT JOIN` (not `LEFT OUTER JOIN`), `INNER JOIN` (not just `JOIN`).
 - Multi-condition `ON` clauses are wrapped in parentheses when clarity benefits, with `AND`s aligned:
   ```sql
-  LEFT JOIN ELEOS.HCPEOPLE H
+  LEFT JOIN <schema>.HCPEOPLE H
       ON  (    H.[Id] = TRY_PARSE(@p_UserName AS INT)
               AND H.[EmployeeStatusCode] = 'A' )
           OR  H.[DriverId] = @p_UserName
@@ -476,7 +476,7 @@ WHERE   C.[ApiCallId] = @p_ApiCallId
 
 ## 16. Temp tables
 
-- Use `#PascalCase` names (`#Loads`, `#Stops`, `#Parameters`, `#ASR_ResendMessages`).
+- Use `#PascalCase` names (`#Loads`, `#Stops`, `#Parameters`, `#ResendMessages`).
 - Always check existence before creating: `IF (OBJECT_ID('tempdb..#Name') IS NULL)`.
 - Comment the purpose: `/* Make Table to Track the Messages to Resend. */`.
 - For "shared" temp tables passed to nested EXEC calls, declare them in the outer procedure and rely on temp-table scoping.
@@ -498,18 +498,18 @@ The convention: **comments that are sentences end with a period; comments that a
 
 | Object | Pattern | Example |
 | --- | --- | --- |
-| Schema | `ELEOS` (single schema) | `ELEOS.usp_GetLoads` |
+| Schema | `<schema>` (single schema) | `<schema>.usp_GetLoads` |
 | Table | PascalCase, no prefix | `ApiCalls`, `WorkflowReport` |
 | Procedure | `usp_<PascalCase>` | `usp_GetBackgroundMessages` |
 | Function | `udf_<PascalCase>` | `udf_DocumentFields` |
-| Trigger / Job | `JOB.<schema>.<Name>` | `JOB.ELEOS.WorkflowReport` |
+| Trigger / Job | `JOB.<schema>.<Name>` | `JOB.<schema>.WorkflowReport` |
 | Parameter | `@p_<PascalCase>` | `@p_ApiCallId` |
 | Local variable | `@<PascalCase>` | `@DriverCode`, `@OrderNumber` |
 | Boolean local | `@True`, `@False` (BIT 1, 0) | declared at top of procs that use them |
 | Primary key | `PK_<TableName>` | `PK_ApiCalls` |
 | Index | `IX_<TableName>_<ColList>` | `IX_ApiCalls_RequestUriDate` |
-| Type | `ELEOS.<PascalCase>` | `ELEOS.FormFieldType` |
-| Temp table | `#<PascalCase>` | `#Loads`, `#ASR_ResendMessages` |
+| Type | `<schema>.<PascalCase>` | `<schema>.FormFieldType` |
+| Temp table | `#<PascalCase>` | `#Loads`, `#ResendMessages` |
 | CTE | `cte<PascalCase>` | `cteStopSequences` |
 
 **Procedure suffix conventions:**
@@ -525,12 +525,12 @@ When creating a new procedure in `5-Procedures/`, use this skeleton:
 
 ```sql
 -- CREATE A SHELL PROCEDURE IF NONE EXISTS.
-;IF OBJECT_ID('ELEOS.usp_DoSomething') IS NULL
-  EXEC ('CREATE PROCEDURE ELEOS.usp_DoSomething AS RETURN 0;')
+;IF OBJECT_ID('<schema>.usp_DoSomething') IS NULL
+  EXEC ('CREATE PROCEDURE <schema>.usp_DoSomething AS RETURN 0;')
 GO
 
 -- ALTER THE UPDATED PROCEDURE DEFINITION.
-;ALTER PROCEDURE ELEOS.usp_DoSomething
+;ALTER PROCEDURE <schema>.usp_DoSomething
 (
     /*********************************************************************************************
      PARAMETER NAME		DATATYPE		    DEFAULT
@@ -538,18 +538,18 @@ GO
      @p_OrderNumber     INT                 = NULL
     ,@p_DriverCode      VARCHAR(50)         = NULL
 )
-WITH EXECUTE AS 'ELEOS'
+WITH EXECUTE AS '<schema_owner>'
 AS
 BEGIN	-- PROCEDURE
 
     /********************************************************************************************
     *********************************************************************************************
-        SCRIPT:		ELEOS.usp_DoSomething
-        AUTHOR:		Scott Applefeld
+        SCRIPT:		<schema>.usp_DoSomething
+        AUTHOR:		<Author Name>
         DATE:		<Month DDth, YYYY>
         VERSION:	v1.0
     *********************************************************************************************
-        NOTES:		v1.0 - <MM/DD/YYYY> - SCOTT APPLEFELD - ASR SOLUTIONS
+        NOTES:		v1.0 - <MM/DD/YYYY> - <AUTHOR NAME> - <COMPANY>
                             <Description of what this procedure does and why it exists.>
     *********************************************************************************************
     ********************************************************************************************/
@@ -572,14 +572,14 @@ BEGIN	-- PROCEDURE
     ;BEGIN TRY
         /* Describe what this block does. */
         ;SELECT  [SomeColumn] = T.[SomeColumn]
-        FROM    ELEOS.SomeTable T
+        FROM    <schema>.SomeTable T
         WHERE   T.[OrderNumber] = @p_OrderNumber
 
     END TRY
     BEGIN CATCH
         /* Audit and Report Error. */
-        ;IF ( OBJECT_ID('ELEOS.usp_AuditError') IS NOT NULL )
-            EXECUTE ELEOS.usp_AuditError @p_ErrorData = @p_OrderNumber
+        ;IF ( OBJECT_ID('<schema>.usp_AuditError') IS NOT NULL )
+            EXECUTE <schema>.usp_AuditError @p_ErrorData = @p_OrderNumber
     END CATCH
 END
 GO
@@ -591,16 +591,16 @@ When creating a new table in `3-Tables/`, use this skeleton:
 
 ```sql
 /*********************************************************************************
-	TABLE: ELEOS.<TableName>
+	TABLE: <schema>.<TableName>
 *********************************************************************************/
 ;IF NOT EXISTS(	SELECT	NULL
 				FROM	sys.schemas S
 						LEFT JOIN sys.tables T
 							ON S.[schema_id] = T.[schema_id]
-				WHERE	S.[name] = 'ELEOS'
+				WHERE	S.[name] = '<schema>'
 						AND T.[name] = '<TableName>'  )
 BEGIN 
-	;CREATE TABLE ELEOS.<TableName> (
+	;CREATE TABLE <schema>.<TableName> (
 		 [<TableName>Id]			BIGINT			NOT NULL	IDENTITY(1,1)
 
 		/* <Group 1 Name> */
@@ -625,11 +625,11 @@ GO
 -- Check for and Create IX_<TableName>_<ColList>.
 ;IF NOT EXISTS(	SELECT	NULL
 				FROM	sys.indexes I
-				WHERE	I.[object_id] = OBJECT_ID('ELEOS.<TableName>')
+				WHERE	I.[object_id] = OBJECT_ID('<schema>.<TableName>')
 						AND I.[name] = 'IX_<TableName>_<ColList>' )
 BEGIN
 	;CREATE NONCLUSTERED INDEX IX_<TableName>_<ColList>
-		ON ELEOS.<TableName> (  [Column1]
+		ON <schema>.<TableName> (  [Column1]
 							   ,[Column2]	)
 END
 GO
@@ -640,11 +640,11 @@ GO
 When creating a new inline TVF in `4-Functions/`, use this skeleton:
 
 ```sql
-;IF OBJECT_ID('ELEOS.udf_DoSomething') IS NOT NULL
-  EXEC ('DROP FUNCTION ELEOS.udf_DoSomething;')
+;IF OBJECT_ID('<schema>.udf_DoSomething') IS NOT NULL
+  EXEC ('DROP FUNCTION <schema>.udf_DoSomething;')
 GO
 
-;CREATE FUNCTION ELEOS.udf_DoSomething
+;CREATE FUNCTION <schema>.udf_DoSomething
 (
     @p_Param1   INT
 )
@@ -654,18 +654,18 @@ RETURN
 (
     /********************************************************************************************
     *********************************************************************************************
-        SCRIPT:		ELEOS.udf_DoSomething
-        AUTHOR:		Scott Applefeld
+        SCRIPT:		<schema>.udf_DoSomething
+        AUTHOR:		<Author Name>
         DATE:		<Month DDth, YYYY>
         VERSION:	v1.0
     *********************************************************************************************
-        NOTES:		v1.0 - <MM/DD/YYYY> - SCOTT APPLEFELD - ASR SOLUTIONS
+        NOTES:		v1.0 - <MM/DD/YYYY> - <AUTHOR NAME> - <COMPANY>
                             <Description.>
     *********************************************************************************************
     ********************************************************************************************/
     SELECT   [Column1] = T.[Column1]
             ,[Column2] = T.[Column2]
-    FROM    ELEOS.SomeTable T
+    FROM    <schema>.SomeTable T
     WHERE   T.[Param1] = @p_Param1
 )
 GO
@@ -675,7 +675,7 @@ For scalar functions, replace `RETURNS TABLE ... RETURN ( SELECT ... )` with:
 
 ```sql
 RETURNS VARCHAR(MAX)
-WITH EXECUTE AS 'ELEOS'
+WITH EXECUTE AS '<schema_owner>'
 AS
 BEGIN
     DECLARE @Result VARCHAR(MAX) = ''

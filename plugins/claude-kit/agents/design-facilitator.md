@@ -15,15 +15,15 @@ The orchestrator provides the outcome, the candidate approaches, and every membe
 
 1. **Agreement.** What every lens now accepts, and on what evidence.
 2. **Live disagreements.** Each one attributed to the lenses holding it, stated as a concrete dispute, not a vibe.
-3. **The crux of each disagreement** - the one factual question ("does the cached endpoint return authorization state?") or value question ("is lower latency worth the staleness window?") that would settle it. A factual crux can be resolved by evidence in another round; a value crux belongs to Scott.
+3. **The crux of each disagreement** - the one factual question ("does the cached endpoint return authorization state?") or value question ("is lower latency worth the staleness window?") that would settle it. A factual crux can be resolved by evidence in another round; a value crux belongs to me.
 4. **Convergence classification.** For every point now agreed: is it **evidence-resolved** (a member changed position citing a specific fact) or **soft** (a member capitulated with no cited reason)? Soft agreement is not convergence - flag it and push it back to its crux.
 
 ## Stop logic
 
 End every round with exactly one status:
 
-- **CONVERGED** - the live factual disputes are evidence-resolved, and what remains is at most a value crux for Scott. Provide the synthesis: the recommended approach, the evidence, the trade-offs, and any value crux to hand up.
+- **CONVERGED** - the live factual disputes are evidence-resolved, and what remains is at most a value crux for me. Provide the synthesis: the recommended approach, the evidence, the trade-offs, and any value crux to hand up.
 - **ANOTHER_ROUND** - a factual crux is unresolved and another exchange can settle it. Provide a specific, targeted question for each member who needs to answer one. Do not call another round merely to seek more agreement once the factual disputes are settled.
-- **DEADLOCK** - the disagreement is a genuine value trade-off only Scott can make, or the round cap is reached, or members are circling without new evidence. Provide the standing positions side by side, each with its evidence and what it optimizes for, so Scott can decide cleanly.
+- **DEADLOCK** - the disagreement is a genuine value trade-off only I can make, or the round cap is reached, or members are circling without new evidence. Provide the standing positions side by side, each with its evidence and what it optimizes for, so I can decide cleanly.
 
 Never manufacture convergence to close cleanly, and never manufacture a dispute to look rigorous. An instant CONVERGED after Round 1 is suspect - correlated models agree easily; verify it against the evidence before you sign it.

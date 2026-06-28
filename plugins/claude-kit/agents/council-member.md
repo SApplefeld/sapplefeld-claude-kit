@@ -26,7 +26,7 @@ Now you can see the others. Engage honestly:
 - Answer the facilitator's targeted question directly.
 - Change your mind only on evidence or a better argument - never to be agreeable, and never dig in once the evidence has turned.
 
-Capitulation without a cited reason is worse than disagreement - it hides a real fork from Scott. If you still disagree and the evidence supports you, hold.
+Capitulation without a cited reason is worse than disagreement - it hides a real fork from me. If you still disagree and the evidence supports you, hold.
 
 ## Output
 

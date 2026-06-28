@@ -1,11 +1,11 @@
 ---
 name: csharp-style
-description: "Scott Applefeld's C# house style. Use whenever writing or modifying ANY C# code: new services, handlers, helpers, MediatR notifications, models, DI registration, or refactoring existing C#. Signature traits: #region organization, section comments ending in periods, static Serilog logger, grouped fields with label comments. Trigger on any C# work even when style is not named."
+description: "My C# house style. Use whenever writing or modifying ANY C# code: new services, handlers, helpers, MediatR notifications, models, DI registration, or refactoring existing C#. Signature traits: #region organization, section comments ending in periods, static Serilog logger, grouped fields with label comments. Trigger on any C# work even when style is not named."
 ---
 
 # C# Style
 
-Scott's personal C# style. Internalize the philosophy, then consult [references/csharp-style.md](references/csharp-style.md) for the detailed pattern reference (full file/class anatomy, all 16 sections, complete service template) before writing code.
+My personal C# style. Internalize the philosophy, then consult [references/csharp-style.md](references/csharp-style.md) for the detailed pattern reference (full file/class anatomy, all 16 sections, complete service template) before writing code.
 
 ## Core philosophy
 

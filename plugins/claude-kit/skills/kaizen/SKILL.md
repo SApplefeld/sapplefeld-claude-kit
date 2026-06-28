@@ -9,7 +9,7 @@ Kaizen is the kit improving itself. Friction with the kit (a rule that was ambig
 
 ## The inbox lives in the kit repo
 
-Notes and briefs live inside the kit's working clone, so git is the sync-and-combine mechanism across Scott's machines. No separate aggregation step.
+Notes and briefs live inside the kit's working clone, so git is the sync-and-combine mechanism across my machines. No separate aggregation step.
 
 - `kaizen/notes-<machine>.md` is per-machine, append-only, one line per note: date, machine, repo, and the friction. Per-machine files mean three workstations can all push notes with zero merge conflicts. A `git pull` before a pass merges every machine's notes automatically.
 - `kaizen/briefs/` holds one file per brief a reflect pass produces.
@@ -18,7 +18,7 @@ Notes and briefs live inside the kit's working clone, so git is the sync-and-com
 
 ## Capturing (the cheap half)
 
-Capture is manual, not an always-on posture: when you (or rarely Scott) notice the kit got in the way, propose a one-line note, and on Scott's nod append it. You do not load this skill to capture; the global rule in CLAUDE.md carries the bar.
+Capture is manual, not an always-on posture: when you (or rarely I) notice the kit got in the way, propose a one-line note, and on my nod append it. You do not load this skill to capture; the global rule in CLAUDE.md carries the bar.
 
 Capture happens while you are working in some other project, so the kit clone is elsewhere on disk. Find it via the machine-local signpost `~/.claude/claude-kit.local.json` (written by setup), which records `kitRepoPath`. Append the note to `<kitRepoPath>/kaizen/notes-<machine>.md`, where `<machine>` is the hostname. If the signpost is missing (setup has not run on this machine), fall back to `~/.claude-kaizen/notes-<machine>.md` and say so, so it gets folded in later.
 
@@ -37,10 +37,10 @@ Zero notes in a session is the normal, healthy case. A note you have to talk you
 
 ## The pass (the reflect half)
 
-Scott's weekly kit review is the pass. Run it when he asks, when he accepts an end-of-effort or session-start offer, or when he sits down to a pending brief.
+My weekly kit review is the pass. Run it when I ask, when I accept an end-of-effort or session-start offer, or when I sit down to a pending brief.
 
-1. **Gather.** In the kit repo, `git pull` first so notes from every machine are merged, then read all `kaizen/notes-*.md` plus any friction from this session still in context, and ask Scott for his. His half of the retro is the other half.
-2. **Reflect and triage.** For each item, with Scott: is it real, and what is the smallest change that fixes it? Sort into:
+1. **Gather.** In the kit repo, `git pull` first so notes from every machine are merged, then read all `kaizen/notes-*.md` plus any friction from this session still in context, and ask me for mine. My half of the retro is the other half.
+2. **Reflect and triage.** For each item, with me: is it real, and what is the smallest change that fixes it? Sort into:
    - **Apply now:** small and clear. Becomes a brief (or is fixed directly, since the pass already runs in the kit repo).
    - **Promote:** large enough to deserve its own design. Brainstorm it into a `docs/plans/` spec instead of a brief.
    - **Route elsewhere:** not actually about the kit. A project learning goes to auto memory; a project convention to that project's CLAUDE.md. It leaves the inbox either way.
@@ -60,4 +60,4 @@ Discipline: follow writing-skills; baseline-test any behavior-shaping wording.
 
 ## Offering a pass
 
-Never offer on an uneventful session. Offer only when the inbox has pending items, and only at a natural moment: finishing-work's close-out, or when Scott signals he is wrapping up. The offer is one dismissable line ("N kaizen items captured, want to run a pass?"). Scott can always start one explicitly. The SessionStart nudge (kit repo only) is the same predicate from the other end: it reminds you when you open claude-kit and items are waiting.
+Never offer on an uneventful session. Offer only when the inbox has pending items, and only at a natural moment: finishing-work's close-out, or when I signal I am wrapping up. The offer is one dismissable line ("N kaizen items captured, want to run a pass?"). I can always start one explicitly. The SessionStart nudge (kit repo only) is the same predicate from the other end: it reminds you when you open claude-kit and items are waiting.

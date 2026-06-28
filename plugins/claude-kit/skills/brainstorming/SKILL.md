@@ -1,11 +1,11 @@
 ---
 name: brainstorming
-description: "Collaborative design conversation for any new feature, project, or non-trivial change. Use when Scott wants to think through a problem before building. Phrases like 'let's think through', 'help me design', 'spec this out', 'how should we approach', or any substantial new effort without an existing spec."
+description: "Collaborative design conversation for any new feature, project, or non-trivial change. Use when I want to think through a problem before building. Phrases like 'let's think through', 'help me design', 'spec this out', 'how should we approach', or any substantial new effort without an existing spec."
 ---
 
 # Brainstorming
 
-Explore the problem space WITH Scott in conversation, then capture the agreement as a spec that the executing-work skill runs on. This is a conversation, not a gate. The value is the back-and-forth, feeling out all corners of the problem together. Never delegate the conversation itself to a subagent.
+Explore the problem space WITH me in conversation, then capture the agreement as a spec that the executing-work skill runs on. This is a conversation, not a gate. The value is the back-and-forth, feeling out all corners of the problem together. Never delegate the conversation itself to a subagent.
 
 ## Process
 
@@ -17,7 +17,7 @@ Explore the problem space WITH Scott in conversation, then capture the agreement
 
 4. **Feel out the corners.** Edge cases, failure modes, integration points, performance characteristics, who consumes the output, what happens on re-run (idempotency matters in this codebase), what already exists that solves a similar shape.
 
-5. **Present options with tradeoffs** when a real decision exists. State a recommendation and the reason. Disagree openly with Scott's framing when warranted; he wants the arguments, not agreement. Hold the position under pushback and move on a new fact, not on tone. The answer is usually somewhere in the middle.
+5. **Present options with tradeoffs** when a real decision exists. State a recommendation and the reason. Disagree openly with my framing when warranted; I want the arguments, not agreement. Hold the position under pushback and move on a new fact, not on tone. The answer is usually somewhere in the middle.
 
 6. **Offer the design council at a hard fork.** When step 5 surfaces a genuinely hard or material decision with more than one defensible approach (an architecture or schema choice, build-vs-buy, a migration direction, a tradeoff that is expensive or awkward to undo), offer the `design-council` skill before settling it 1:1. Offering is cheap, running is not: the offer is one line and I decline in a word, while the run is token-intensive and slow. So err toward offering, and lower the bar to offer, never the bar to run. Make the offer in the turn you recognize the fork, not a later one you control: "offer it later if the fork is still open" is precisely how it never gets offered. Do not auto-run it: name the cost so I can authorize the spend, and if I decline, stay in the 1:1 conversation. The council returns a converged recommendation or a cleanly-stated unresolved fork; it informs my call, never replaces it or the conversation. I can invoke it directly at any time. This is offered, not default.
 
@@ -28,9 +28,9 @@ Explore the problem space WITH Scott in conversation, then capture the agreement
 9. **Spec self-review.** Before handing the spec to executing-work, read it once with fresh eyes and fix inline: placeholders (TBD, TODO, "handle appropriately"), sections that contradict each other, requirements that could be read two ways (pick one, make it explicit), and scope that drifted past the goal. A defect caught here is a sentence to fix; the same defect found mid-execution is rework. Fix and move on; no re-review ceremony.
 
 10. **Agree on the commit model** and record it in the spec header:
-   - **Review-Only:** changes accumulate staged as sections complete, and `git diff --staged` is Scott's review surface before anything is committed. Common for smaller changesets in big existing projects.
+   - **Review-Only:** changes accumulate staged as sections complete, and `git diff --staged` is my review surface before anything is committed. Common for smaller changesets in big existing projects.
    - **Branch-and-PR:** work happens on a feature branch and finishing-work opens a pull request. The default for shared work or client repos (GitHub or Azure DevOps).
-   - **Commit-and-Push:** "land it on main and leave no mess." Commit and push to origin as sections complete; if concurrency forced a worktree branch, finishing-work merges to main and tears it down. For personal or greenfield repos where Scott has said main is fine.
+   - **Commit-and-Push:** "land it on main and leave no mess." Commit and push to origin as sections complete; if concurrency forced a worktree branch, finishing-work merges to main and tears it down. For personal or greenfield repos where I have said main is fine.
 
 11. **Assign a model tier to each Section of Work.** Implementation cost scales with the model; quality is protected by spec precision plus strong-model review, not by using the strongest model for every keystroke. Assign per section:
    - **sonnet:** mechanical or well-bounded: a clear contract, an existing sibling pattern to mimic, single-responsibility scope, low integration risk. New procs/services following an established shape, mappings, DTOs, tests, CRUD surfaces.
@@ -73,4 +73,4 @@ Unresolved items and who owns the answer.
 
 ## When not to use
 
-A trivial fix or a small obvious change does not need a spec; just fix it under the global rules. If Scott asks to brainstorm something that turns out to be trivial, say so and offer to just do it.
+A trivial fix or a small obvious change does not need a spec; just fix it under the global rules. If I ask to brainstorm something that turns out to be trivial, say so and offer to just do it.

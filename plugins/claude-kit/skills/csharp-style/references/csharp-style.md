@@ -1,6 +1,6 @@
-# C# Style (modeled on ASR.Eleos.Documents)
+# C# Style
 
-This is the detailed pattern reference for writing C# in Scott's style. The canonical examples are modeled on `D:\source\repos\EleosCore\ASR.Eleos\ASR.Eleos.Documents`. The patterns are what transfer: substitute the project's own namespaces and type names rather than copying `ASR.Eleos` literally into another codebase. Inside an ASR.Eleos repo, open a sibling file in that library and follow its layout exactly.
+This is the detailed pattern reference for writing C# in my style. The canonical examples use a generic document-processing library (`Acme.Documents`) as the example shape. The patterns are what transfer: substitute the project's own namespaces and type names rather than copying the example names literally into another codebase. Inside a repo already written in this style, open a sibling file in that library and follow its layout exactly.
 
 ## Table of contents
 
@@ -30,7 +30,7 @@ Every C# file in this library follows the same shape:
 1. **Using statements**, ordered:
    - `System.*` namespaces first (alphabetical-ish, not strictly enforced)
    - Third-party where convenient (Serilog often appears mid-list)
-   - `ASR.Eleos.*` namespaces
+   - project namespaces
    - Other third-party (`AutoMapper`, `MediatR`, etc.)
    - **No blank lines between groups.**
 
@@ -38,7 +38,7 @@ Every C# file in this library follows the same shape:
 
 3. **Namespace declaration** - file-scoped with semicolon for new files:
    ```csharp
-   namespace ASR.Eleos.Documents;
+   namespace Acme.Documents;
    ```
    Older files (e.g. `Assembly/RegisterServices.cs`) use block-scoped - **leave existing block-scoped files alone**, but write *new* files with file-scoped.
 
@@ -51,12 +51,12 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Serilog;
-using ASR.Eleos.Domain;
-using ASR.Eleos.Common.Platform;
+using Acme.Domain;
+using Acme.Common.Platform;
 using AutoMapper;
 using System.Threading;
 
-namespace ASR.Eleos.Documents;
+namespace Acme.Documents;
 
 public class FormService : IFormService
 ```
@@ -92,18 +92,18 @@ public class FormService : IFormService
     private readonly Mapper _mapperService;
 
     // Services.
-    private readonly IEleosApiService _eleosService;
+    private readonly IApiService _apiService;
     private readonly IHtmlService _htmlService;
     #endregion
 
     #region Constructor
     public FormService(
-            IEleosApiService eleosService,
+            IApiService apiService,
             IHtmlService htmlService
     )
     {
         // Save Services.
-        _eleosService = eleosService;
+        _apiService = apiService;
         _htmlService = htmlService;
     }
     #endregion
@@ -158,7 +158,7 @@ private static StringComparer IgnoreCaseComparer => StringComparer.InvariantCult
 private readonly Mapper _mapperService;
 
 // Services.
-private readonly IEleosApiService _eleosService;
+private readonly IApiService _apiService;
 private readonly IHtmlService _htmlService;
 #endregion
 ```
@@ -175,12 +175,12 @@ private readonly IHtmlService _htmlService;
 **Example** - `Services/Build/FormService.cs:33-50`:
 ```csharp
 public FormService(
-        IEleosApiService eleosService,
+        IApiService apiService,
         IHtmlService htmlService
 )
 {
     // Save Services.
-    _eleosService = eleosService;
+    _apiService = apiService;
     _htmlService = htmlService;
 
     // Save Mapper.
@@ -308,7 +308,7 @@ Notice how the comments alone tell the story of the method. That's the goal.
       Log.Error(ex, "Failure Processing Document.");
   }
   ```
-- `Log.Debug($"...")` is used in output/EBE services for trace-level diagnostics with method-name prefixed messages: `Log.Debug($"ASR.Eleos.Documents.PdfService.CreateFromHtmlAsync called with Html: {html}");`
+- `Log.Debug($"...")` is used in output services for trace-level diagnostics with method-name prefixed messages: `Log.Debug($"Acme.Documents.PdfService.CreateFromHtmlAsync called with Html: {html}");`
 - Log messages always end in a period.
 
 ## 9. Exception handling
@@ -453,24 +453,24 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Serilog;
-using ASR.Eleos.Domain;
+using Acme.Domain;
 
-namespace ASR.Eleos.Documents;
+namespace Acme.Documents;
 
 public class WidgetService : IWidgetService
 {
     #region Variables
     // Services.
-    private readonly IEleosApiService _eleosService;
+    private readonly IApiService _apiService;
     #endregion
 
     #region Constructor
     public WidgetService(
-            IEleosApiService eleosService
+            IApiService apiService
     )
     {
         // Save Services.
-        _eleosService = eleosService;
+        _apiService = apiService;
     }
     #endregion
 
@@ -489,7 +489,7 @@ public class WidgetService : IWidgetService
         try
         {
             // Get Widget from API.
-            widget = await _eleosService.GetWidgetAsync(request.Id, cancellationToken);
+            widget = await _apiService.GetWidgetAsync(request.Id, cancellationToken);
 
             // Apply Defaults.
             widget ??= new();

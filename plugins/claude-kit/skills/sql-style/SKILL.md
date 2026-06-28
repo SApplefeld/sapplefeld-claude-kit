@@ -1,11 +1,11 @@
 ---
 name: sql-style
-description: "Scott Applefeld's T-SQL house style. Use whenever writing or modifying ANY SQL: stored procedures, tables, functions, indexes, install or deployment scripts, or ad-hoc queries. Signature traits: shell-then-ALTER deployment, banner-comment headers, leading commas, tab-aligned columns, leading semicolons, audit-logging CATCH blocks that do not re-throw. Trigger on any SQL work even when style is not named."
+description: "My T-SQL house style. Use whenever writing or modifying ANY SQL: stored procedures, tables, functions, indexes, install or deployment scripts, or ad-hoc queries. Signature traits: shell-then-ALTER deployment, banner-comment headers, leading commas, tab-aligned columns, leading semicolons, audit-logging CATCH blocks that do not re-throw. Trigger on any SQL work even when style is not named."
 ---
 
 # T-SQL Style
 
-Scott's personal SQL style. Internalize the philosophy, then consult [references/sql-style.md](references/sql-style.md) for the detailed pattern reference (all 21 sections: deployment idioms, banner formats, full procedure/table/function templates) before writing code.
+My personal SQL style. Internalize the philosophy, then consult [references/sql-style.md](references/sql-style.md) for the detailed pattern reference (all 21 sections: deployment idioms, banner formats, full procedure/table/function templates) before writing code.
 
 ## Core philosophy
 

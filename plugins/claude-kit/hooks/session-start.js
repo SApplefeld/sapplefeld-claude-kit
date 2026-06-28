@@ -24,7 +24,7 @@ function readStdin() {
 
 // Count pending kaizen items (note lines plus briefs) in the kit repo.
 // Only fires inside the kit repo itself: friction is captured from anywhere,
-// but the reminder to act belongs where Scott can act. Injects a count only,
+// but the reminder to act belongs where it can be acted on. Injects a count only,
 // never inbox text. Any failure returns 0 (silent).
 function countPendingKaizen(cwd) {
     const kitMarker = path.join(cwd, 'plugins', 'claude-kit', '.claude-plugin', 'plugin.json');

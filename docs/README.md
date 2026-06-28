@@ -20,7 +20,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-None active at present. Completed plans are in `archive/` (most recent: `claude-kit_doc-closeout-discipline_spec_v1.md`, the doc-close-out discipline and current-state record effort).
+None active at present. Completed plans are in `archive/` (most recent: `claude-kit_first-person-voice_spec_v1.md`, the first-person voice and plain-instruction sweep).
 
 ## Archive
 

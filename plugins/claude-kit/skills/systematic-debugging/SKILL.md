@@ -34,7 +34,7 @@ Fix the cause, not the symptom. Then: verify the repro now passes, run the surro
 
 ## The escalation rule
 
-**Two failed fixes mean the mental model is wrong - stop.** Do not attempt fix number three from the same understanding. Instead: list every assumption in play, verify each against evidence, and widen the frame - the bug may be in the design, the spec, the deployment, or the data rather than the code under suspicion. If the root cause implicates a design decision, surface it to Scott with the evidence rather than quietly patching around it.
+**Two failed fixes mean the mental model is wrong - stop.** Do not attempt fix number three from the same understanding. Instead: list every assumption in play, verify each against evidence, and widen the frame - the bug may be in the design, the spec, the deployment, or the data rather than the code under suspicion. If the root cause implicates a design decision, surface it to me with the evidence rather than quietly patching around it.
 
 ## When not to use
 

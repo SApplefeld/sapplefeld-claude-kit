@@ -5,7 +5,7 @@ description: "Guide to writing in the style of Scott Applefeld. Use whenever ask
 
 # Scott's Writing Structure - Outline Skill
 
-Rules reverse-engineered from five samples: *How We Secured TMWSuite*, *What Are the Benefits (Cost Savings)*, *What Is the Integration (Architecture + Endpoints)*, *RE: KNX Proposal*, *RE: Heniff Weekly Review (2025-01-13)*.
+Rules reverse-engineered from a set of the author's own documents (technical proposals, benefit analyses, architecture docs, and email replies).
 
 Follow these rules when drafting in Scott's voice. Where the samples disagree, the dominant pattern is listed first and the exception is flagged.
 
@@ -15,10 +15,10 @@ Follow these rules when drafting in Scott's voice. Where the samples disagree, t
 
 - Open with a **blunt declarative statement of the core premise**, not a question, not a quote, not a scene.
 - Opening paragraph = **1 to 3 sentences, 25–55 words**.
-- The opening sentence starts with a frame-setter: `"First, it's fundamentally important to understand…"`, `"The following diagram provides a high-level introduction to…"`, `"The most valuable resource to Trucking is…"`, `"To provide a complete outsourced solution for…"`.
-- Never open with a question. Zero of five samples open with one.
+- The opening sentence starts with a frame-setter: `"First, it's fundamentally important to understand…"`, `"The following diagram provides a high-level introduction to…"`, `"The most valuable resource to the business is…"`, `"To provide a complete solution for…"`.
+- Never open with a question.
 - Never open with a quote, anecdote, or scene-setting.
-- **Email exception**: If the piece is an email reply, open with a one-line personal acknowledgement (`"Thanks Jim!"` / `"Thanks Karen!"`) before the frame-setter. Keep the acknowledgement to one line.
+- **Email exception**: If the piece is an email reply, open with a one-line personal acknowledgement (`"Thanks [Name]!"`) before the frame-setter. Keep the acknowledgement to one line.
 
 ## 2. WHAT COMES SECOND
 
@@ -33,7 +33,7 @@ Do **not** state the verdict or recommendation second. Verdicts land at the end 
 ## 3. BODY - NUMBER OF SECTIONS
 
 - Default: **4 to 6 top-level sections**.
-  - TMWSuite: 6. Cost Savings: 5 numbered + 1 unnumbered features section. Integration: 4 major components + sub-sections. KNX email: 4 (Goal, Approach, Cost, Timeframe). Heniff review: 4 (Significant Issues, Status Updates, In Progress, Requested).
+  - Across the samples this ranged from 4 to 6 sections. Proposals and benefit docs sat at 5 to 6 (some numbered, some with an extra unnumbered features section); architecture docs ran 4 major components plus sub-sections; email replies stayed at 4 (for example: Goal, Approach, Cost, Timeframe).
 - Hard floor: 4. Hard ceiling: 6 top-level sections. If you exceed 6, collapse.
 - Most sections have **2 to 3 nested sub-sections** when the topic needs drill-down. Nest at most two levels deep (section → sub-section → bullet list). Never go three levels deep in prose.
 
@@ -41,8 +41,8 @@ Do **not** state the verdict or recommendation second. Verdicts land at the end 
 
 - Headers are **short noun phrases**, 2–4 words, Title Case or ALL CAPS.
   - Examples: `INTEGRATION DESIGN`, `DEMILITARIZED ZONE`, `PROTECTING DATABASE`, `END RESULT`, `Improving Retention`, `Back Office Efficiencies`, `Driver Efficiencies`, `Safety Monitoring`, `GOAL`, `APPROACH`, `COST`, `TIMEFRAME`.
-- Never question-form headers. Zero of five samples use them.
-- Never command/imperative headers ("Do this", "Fix that"). Zero of five samples use them.
+- Never question-form headers.
+- Never command/imperative headers ("Do this", "Fix that").
 - Never full-sentence headers.
 - Technical/internal docs use ALL CAPS headers. Client-facing proposals and benefit docs use Title Case. Pick one style per document and stay consistent.
 - Sub-section headers follow the same rule: short noun phrase, often 2–3 words, Title Case (`Turnover Costs`, `Pay Drivers Sooner`, `Quick Workflow Execution`).
@@ -62,29 +62,29 @@ Use these. They are the signature moves.
 
 **"However" pivots.** Build the case, then pivot with `However,` or `By comparison,` or `Comparatively,`. This appears in every sample. It's the core rhetorical move - set up the reasonable-sounding status quo, then pivot to the reason it isn't sufficient.
 
-**Numbered lists for enumerated mechanics.** When listing steps, components, or ranked items, use numbered lists with lettered sub-items (1 → a → i). Used in TMWSuite, Cost Savings, KNX, Integration.
+**Numbered lists for enumerated mechanics.** When listing steps, components, or ranked items, use numbered lists with lettered sub-items (1 → a → i). This appears across the proposal, benefit, and architecture samples.
 
 **Bulleted lists for catalogs and field definitions.** When listing non-ranked items (fields, data points, options), use bullets. Each bullet is typically **bold term + colon or line break + explanation**.
 
-**Italics for emphasis on a single word.** Pattern: `"any user"`, `"every table"`, `"all"`, `"nothing"`, `"Triggers"`, `"less than 0.25%"`, `"per year"`. One italicized word per sentence, max. Used to stress magnitude, universality, or a key technical term.
+**Italics for emphasis on a single word.** Pattern: `"any user"`, `"every"` record, `"all"`, `"nothing"`, a key technical term, `"per year"`. One italicized word per sentence, max. Used to stress magnitude, universality, or a key technical term.
 
-**Bold numerics for anchoring quantitative claims.** In the cost savings doc especially: `**$1,080,000**`, `**1% reduction**`, `**\$9.00 per driver per month**`, `**11%**`. Bold the number and its unit together.
+**Bold numerics for anchoring quantitative claims.** In benefit and cost analyses especially: `**$X,XXX,XXX**`, `**X% reduction**`, `**$X.XX per unit per month**`, `**XX%**`. Bold the number and its unit together.
 
-**Concrete numbers over adjectives.** Every claim of impact is backed by a number - `40%`, `$109 per tractor per day`, `20-25 minutes`, `5 seconds`, `less than 0.25%`. Never write "significantly faster" without following it with the actual figure.
+**Concrete numbers over adjectives.** Every claim of impact is backed by a number - a concrete percentage, a specific dollar figure per unit per day, a time span in minutes, a duration in seconds. Never write "significantly faster" without following it with the actual figure.
 
 **Short summary paragraph at the end of each section.** 1–2 sentences restating the conclusion. Then move on.
 
-**Concrete examples after abstract explanation.** `"The classic simple example for this 'Stops'. Let's say I want to update a Stop…"` - named example, walks through it, resolves it.
+**Concrete examples after abstract explanation.** After stating an abstract rule, introduce a single named example (`"The classic simple example for this is X. Let's say I want to update X…"`), walk through it, and resolve it.
 
 **Prose paragraphs, not wall-of-bullets.** Even in technical docs, the *reasoning* lives in prose. Bullets are reserved for catalogs and field lists, not for decomposing arguments.
 
 **No em dashes.** Per the kit's global style rule, do not use em dashes in Scott's documents; use commas, periods, parentheses, or colons. (The original samples used them sparingly; the kit no longer does, because em dashes now read as an AI-writing tell.)
 
-**Parenthetical asides for caveats.** `"(as some of our customers have…)"`, `"(not every customer does)"`, `"(Dwell, Pre/Post Trip, Driving)"`. Use parentheses for scope-limiting caveats rather than a new sentence.
+**Parenthetical asides for caveats.** `"(as some of our customers have…)"`, `"(not every customer does)"`, `"(option A, option B, option C)"`. Use parentheses for scope-limiting caveats rather than a new sentence.
 
-**Sentence length varies deliberately.** Long explanatory sentences (30–50 words) interleaved with short landing sentences (5–12 words) at the end of a paragraph. `"The answer to solve this? Impersonation."` `"This is a difficult problem in TMWSuite."`
+**Sentence length varies deliberately.** Long explanatory sentences (30–50 words) interleaved with short landing sentences (5–12 words) at the end of a paragraph. `"The answer to solve this? Impersonation."` `"This is a difficult problem."`
 
-**First-person plural voice in technical/proposal writing.** `"We create a ROLE called RESTRICTED."` `"We came up with a few cost models."` `"We've never yet seen anyone…"` This is the default. Switch to first-person singular only for subjective framing: `"In my opinion…"` or `"I do not have a reference study for…"`.
+**First-person plural voice in technical/proposal writing.** `"We create a new role with restricted permissions."` `"We came up with a few cost models."` `"We've never yet seen anyone…"` This is the default. Switch to first-person singular only for subjective framing: `"In my opinion…"` or `"I do not have a reference study for…"`.
 
 ## 7. CLOSING
 
@@ -97,7 +97,7 @@ Use these. They are the signature moves.
 
 ## 8. NEVER DO
 
-Conspicuously absent across all five samples:
+Conspicuously absent across all the samples:
 
 - **No question-form headers.** Ever.
 - **No rhetorical questions in the body prose.** The single exception is the self-answer device `"The answer to solve this? Impersonation."` - used maybe once per document, never more.
@@ -117,17 +117,17 @@ Conspicuously absent across all five samples:
 
 ---
 
-## CONTRADICTIONS ACROSS THE FIVE SAMPLES
+## CONTRADICTIONS ACROSS THE SAMPLES
 
 Flagged honestly:
 
-1. **Header case**: Technical PDFs use ALL CAPS (`INTEGRATION DESIGN`). Benefit and integration docs use Title Case (`Improving Retention`, `Architecture Diagram`). The KNX email uses ALL CAPS (`GOAL`, `APPROACH`). No strict rule - pick based on formality: ALL CAPS for internal/technical and for proposal-style enumerations, Title Case for longer Title Case reports.
+1. **Header case**: Technical PDFs use ALL CAPS (`INTEGRATION DESIGN`). Benefit and integration docs use Title Case (`Improving Retention`, `Architecture Diagram`). Proposal-style emails use ALL CAPS (`GOAL`, `APPROACH`). No strict rule - pick based on formality: ALL CAPS for internal/technical and for proposal-style enumerations, Title Case for longer Title Case reports.
 
-2. **Opener formality**: Three of five (the PDFs) open cold with the thesis. The two emails open with a one-line thank-you first. Rule: emails get the courtesy line, documents don't.
+2. **Opener formality**: The formal documents open cold with the thesis. The emails open with a one-line thank-you first. Rule: emails get the courtesy line, documents don't.
 
-3. **Section count**: Heniff weekly is denser (4 major buckets with many nested items) than the proposal-style docs (4–6 roughly parallel sections). Status/review writing nests more; proposal/explanatory writing stays flatter.
+3. **Section count**: Status/review writing is denser (a few major buckets with many nested items) than the proposal-style docs (4–6 roughly parallel sections). Status/review writing nests more; proposal/explanatory writing stays flatter.
 
-4. **First-person singular vs plural**: Cost Savings uses `"In my opinion"` once. KNX uses `"I"` frequently (`"I think"`, `"I suspect"`, `"I'd love your feedback"`). Technical security/architecture docs stay in `"we"`. Rule: use `I` only when the piece is a direct 1:1 communication expressing personal judgment; use `we` for company-voice deliverables.
+4. **First-person singular vs plural**: Benefit analyses use `"In my opinion"` sparingly. Direct 1:1 emails use `"I"` frequently (`"I think"`, `"I suspect"`, `"I'd love your feedback"`). Technical security/architecture docs stay in `"we"`. Rule: use `I` only when the piece is a direct 1:1 communication expressing personal judgment; use `we` for company-voice deliverables.
 
 ## STRONGEST PATTERNS (IF YOU REMEMBER NOTHING ELSE)
 

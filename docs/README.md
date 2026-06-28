@@ -20,7 +20,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-None active at present. Completed plans are in `archive/` (most recent: `claude-kit_first-person-voice_spec_v1.md`, the first-person voice and plain-instruction sweep).
+None active at present. Completed plans are in `archive/` (most recent: `claude-kit_anti-deferral_spec_v1.md`, the anti-deferral doctrine - act on found work, hand off the rest).
 
 ## Archive
 

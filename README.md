@@ -38,7 +38,6 @@ claude-kit/                          (repo = the marketplace)
         session-start.js             Re-injects in-progress plans on startup/resume/compaction
         format-on-edit.js            CSharpier on edited .cs files (silent when not installed)
   kaizen/                            Kit self-improvement inbox (per-machine notes-*.md + briefs/)
-  home/CLAUDE-FOR-FABLE.md           Leaner user-level CLAUDE.md variant for the Fable model
   settings/settings.recommended.json Permission rules + acceptEdits starting point
   setup.ps1 / setup.sh               Dev-clone setup: kaizen signpost (~/.claude/claude-kit.local.json) + git hook wiring
   build.ps1 / build.sh               Package plugins/claude-kit -> plugins/claude-kit.zip (claude-kit/ at archive root) for manual upload

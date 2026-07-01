@@ -35,7 +35,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 11. **Assign a model tier to each Section of Work.** Implementation cost scales with the model; quality is protected by spec precision plus strong-model review, not by using the strongest model for every keystroke. Assign per section:
    - **sonnet:** mechanical or well-bounded: a clear contract, an existing sibling pattern to mimic, single-responsibility scope, low integration risk. New procs/services following an established shape, mappings, DTOs, tests, CRUD surfaces.
    - **opus:** moderate complexity: multi-file coordination, nuanced refactors, performance-sensitive logic, mild ambiguity within a clear design.
-   - **fable** (main thread, no dispatch): novel design, security-sensitive surfaces, cross-cutting architecture, or any section where the spec itself may evolve during implementation.
+   - **fable** (main thread, no dispatch): novel design, security-sensitive surfaces, cross-cutting architecture, or any section where the spec itself may evolve during implementation. This tier is the deliberate exception, not the comfortable default: the main thread runs the costliest model, so a section lands here because it needs that model, never because writing a dispatch brief felt like overhead.
 
    A section only earns a cheap tier if its spec is precise enough that an implementer with no conversation context can build it from the section text alone. Write to that standard or assign a higher tier. Tier assignments are planning-time recommendations; executing-work may upgrade a tier after a failed attempt, never downgrade mid-effort.
 

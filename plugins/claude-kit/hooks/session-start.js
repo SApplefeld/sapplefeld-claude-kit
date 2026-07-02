@@ -84,8 +84,12 @@ function main() {
     let completedUnarchived = 0;
     try {
         // Cap the scan so a pathological repo cannot turn session start into
-        // thousands of file opens.
-        const entries = fs.readdirSync(plansDir).filter((f) => f.toLowerCase().endsWith('.md')).slice(0, 50);
+        // thousands of file opens. The index README documents the phrase
+        // "Status: Complete"; it is not a plan.
+        const entries = fs.readdirSync(plansDir)
+            .filter((f) => f.toLowerCase().endsWith('.md'))
+            .filter((f) => f.toLowerCase() !== 'readme.md')
+            .slice(0, 50);
         for (const file of entries) {
             try {
                 // Only the header matters; read the first 2KB.

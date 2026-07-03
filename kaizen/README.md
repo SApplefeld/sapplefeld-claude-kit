@@ -7,6 +7,7 @@ The kit's self-improvement backlog. Captured friction with the kit becomes notes
 - `notes-<machine>.md` is per-machine, append-only, one line per note: date, machine, repo, and the friction. Per-machine files mean every workstation can push notes with no merge conflicts. A `git pull` before a pass merges them all.
 - `notes-seed.md` holds the initial backlog from the 2026-06-17 session mining (the findings this port did not already address).
 - `briefs/` holds one file per brief a reflect pass produces.
+- `archive/` holds applied briefs, moved out of `briefs/` in the same commit that applied them, so the pending predicate stays clean.
 
 Notes and briefs are tracked and pushed by git: that is the sync. The machine-local pointer that tells capture where this clone lives is the signpost at `~/.claude/claude-kit.local.json`, written by setup, and is never committed.
 

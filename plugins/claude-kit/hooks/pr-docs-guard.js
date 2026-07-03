@@ -9,7 +9,10 @@
 // this is the teeth.
 //
 // Fires on Bash. Acts only on a PR-creation command (gh pr create,
-// az repos pr create). Distinct from docs-write-guard.js: that scopes to
+// az repos pr create). A chain that runs git commit ahead of the PR create
+// (git commit ... && gh pr create) is allowed: the command commits the docs
+// itself, so the pre-execution dirty check would false-positive on it.
+// Distinct from docs-write-guard.js: that scopes to
 // non-curator subagents writing docs/; this applies to anyone opening the PR.
 //
 // SAFETY: fails OPEN. Any error (no cwd, git missing, not a repo, timeout, parse
@@ -25,10 +28,24 @@ function readStdin() {
     try { return fs.readFileSync(0, 'utf8'); } catch { return ''; }
 }
 
-// A command that creates a pull request on a supported host.
-function isPrCreate(cmd) {
+// Index of the first PR-creation command (gh pr create, az repos pr create) in
+// the string, or -1 if none.
+function prCreateIndex(cmd) {
     const c = String(cmd || '');
-    return /\bgh\s+pr\s+create\b/i.test(c) || /\baz\s+repos\s+pr\s+create\b/i.test(c);
+    const matches = [/\bgh\s+pr\s+create\b/i.exec(c), /\baz\s+repos\s+pr\s+create\b/i.exec(c)]
+        .filter(Boolean)
+        .map(m => m.index);
+    return matches.length ? Math.min(...matches) : -1;
+}
+
+// True if a git commit appears before position `end` in the command string. A
+// chain that commits ahead of the PR create (git commit ... && gh pr create)
+// commits the docs itself, so the pre-execution dirty check would be a false
+// positive; such chains are allowed. Fail-open tradeoff: a chained commit whose
+// pathspec excludes docs/ also passes.
+function commitsBefore(cmd, end) {
+    const m = /\bgit\s+commit\b/i.exec(String(cmd || ''));
+    return m !== null && m.index < end;
 }
 
 // True if docs/ has uncommitted or untracked changes vs HEAD; null if we cannot
@@ -53,7 +70,10 @@ function main() {
 
     const input = p.tool_input || p.toolInput || (p.tool && p.tool.input) || {};
     const cmd = input.command;
-    if (!cmd || !isPrCreate(cmd)) return; // not a PR-creation command: allow
+    if (!cmd) return;
+    const prAt = prCreateIndex(cmd);
+    if (prAt < 0) return; // not a PR-creation command: allow
+    if (commitsBefore(cmd, prAt)) return; // chain commits before the PR create: allow
 
     const cwd = p.cwd || process.cwd();
     const dirty = docsDirty(cwd);

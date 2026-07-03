@@ -33,6 +33,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
    - **Commit-and-Push:** "land it on main and leave no mess." Commit and push to origin as sections complete; if concurrency forced a worktree branch, finishing-work merges to main and tears it down. For personal or greenfield repos where I have said main is fine.
 
 11. **Assign a model tier to each Section of Work.** Implementation cost scales with the model; quality is protected by spec precision plus strong-model review, not by using the strongest model for every keystroke. Tier picks the model; briefability picks the locus (dispatch versus main thread). Assign per section:
+   - **haiku:** pure transcription: an exact sibling to clone with the section's substitutions, single-responsibility scope, and a self-surfacing gate (the build or an existing test fails loudly if the output is wrong). Renames and sweeps, config or DTO additions mirroring a named sibling, test data, pin-test count updates. The tier is only assignable when the section text can name both the sibling and the gate; a section that leaves either to be found, or contains any judgment call, is `sonnet`.
    - **sonnet:** mechanical or well-bounded: a clear contract, an existing sibling pattern to mimic, single-responsibility scope, low integration risk. New procs/services following an established shape, mappings, DTOs, tests, CRUD surfaces.
    - **opus:** moderate complexity: multi-file coordination, nuanced refactors, performance-sensitive logic, mild ambiguity within a clear design.
    - **fable:** needs the strongest model: novel logic, security-sensitive surfaces, cross-cutting architecture, subtle correctness. Dispatches to `implementer-fable` (which inherits the session model, or takes the explicit `fable` override from a below-fable session) like any other tier.
@@ -61,7 +62,7 @@ sessions (and post-compaction recovery) understand intent, not just steps.
 
 ## Sections of Work
 ### 1. <Section name>
-Model: sonnet | opus | fable | fable (inline)
+Model: haiku | sonnet | opus | fable | fable (inline)
 What gets built. Acceptance criteria as verifiable statements. Files in scope.
 ### 2. ...
 

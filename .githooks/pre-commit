@@ -17,6 +17,15 @@ if ! git diff --cached --name-only -- 'plugins/claude-kit/' | grep -q .; then
     exit 0
 fi
 
+# Validate before packaging: a frontmatter parse error ships silently otherwise
+# (the agent loads with empty metadata at runtime). Skip quietly if the CLI is absent.
+if command -v claude >/dev/null 2>&1; then
+    if ! claude plugin validate ./plugins/claude-kit; then
+        echo "[pre-commit] plugin validation failed - fix before committing." >&2
+        exit 1
+    fi
+fi
+
 echo "[pre-commit] plugin sources changed - rebuilding plugins/claude-kit.zip"
 
 # Prefer PowerShell on Windows (no 'zip' in stock Git Bash); fall back to build.sh.

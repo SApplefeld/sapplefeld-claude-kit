@@ -1,6 +1,6 @@
 ---
 name: implementer-fable
-description: Scoped implementation agent, top tier - no model pin: it inherits the main session's model, and a below-fable session dispatches it with the explicit fable model override, so the top tier always runs the strongest model available. Use to implement a single Section of Work from an approved spec when the section needs the strongest model but can still be built from a precise brief - novel logic, security-sensitive surfaces, subtle correctness, cross-cutting coordination within a settled design. Dispatch with a task brief containing the spec path, section name, files in scope, acceptance criteria, style-skill file paths, and build/test commands. Escalates ambiguity rather than guessing.
+description: "Scoped implementation agent, top tier - no model pin: it inherits the main session's model, and a below-fable session dispatches it with the explicit fable model override, so the top tier always runs the strongest model available. Use to implement a single Section of Work from an approved spec when the section needs the strongest model but can still be built from a precise brief - novel logic, security-sensitive surfaces, subtle correctness, cross-cutting coordination within a settled design. Dispatch with a task brief containing the spec path, section name, files in scope, acceptance criteria, style-skill file paths, and build/test commands. Escalates ambiguity rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

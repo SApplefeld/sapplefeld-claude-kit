@@ -110,7 +110,10 @@ ProcessRequest() {
     }
 
     sessionId := Trim(lines[1], " `t`r")
-    transcriptPath := Trim(lines[2], " `t`r")
+    ; Normalize separators: SplitPath only splits on backslashes, and request
+    ; writers on this machine produce forward-slash paths from Unix-style
+    ; shells (observed live: a valid request rejected for exactly this).
+    transcriptPath := StrReplace(Trim(lines[2], " `t`r"), "/", "\")
     prompt := Trim(lines[3], " `t`r")
 
     if !RegExMatch(sessionId, "i)" UUID_PATTERN) {

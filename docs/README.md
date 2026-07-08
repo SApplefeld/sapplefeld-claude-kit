@@ -20,9 +20,9 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-- **`plans/claude-kit_resume-relay_spec_v1.md`** - unattended `/resume` for compacted sessions: an AutoHotkey watcher on the dedicated VM types the resume and continue prompt from a request file the compact-session skill writes at boundaries. Sections 1-2 built and dry-run green; awaiting the supervised live-fire (Section 3).
+None at present.
 
-Completed plans are in `archive/` (most recent: `claude-kit_compact-session_spec_v1.md`, deliberate low-loss session compaction and the headless continuation chain - a vendored Bun compaction engine in the `compact-session` skill plus the section-boundary compaction step in `executing-work`).
+Completed plans are in `archive/` (most recent: `claude-kit_resume-relay_spec_v1.md`, unattended `/resume` for compacted sessions via an AutoHotkey relay watcher on the dedicated VM, live-fire verified from inside a relay-resumed session; before it, `claude-kit_compact-session_spec_v1.md`, the low-loss compaction engine and continuation chain it completes).
 
 ## Archive
 

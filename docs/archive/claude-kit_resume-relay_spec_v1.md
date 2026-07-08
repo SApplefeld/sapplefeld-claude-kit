@@ -1,6 +1,6 @@
 # Resume Relay: Unattended /resume for Compacted Sessions
 
-Status: In Progress
+Status: Complete
 Commit Model: Review-Only
 Fable Spend: session-led (small effort, built in the Fable session that designed it)
 Created: 2026-07-08
@@ -75,4 +75,19 @@ Decisions / Surprises:
 - Dry-run gate re-run green after the changes: unconfigured target refused 3x to `failed\`; configured target processed a valid request through the dry-run path.
 Review Findings: none this round (environment findings, not code review).
 Next: Section 3 live fire on the CLI sandbox terminal; then finishing pass.
+Commit Model: Review-Only
+
+### Chapter 4 - 2026-07-08
+Completed: Section 3, live fire on the CLI sandbox terminal; effort Complete
+Implemented By: main session, live with Scott (who armed the watcher, deployed the patched copy, and drove the firing between turns)
+Decisions / Surprises:
+- Full unattended cycle observed end to end and self-evidencing: the relay validated the request, focused the Windows Terminal, typed `/resume 2f5494be-...`, the CLI switched into that session, the typed continue prompt landed there, and the model replied exactly RELAYED. The close-out Chapters of this very plan are being written inside the relay-resumed session; transcript timestamps confirm the resumed transcript is the one growing.
+- In-session `/resume <id>` in the CLI switches sessions cleanly, so the relay works against a terminal showing an active session, which is the exact production shape (a run ends its turn after compacting, then the relay moves the terminal into the compacted successor).
+- Default timings needed no tuning: MENU_SETTLE_MS 800 and SESSION_LOAD_MS 6000 carried the sequence (log span resuming-to-typed was 8 seconds), and Enter after the typed `/resume <uuid>` executed the command directly with no slash-menu interference.
+- The fail-safes went 3 for 3 across the effort's live attempts, each against a real malformed request (an unexpanded shell variable twice, a forward-slash path once), each refused with logged attempts and zero keystrokes. The content-keyed attempt counter also proved out live: a malformed request was overwritten mid-failure-cycle and the corrected request succeeded on its next poll with a fresh count.
+- The forward-slash rejection led to a tolerance patch (separator normalization before the filename check), deployed and validated in the successful firing, whose request carried a forward-slash path.
+- Finishing-pass judgment call: the Section 1-2 adversarial review already scrutinized this changeset's security surface (wrong-window typing, request-content injection, trust boundary), so no separate security pass was manufactured for ~250 lines of reviewed script; recorded here as the deliberate call.
+- Resting state: the relay is ARMED on the sandbox VM (watcher running, Startup shortcut installed, window.txt targeting `ahk_exe WindowsTerminal.exe`). Known sharp edge, accepted for a dedicated VM: that expression matches any Windows Terminal window, so multiple open terminals would make the target ambiguous; pinning by title is the knob if that day comes.
+Review Findings: Sections 1-2 review previously adjudicated (Chapter 2 update); no new findings this round.
+Next: none; archived via curating-docs in this close-out. Delivered in this changeset, staged for review under Review-Only.
 Commit Model: Review-Only

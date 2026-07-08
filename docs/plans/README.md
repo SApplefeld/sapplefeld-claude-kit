@@ -11,4 +11,6 @@ This folder holds active plans only: specs that are open or in progress. A plan 
 
 ## Current
 
-None at present. Completed plans are in `../archive/` (most recent: `claude-kit_compact-session_spec_v1.md`).
+- `claude-kit_resume-relay_spec_v1.md` - unattended `/resume` via an AutoHotkey relay watcher; live-fire section open.
+
+Completed plans are in `../archive/` (most recent: `claude-kit_compact-session_spec_v1.md`).

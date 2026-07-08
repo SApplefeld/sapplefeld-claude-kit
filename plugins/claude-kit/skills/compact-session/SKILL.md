@@ -50,6 +50,7 @@ The plan doc remains the recovery spine in both modes: a compacted session plus 
 - Workers inherit my existing permission settings. Never pass `bypassPermissions`. A denied tool in a worker fails visibly; surface it rather than widening permissions.
 - Hooks stay ON for workers (they are the kit's quality machinery) and OFF for the summarizer (a Stop hook can extend the summarizer turn past its XML output).
 - Do not attach interactively (or suggest I attach) to a worker while a headless turn is writing to it; hand me the `/resume` line only when its current turn is done.
+- **Billing contingency.** Anthropic announced, then paused (June 2026), moving all `claude -p` usage to Agent SDK metering: a monthly credit by plan tier, then API rates, while interactive sessions stay on subscription limits (support.claude.com article 15036540). Billing attaches to the invocation, so when the switch lands, every chain-mode worker turn (and any subagents it spawns) is metered end to end; the summarizer spawn is metered in both modes, which is accepted as noise. The tell that the switch happened: `claude -p` usage appearing as Agent SDK credit in the Claude console rather than plan usage. From that point, treat chain mode as deliberate metered spend for unattended stretches only, prefer interactive mode with compaction at boundaries where I am present, and fall back to native auto-compaction for overnight interactive work rather than stalling a run on a `/resume`.
 
 ## Retrieving omitted content
 

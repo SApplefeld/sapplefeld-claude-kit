@@ -75,6 +75,8 @@ For each Section of Work, in order:
    - **Branch-and-PR:** commit the section's code together with its Chapter (the plan doc update from step 6) to the feature branch, so the record rides with the change into the eventual merge. The PR happens in finishing-work. Pushing here is not merging: nothing is final until that merge.
    - **Commit-and-Push:** commit the section and push to origin. (If concurrency put you on a worktree branch, the merge to main and teardown happen in finishing-work, not here.)
 
+8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. In chain mode, compact the worker session now and resume the compacted successor for the next section. In an interactive session this step is a no-op mid-run: compacting the live session needs my typed `/resume`, and halting for it violates the completion contract, so offer the compaction line only when the turn genuinely ends (a true-blocker stop, effort close, or my request).
+
 Then continue to the next section. Do not stop here.
 
 ## Delegating to subagents

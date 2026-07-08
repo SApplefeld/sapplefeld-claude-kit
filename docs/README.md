@@ -20,7 +20,9 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-None active at present. Completed plans are in `archive/` (most recent: `claude-kit_fable-metering_spec_v1.md`, the two-mode session doctrine for per-call Fable billing - Fable-led design, Opus-led execution with default Fable oversight).
+None at present.
+
+Completed plans are in `archive/` (most recent: `claude-kit_compact-session_spec_v1.md`, deliberate low-loss session compaction and the headless continuation chain - a vendored Bun compaction engine in the `compact-session` skill plus the section-boundary compaction step in `executing-work`).
 
 ## Archive
 

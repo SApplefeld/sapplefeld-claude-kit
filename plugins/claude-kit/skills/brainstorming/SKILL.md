@@ -32,7 +32,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
    - **Branch-and-PR:** work happens on a feature branch and finishing-work opens a pull request. The default for shared work or client repos (GitHub or Azure DevOps).
    - **Commit-and-Push:** "land it on main and leave no mess." Commit and push to origin as sections complete; if concurrency forced a worktree branch, finishing-work merges to main and tears it down. For personal or greenfield repos where I have said main is fine.
 
-   Record the **Run Mode** in the same header pass. `interactive` (the default) is a session I start and can watch. `chain` is the unattended posture: executing-work stands up the compact-session skill's chain mode - a thin supervisor plus a headless worker session that runs the section loop and is compacted at section boundaries - so the run outlives its context window with no `/resume` from me. Chain is only for a spec I have explicitly cleared to run unattended, and the compact-session skill's billing and advisor rules for headless spawns apply.
+   Record the **Run Mode** in the same header pass. `chain` (the default) is the unattended posture: executing-work stands up the compact-session skill's chain mode - a thin supervisor plus a headless worker session that runs the section loop and is compacted at section boundaries - so the run outlives its context window with no `/resume` from me. `interactive` is the recorded override for a run I intend to watch and drive from my own session; record it when I say so. The compact-session skill's billing and advisor rules for headless spawns apply to every chain.
 
 11. **Assign a model tier to each Section of Work.** Implementation cost scales with the model; quality is protected by spec precision plus strong-model review, not by using the strongest model for every keystroke. Tier picks the model; briefability picks the locus (dispatch versus main thread). Assign per section:
    - **haiku:** pure transcription: an exact sibling to clone with the section's substitutions, single-responsibility scope, and a self-surfacing gate (the build or an existing test fails loudly if the output is wrong). Renames and sweeps, config or DTO additions mirroring a named sibling, test data, pin-test count updates. The tier is only assignable when the section text can name both the sibling and the gate; a section that leaves either to be found, or contains any judgment call, is `sonnet`.
@@ -52,7 +52,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 
 Status: In Progress
 Commit Model: Review-Only | Branch-and-PR | Commit-and-Push
-Run Mode: interactive | chain
+Run Mode: chain | interactive
 Fable Spend: <expected Fable surface, e.g. "S2, finishing reviews" or "advisor (session), S2"> | n/a (Fable-led session) | none (cost hold)
 Created: YYYY-MM-DD
 

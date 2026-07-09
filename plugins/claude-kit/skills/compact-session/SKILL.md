@@ -9,9 +9,10 @@ Native compaction flattens history into one lossy blob at a moment the harness p
 
 ## Prerequisites
 
-- **Bun** must be on PATH (`bun --version`). If it is missing, say so and continue uncompacted; do not install anything unprompted. (On this machine winget puts it at `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe`; a fresh shell may need that appended to PATH.)
+- **Bun** must be on PATH (`bun --version`). If it is missing, say so and continue uncompacted; do not install anything unprompted. (Windows/winget installs vary: some machines get a `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` shim, others only the payload under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Oven-sh.Bun*\...\bun.exe`. `doctor.ps1` at the kit repo root probes both and `-Fix` wires the user PATH durably.)
 - **`claude` must resolve to a native executable**, not an npm `.cmd` shim: the engine passes transcript-derived text as arguments, and a `.cmd` shim would route them through cmd.exe's parser (an injection surface for hostile pasted content).
 - The engine lives beside this skill in `engine/`. Reference it via this skill's base directory.
+- After installing the kit on a new Windows machine, `doctor.ps1` (or `doctor.cmd` while scripts are still policy-blocked) at the kit repo root verifies all of the above in one pass.
 
 ## When to compact
 
@@ -29,8 +30,9 @@ bun <skill-base-dir>/engine/compact-cli.ts --transcript <path> [--keep N] [--sum
 
 - `--keep N` preserves the most recent N turns unmodified and defaults to 1, which protects the in-flight turn. Pass a larger N to keep more of the freshest working context, or an explicit `--keep 0` to summarize everything (only for a cleanly ended session).
 - Run the command with cwd inside the repo the transcript belongs to; the CLI enforces this (summarizer session resolution is project-scoped, and a wrong cwd would otherwise risk summarizing the wrong conversation).
-- The summarizer defaults to `claude-sonnet-5` with hooks disabled, tools denied, and a 240s timeout. Do not pass Haiku as the summarizer: at real transcript scale it reproducibly breaks the XML output contract (three distinct failures in three attempts on a ~380-row transcript during QA), and even when it succeeds its summaries soften framing. Failures are contained (the source is untouched), but they waste the run.
+- The summarizer defaults to `claude-sonnet-5` with hooks disabled, tools denied, a 240s timeout, and `ANTHROPIC_API_KEY` scrubbed from its environment (an inherited key disables the claude.ai login auth and fails or API-bills the run; scrubbing keeps it on the subscription; a machine whose only auth is an API key cannot summarize). Do not pass Haiku as the summarizer: at real transcript scale it reproducibly breaks the XML output contract (three distinct failures in three attempts on a ~380-row transcript during QA), and even when it succeeds its summaries soften framing. Failures are contained (the source is untouched), but they waste the run.
 - Success prints JSON with `destinationSessionId` and the `/resume` command. Failure or nothing-to-compact exits nonzero with the reason on stderr, and the source session is untouched; report it and continue uncompacted.
+- **The context display lags one call after resume.** The harness estimates `/context` from the transcript's latest billed-usage row rather than re-tokenizing, and the engine copies rows verbatim, usage numbers included, so a freshly resumed compacted session shows the source session's token count until the first new API call writes a real usage row. That stale first reading is cosmetic, not a failed compaction; judge success by the engine's JSON result, and expect the display to correct itself on the next turn.
 
 ## The two modes
 
@@ -48,6 +50,7 @@ The plan doc remains the recovery spine in both modes: a compacted session plus 
 
 ## Hard rules for headless spawns
 
+- If the session environment carries `ANTHROPIC_API_KEY`, spawn workers with it scrubbed (Bash: `env -u ANTHROPIC_API_KEY claude -p ...`); an inherited key flips the worker to API-key auth (or fails it when the key is not the intended auth), off subscription billing. The engine already scrubs its own summarizer spawn.
 - **Every** headless `claude` spawn pins `--model` explicitly. An unpinned spawn inherits the harness default, which can be an API-billed tier; this was observed, not theorized. Workers get the tier the spec assigns the section; the summarizer default is already pinned.
 - Workers inherit my existing permission settings. Never pass `bypassPermissions`. A denied tool in a worker fails visibly; surface it rather than widening permissions.
 - **Workers inherit the advisor.** An `advisorModel` in settings (which is where an interactive `/advisor` saves it) attaches the advisor tool to headless spawns too - verified live on v2.1.205: the advisor is fully active in `claude -p`, and each consultation re-reads the transcript at the advisor's rates, uncached (one consultation roughly quadrupled a small turn's cost). That ride-along is the intended default: workers get the same quick Fable check at decision points the session would. The override is `Fable Spend: none (cost hold)` in the spec header - before starting a chain under one, verify the advisor is actually off for the workers, because the setting persists from interactive use and will otherwise re-arm them silently.

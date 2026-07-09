@@ -45,6 +45,9 @@ claude-kit/                          (repo = the marketplace)
   kaizen/                            Kit self-improvement inbox (per-machine notes-*.md + briefs/)
   settings/settings.recommended.json Permission rules + acceptEdits starting point
   setup.ps1 / setup.sh               Dev-clone setup: kaizen signpost (~/.claude/claude-kit.local.json) + git hook wiring
+  setup.cmd / doctor.cmd             Execution-policy-proof wrappers (a fresh Windows box blocks .ps1 by default)
+  doctor.ps1                         Post-install health check: policy, bun, engine smoke run, claude CLI shape,
+                                     ANTHROPIC_API_KEY hazard, doctrine import, signpost, hooks, relay state; -Fix repairs
   build.ps1 / build.sh               Package plugins/claude-kit -> plugins/claude-kit.zip (claude-kit/ at archive root) for manual upload
   .githooks/pre-commit               Rebuilds the zip on commit when plugin sources change (wired via core.hooksPath)
 ```
@@ -69,7 +72,7 @@ The catalog at `.claude-plugin/marketplace.json` points to the plugin with `"sou
    Default scope is user, so every project picks it up. If the marketplace was added before a structure fix, refresh it first: `/plugin marketplace update applefeld` (or remove and re-add).
 
 4. Wire the dev clone (kaizen signpost + git hooks; this no longer installs a user CLAUDE.md):
-   - Windows: `.\setup.ps1`
+   - Windows: `.\setup.cmd` (wraps `setup.ps1`; use the wrapper on a fresh box, where the default execution policy blocks `.ps1` files)
    - WSL/macOS/Linux: `./setup.sh`
 
 5. Merge `settings/settings.recommended.json` into `~/.claude/settings.json` (review the allow-list first - it includes `git push` for the Commit-and-Push model; remove it if you want pushes gated).
@@ -77,6 +80,8 @@ The catalog at `.claude-plugin/marketplace.json` points to the plugin with `"sou
 6. Operating doctrine (single-sourced as the `operating-instructions` skill, which rides plugin auto-update):
    - Claude Code (once per machine): add `@claude-kit-doctrine.md` to `~/.claude/CLAUDE.md`. The `doctrine-refresh` hook rewrites that imported file from the installed skill each session, so the doctrine loads always-on and stays current; the hook offers to add the line if it is missing.
    - Cowork / Chat (once per account): add to your account personal preferences: `Before any non-trivial task, consult the operating-instructions skill.` Plugins cannot write account preferences and Cowork/Chat do not read `~/.claude`, so this one line is the only manual step there.
+
+7. Verify the machine (Windows): `.\doctor.cmd` runs the post-install health check in one pass - execution policy, bun resolution (PATH, WinGet Links shim, or WinGet Packages payload), a real smoke run of the compact-session engine, the `claude` CLI shape, the `ANTHROPIC_API_KEY` hazard, the doctrine import, the kaizen signpost, git hooks, and the optional resume relay's state. `.\doctor.cmd -Fix` also applies the safe durable repairs (RemoteSigned policy when scripts are blocked, bun onto the user PATH, setup.ps1 when the signpost or hooks are missing). Arming the resume relay stays a deliberate separate step (`plugins/claude-kit/skills/compact-session/relay/arm-resume-relay.ps1`); the doctor reports its state but never arms it.
 
 Updating. Commit and push here first. The plugin's version is the git commit SHA (`plugin.json` omits `version`), so every commit is a new version with no version bumping. How you pull that update differs by surface, and the surfaces are SEPARATE installs:
 

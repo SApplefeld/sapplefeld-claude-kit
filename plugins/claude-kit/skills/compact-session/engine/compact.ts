@@ -121,6 +121,16 @@ async function generateSummaries(
   const analysis = await copyTranscriptToNewSession(transcriptPath);
   const prompt = buildCompactionPrompt(turns, nextTurn);
 
+  // The spawn's environment drops ANTHROPIC_API_KEY: the CLI treats an
+  // inherited key as its auth source, which disables the claude.ai login and
+  // fails (or API-bills) the summarizer. Scrubbing it makes the summarizer
+  // authenticate like an interactive session and bill to the subscription.
+  // Consequence: a machine whose only auth is an API key cannot summarize.
+  const summarizerEnv: Record<string, string | undefined> = {
+    ...process.env,
+  };
+  delete summarizerEnv.ANTHROPIC_API_KEY;
+
   try {
     // Resume by session ID: the CLI's --resume accepts a session ID or search
     // term, not a file path. The analysis copy sits in the active project
@@ -141,6 +151,7 @@ async function generateSummaries(
         prompt,
       ],
       {
+        env: summarizerEnv,
         stdout: "pipe",
         stderr: "pipe",
         timeout: SUMMARIZER_TIMEOUT_MS,

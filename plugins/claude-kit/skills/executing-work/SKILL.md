@@ -47,6 +47,8 @@ When you stop, lead the message with `BLOCKED: <exactly what you need from me>` 
 
 Read the plan doc in full, **including all Chapters**. The Chapters are the state: they record what is done, what surprised us, and the commit model in effect. After a compaction, this re-read is mandatory before touching any file.
 
+**Run Mode check.** A `Run Mode: chain` header is the entry point for the compact-session skill's chain mode: stand up the supervisor/worker pair per that skill before the section loop, and the **worker runs this skill** - it orchestrates, dispatches implementers, and writes Chapters exactly as an interactive session would; it does not absorb implementation inline just because it is headless. A missing or `interactive` Run Mode means the normal in-session loop below. A spec that predates the header is `interactive`; never infer `chain` from the work looking long.
+
 **Branch check.** Nothing is committed to main or master without my explicit permission. Commit-and-Push is that permission for its own repos; in a shared repo without it, treat the work as Branch-and-PR and note the substitution in the Chapter. If concurrency put you in a worktree on a feature branch, that is your workspace; integration and any teardown happen in finishing-work. Expect sibling sessions to touch the same repo, so own a disjoint set of files and never stage another session's work.
 
 ## Section loop
@@ -75,9 +77,15 @@ For each Section of Work, in order:
    - **Branch-and-PR:** commit the section's code together with its Chapter (the plan doc update from step 6) to the feature branch, so the record rides with the change into the eventual merge. The PR happens in finishing-work. Pushing here is not merging: nothing is final until that merge.
    - **Commit-and-Push:** commit the section and push to origin. (If concurrency put you on a worktree branch, the merge to main and teardown happen in finishing-work, not here.)
 
-8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. In chain mode, compact the worker session now and resume the compacted successor for the next section. In an interactive session this step is a no-op mid-run: compacting the live session needs my typed `/resume`, and halting for it violates the completion contract, so offer the compaction line only when the turn genuinely ends (a true-blocker stop, effort close, or my request). Exception: with the resume relay armed (the compact-session skill's relay mode), the workstation performs the resume itself, so a boundary compaction plus a relay request IS a valid way to end the turn mid-plan; the relayed continue prompt starts the next section in the compacted session, and the contract is carried across the boundary by the plan doc, not broken.
+8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. In chain mode (`Run Mode: chain` in the spec header), compact the worker session now and resume the compacted successor for the next section. In an interactive session this step is a no-op mid-run: compacting the live session needs my typed `/resume`, and halting for it violates the completion contract, so offer the compaction line only when the turn genuinely ends (a true-blocker stop, effort close, or my request). Exception: with the resume relay armed (the compact-session skill's relay mode), the workstation performs the resume itself, so a boundary compaction plus a relay request IS a valid way to end the turn mid-plan; the relayed continue prompt starts the next section in the compacted session, and the contract is carried across the boundary by the plan doc, not broken.
 
 Then continue to the next section. Do not stop here.
+
+## The advisor
+
+`/advisor <model>` gives the session an in-context consultation channel to a stronger model at decision points. It composes with the tier system rather than replacing it: the advisor shares the session's conversation (and its blind spots), so it is for orchestration judgment - adjudicating a DONE_WITH_CONCERNS, weighing an escalation, a recurring error - never a substitute for the fresh-context reviewers, whose value is exactly that they never saw the session's reasoning. The recommended posture for an execution-heavy session on a lower model is the session model plus a `fable` advisor, with the spend named in the spec's `Fable Spend` header.
+
+Three properties to plan around (verified on v2.1.205): the advisor is **session-wide and inherited by every dispatched subagent** - there is no per-agent override; a subagent whose pinned model outranks the advisor **silently drops it** (no error); and the setting **persists in settings and reaches headless spawns**, so an interactive `/advisor fable` arms every later chain-mode worker with Fable spend unless deliberately turned off. Each consultation re-reads the transcript at the advisor's rates, uncached. Under `Fable Spend: none (cost hold)`, run with the advisor off.
 
 ## Delegating to subagents
 
@@ -93,13 +101,14 @@ Append to the `## Chapters` section of the plan doc:
 ### Chapter N - YYYY-MM-DD
 Completed: <section name>
 Implemented By: <main session | implementer-sonnet | implementer-opus | implementer-fable, plus any escalation>
+Metrics: <review rounds; NEEDS_CONTEXT count; escalations; advisor <model | off>>
 Decisions / Surprises: <anything resolved or discovered; "none" is acceptable>
 Review Findings: <Critical/Major addressed; Majors justified; Minors noted>
 Next: <next section, or "finishing-work">
 Commit Model: <Review-Only | Branch-and-PR | Commit-and-Push>
 ```
 
-Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader.
+Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader. The Metrics line doubles as the data feed for the kit's open experiments (the tier-band and advisor questions in `docs/backlog.md`), so record it even when every count is zero.
 
 ## When all sections are complete
 

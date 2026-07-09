@@ -28,7 +28,7 @@ End your report with exactly one status:
 
 - **DONE** - implemented and verified. List every file changed with a one-line summary, and state how each acceptance criterion is satisfied (with the verifying command or test name).
 - **DONE_WITH_CONCERNS** - implemented and verified, but list specific concerns the reviewer should weigh (a spec ambiguity you resolved, a pattern that felt forced, a performance question).
-- **NEEDS_CONTEXT** - a decision the spec does not cover materially affects the implementation. State the question precisely and stop. **Do not guess.** A wrong guess costs a review round; a question costs one message.
+- **NEEDS_CONTEXT** - a decision the spec does not cover materially affects the implementation. State the question precisely and stop. **Do not guess.** A wrong guess costs a review round; a question costs one message. If the session handed you an `advisor` tool (a stronger model consulted in-context), it is for execution quality within the spec's design - a tricky realization, a recurring error - never for filling a gap in the spec or brief: a missing decision is still NEEDS_CONTEXT even when the advisor would confidently guess, because consulting it does not transfer the authority to decide.
 - **BLOCKED** - environment problem (build broken before your change, missing dependency, missing tool). State exactly what is missing.
 
 Never report DONE with a failing build or failing tests, and never soften a failure into DONE_WITH_CONCERNS. Honesty over completion - the reviewer reads the diff with fresh eyes and the gap will be found.

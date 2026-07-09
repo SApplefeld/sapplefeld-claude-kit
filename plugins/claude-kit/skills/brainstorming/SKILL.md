@@ -32,6 +32,8 @@ Explore the problem space WITH me in conversation, then capture the agreement as
    - **Branch-and-PR:** work happens on a feature branch and finishing-work opens a pull request. The default for shared work or client repos (GitHub or Azure DevOps).
    - **Commit-and-Push:** "land it on main and leave no mess." Commit and push to origin as sections complete; if concurrency forced a worktree branch, finishing-work merges to main and tears it down. For personal or greenfield repos where I have said main is fine.
 
+   Record the **Run Mode** in the same header pass. `interactive` (the default) is a session I start and can watch. `chain` is the unattended posture: executing-work stands up the compact-session skill's chain mode - a thin supervisor plus a headless worker session that runs the section loop and is compacted at section boundaries - so the run outlives its context window with no `/resume` from me. Chain is only for a spec I have explicitly cleared to run unattended, and the compact-session skill's billing and advisor rules for headless spawns apply.
+
 11. **Assign a model tier to each Section of Work.** Implementation cost scales with the model; quality is protected by spec precision plus strong-model review, not by using the strongest model for every keystroke. Tier picks the model; briefability picks the locus (dispatch versus main thread). Assign per section:
    - **haiku:** pure transcription: an exact sibling to clone with the section's substitutions, single-responsibility scope, and a self-surfacing gate (the build or an existing test fails loudly if the output is wrong). Renames and sweeps, config or DTO additions mirroring a named sibling, test data, pin-test count updates. The tier is only assignable when the section text can name both the sibling and the gate; a section that leaves either to be found, or contains any judgment call, is `sonnet`.
    - **sonnet:** mechanical or well-bounded: a clear contract, an existing sibling pattern to mimic, single-responsibility scope, low integration risk. New procs/services following an established shape, mappings, DTOs, tests, CRUD surfaces.
@@ -41,7 +43,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 
    A section only earns a cheap tier if its spec is precise enough that an implementer with no conversation context can build it from the section text alone; the same test one level up separates fable from fable (inline). Write to that standard or assign a higher tier. Tier assignments are planning-time recommendations; executing-work may upgrade a tier after a failed attempt, never downgrade mid-effort.
 
-   A `fable` tier is also spend authorization: Fable bills per call to API credits, so name the expected Fable surface (fable-tier sections; the finishing reviews run at Fable by default) in the spec's `Fable Spend` header line at approval time. A `none (cost hold)` entry keeps the whole effort at the session model, with any tier downgrade flagged in the Chapter rather than applied silently.
+   A `fable` tier is also spend authorization: Fable bills per call to API credits, so name the expected Fable surface (fable-tier sections; the finishing reviews run at Fable by default) in the spec's `Fable Spend` header line at approval time. A `none (cost hold)` entry keeps the whole effort at the session model, with any tier downgrade flagged in the Chapter rather than applied silently. A Fable **advisor** (`/advisor fable` on a lower-model session) is Fable spend too - each consultation re-reads the transcript at Fable rates - so when the session runs with one, name it in the same header line (e.g. "advisor (session), S2"); `none (cost hold)` means the advisor is off as well.
 
 ## Spec format
 
@@ -50,7 +52,8 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 
 Status: In Progress
 Commit Model: Review-Only | Branch-and-PR | Commit-and-Push
-Fable Spend: <expected Fable surface, e.g. "S2, finishing reviews"> | n/a (Fable-led session) | none (cost hold)
+Run Mode: interactive | chain
+Fable Spend: <expected Fable surface, e.g. "S2, finishing reviews" or "advisor (session), S2"> | n/a (Fable-led session) | none (cost hold)
 Created: YYYY-MM-DD
 
 ## Goal

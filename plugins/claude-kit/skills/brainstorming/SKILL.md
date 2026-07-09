@@ -43,7 +43,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 
    A section only earns a cheap tier if its spec is precise enough that an implementer with no conversation context can build it from the section text alone; the same test one level up separates fable from fable (inline). Write to that standard or assign a higher tier. Tier assignments are planning-time recommendations; executing-work may upgrade a tier after a failed attempt, never downgrade mid-effort.
 
-   A `fable` tier is also spend authorization: Fable bills per call to API credits, so name the expected Fable surface (fable-tier sections; the finishing reviews run at Fable by default) in the spec's `Fable Spend` header line at approval time. A `none (cost hold)` entry keeps the whole effort at the session model, with any tier downgrade flagged in the Chapter rather than applied silently. A Fable **advisor** (`/advisor fable` on a lower-model session) is Fable spend too - each consultation re-reads the transcript at Fable rates - so when the session runs with one, name it in the same header line (e.g. "advisor (session), S2"); `none (cost hold)` means the advisor is off as well.
+   A `fable` tier is also spend authorization: Fable bills per call to API credits, so name the expected Fable surface (fable-tier sections; the finishing reviews run at Fable by default) in the spec's `Fable Spend` header line at approval time. A `none (cost hold)` entry keeps the whole effort at the session model, with any tier downgrade flagged in the Chapter rather than applied silently. A Fable **advisor** is the standing default on every below-fable session (set once with `/advisor fable`, it persists in settings and reaches every dispatched implementer and headless worker), so the header does not name it - it is presumed, with each consultation re-reading the transcript at Fable rates. `none (cost hold)` is the explicit override: it keeps the effort at the session model AND turns the advisor off for the run.
 
 ## Spec format
 
@@ -53,7 +53,7 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 Status: In Progress
 Commit Model: Review-Only | Branch-and-PR | Commit-and-Push
 Run Mode: chain | interactive
-Fable Spend: <expected Fable surface, e.g. "S2, finishing reviews" or "advisor (session), S2"> | n/a (Fable-led session) | none (cost hold)
+Fable Spend: <expected Fable surface beyond the default advisor, e.g. "S2, finishing reviews"> | n/a (Fable-led session) | none (cost hold)
 Created: YYYY-MM-DD
 
 ## Goal

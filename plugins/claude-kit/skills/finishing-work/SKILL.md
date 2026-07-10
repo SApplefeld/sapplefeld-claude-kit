@@ -15,7 +15,7 @@ In a session running below fable, dispatch the security review (step 2) and the 
 
 1. **QA verification.** Dispatch the `qa-verifier` agent with the spec path: full build, full test suite, and every acceptance criterion checked with evidence. Any FAIL: fix and re-run before proceeding. Do not rationalize a failing criterion as "close enough".
 
-2. **Security review.** Dispatch the `security-reviewer` agent over the whole changeset (not just the last section). Critical findings block completion. Major findings: fix or present to me with the tradeoff.
+2. **Security review.** Dispatch the `security-reviewer` agent over the whole changeset (not just the last section). Critical findings block completion. Major findings: fix or present to me with the tradeoff. One waiver exists, on a file-type predicate, not a judgment call: when every file in the changeset is prose (markdown or plain text - no code, script, hook, config, query, or schema file anywhere in it), the dispatch may be skipped, with the skip and the changed-file evidence recorded in the final Chapter. A single non-prose file, even a one-line edit, voids the waiver: run the review, scoped to the non-prose files when the rest is prose.
 
 3. **Final adversarial review.** Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec. Per-section reviews catch local issues; this pass catches cross-section cohesion problems, leftover debris (dead code, stale TODOs, orphaned files), and spec items that fell through the cracks.
 

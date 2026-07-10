@@ -5,7 +5,7 @@ description: Convene a read-only, multi-lens design council to pressure-test com
 
 # Design Council
 
-Structured, evidence-grounded convergence for a design fork. Several lenses take independent positions, then argue them through a neutral facilitator until each disagreement is either resolved with evidence or handed to me as a clean choice. The point is to add design-stage adversariality - the kit reviews implementations from four angles and approaches from one - without replacing the conversation with me or my decision.
+Structured, evidence-grounded convergence for a design fork. Several lenses take independent positions, then argue them through a neutral facilitator until each disagreement is either resolved with evidence or handed to me as a clean choice. The point is to add design-stage adversariality - the kit reviews implementations from five angles and approaches from one - without replacing the conversation with me or my decision.
 
 The failure mode this is built against is **false convergence**: models are agreeable by default and will "agree" by capitulation if you let them. Every rule below exists to keep genuine disagreement visible until evidence - not politeness - settles it.
 

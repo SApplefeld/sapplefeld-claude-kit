@@ -11,4 +11,4 @@ This folder holds active plans only: specs that are open or in progress. A plan 
 
 ## Current
 
-None at present. Completed plans are in `../archive/` (most recent: `claude-kit_resume-relay_spec_v1.md`).
+None at present. Completed plans are in `../archive/` (most recent: `claude-kit_review-tension_spec_v1.md`).

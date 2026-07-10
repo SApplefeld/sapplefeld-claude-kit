@@ -53,7 +53,7 @@ function findCompletedUnarchived(cwd) {
 function findDocsScratch(cwd) {
     const root = path.join(cwd, 'docs');
     const SCRATCH_DIR = /(^|[\\/])(reviews|_impl_reports)([\\/]|$)/i;
-    const SCRATCH_NAME = /(_adversarial|_security|_qa|_rev[_-])/i;
+    const SCRATCH_NAME = /(_adversarial|_blind|_security|_qa|_rev[_-])/i;
     const hits = [];
     let budget = 2000;
     function walk(dir, depth) {

@@ -22,7 +22,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 None at present.
 
-Completed plans are in `archive/` (most recent: `claude-kit_resume-relay_spec_v1.md`, unattended `/resume` for compacted sessions via an AutoHotkey relay watcher on the dedicated VM, live-fire verified from inside a relay-resumed session; before it, `claude-kit_compact-session_spec_v1.md`, the low-loss compaction engine and continuation chain it completes).
+Completed plans are in `archive/` (most recent: `claude-kit_review-tension_spec_v1.md`, the blind diff-only reviewer lens paired with the spec-anchored adversarial-reviewer, recall-over-precision reviewer incentives, the workaround-comment rejection test, and the within-effort recurrence rule, adopted from the Bun-in-Rust port methodology; before it, `claude-kit_resume-relay_spec_v1.md`, unattended `/resume` for compacted sessions via an AutoHotkey relay watcher on the dedicated VM).
 
 ## Archive
 

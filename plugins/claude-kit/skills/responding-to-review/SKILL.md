@@ -1,6 +1,6 @@
 ---
 name: responding-to-review
-description: "Use when a review agent returns findings, when I give feedback or a correction, or before implementing a suggestion from either, especially when it seems wrong, unclear, or larger than the problem. Triggers: adversarial/security/qa/docs review output to adjudicate, a 'you're right' about to be typed, pushback you are tempted to swallow."
+description: "Use when a review agent returns findings, when I give feedback or a correction, or before implementing a suggestion from either, especially when it seems wrong, unclear, or larger than the problem. Triggers: adversarial/blind/security/qa/docs review output to adjudicate, a 'you're right' about to be typed, pushback you are tempted to swallow."
 ---
 
 # Responding to Review
@@ -9,7 +9,7 @@ A review finding is an input to your judgment, not an order to execute. The kit'
 
 ## The two sources
 
-**Review-agent findings** (adversarial-reviewer, security-reviewer, qa-verifier) are fallible. A finding can be wrong, out of scope, or built on context the agent lacked. Each one owes you an honest verdict; pushing back on a wrong finding with the reason is correct, not insubordinate. Adjudicate every finding. Do not rubber-stamp, and do not reflexively defer. (docs-curator is the exception: its Drift Report is not a severity-rated finding to adjudicate but a signal you route to me per finishing-work.)
+**Review-agent findings** (adversarial-reviewer, blind-reviewer, security-reviewer, qa-verifier) are fallible. A finding can be wrong, out of scope, or built on context the agent lacked. Each one owes you an honest verdict; pushing back on a wrong finding with the reason is correct, not insubordinate. Adjudicate every finding. Do not rubber-stamp, and do not reflexively defer. (docs-curator is the exception: its Drift Report is not a severity-rated finding to adjudicate but a signal you route to me per finishing-work.)
 
 **My feedback** is trusted: implement once you understand it. Still verify scope when it is unclear, and still say so when you see a problem with it. Silence reads as agreement, and I want the disagreement when you have one.
 

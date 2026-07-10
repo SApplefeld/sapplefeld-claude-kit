@@ -8,8 +8,8 @@
 #   .\doctor.ps1 -Fix     Also applies the safe durable repairs: execution
 #                         policy to RemoteSigned when scripts are blocked, bun
 #                         appended to the user PATH when installed but
-#                         unresolvable, setup.ps1 when the signpost or git
-#                         hooks are missing.
+#                         unresolvable, the kaizen signpost and git hook
+#                         wiring when either is missing (first-run setup).
 #
 # If scripts are blocked entirely, use the wrapper:  doctor.cmd [-Fix]
 # Exit code: 0 when nothing FAILs (warnings allowed), 1 otherwise.
@@ -210,7 +210,10 @@ else {
     Report "WARN" "Doctrine import" @("Add this line to $claudeMd so the doctrine loads always-on:  @claude-kit-doctrine.md")
 }
 
-# --- Kaizen signpost + git hooks (setup.ps1's job; -Fix runs it).
+# --- Kaizen signpost + git hooks (first-run setup, applied inline by -Fix).
+# --- The signpost tells kaizen capture where this machine's kit clone lives;
+# --- the hooksPath wiring activates the pre-commit zip rebuild. On POSIX,
+# --- setup.sh is the counterpart until a doctor.sh exists.
 $signpost = Join-Path $claudeDir "claude-kit.local.json"
 $hooksPath = $null
 if (Get-Command git -ErrorAction SilentlyContinue) {
@@ -221,9 +224,16 @@ if (-not (Test-Path $signpost)) { $setupGaps += "kaizen signpost missing ($signp
 if ($hooksPath -ne ".githooks") { $setupGaps += "core.hooksPath is '$hooksPath', not '.githooks' (pre-commit zip rebuild inactive)" }
 $setupNeeded = $setupGaps.Count -gt 0
 if ($setupNeeded -and $Fix) {
-    & (Join-Path $kitRoot "setup.ps1")
+    if (-not (Test-Path $claudeDir)) {
+        New-Item -ItemType Directory -Path $claudeDir | Out-Null
+    }
+    $signpostData = [ordered]@{ kitRepoPath = $kitRoot; machine = $env:COMPUTERNAME }
+    [System.IO.File]::WriteAllText($signpost, ($signpostData | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        & git -C $kitRoot config core.hooksPath .githooks
+    }
     $setupNeeded = $false
-    Report "FIXED" "Setup (signpost + git hooks)" @("Ran setup.ps1.")
+    Report "FIXED" "Setup (signpost + git hooks)" @("Wrote $signpost and set core.hooksPath -> .githooks.")
 }
 if (-not $setupNeeded) {
     if (Test-Path $signpost) {
@@ -235,12 +245,12 @@ if (-not $setupNeeded) {
             Report "PASS" "Kaizen signpost" @($note)
         }
         else {
-            Report "WARN" "Kaizen signpost" @("$signpost exists but its kitRepoPath is unreadable or missing on disk; re-run setup.ps1 from the intended clone.")
+            Report "WARN" "Kaizen signpost" @("$signpost exists but its kitRepoPath is unreadable or missing on disk; re-run doctor -Fix from the intended clone.")
         }
     }
 }
 else {
-    Report "WARN" "Setup (signpost + git hooks)" ($setupGaps + @("Fix: .\setup.ps1   (or re-run doctor with -Fix)."))
+    Report "WARN" "Setup (signpost + git hooks)" ($setupGaps + @("Fix: re-run doctor with -Fix."))
 }
 
 # --- Resume relay (optional). Reports armed state; arming stays a deliberate

@@ -2,6 +2,10 @@
 # Dev-clone setup for the claude-kit repo: record the kaizen signpost and wire git
 # hooks. Run from the repo root: ./setup.sh
 #
+# POSIX only. On Windows these first-run duties live in doctor: doctor.cmd -Fix
+# does setup and verification in one pass. This script remains the POSIX path
+# until a doctor.sh exists (tracked in docs/backlog.md).
+#
 # The operating doctrine ships via the plugin now (the operating-instructions
 # skill), so setup no longer installs a user-level CLAUDE.md. On Claude Code the
 # doctrine-refresh hook maintains ~/.claude/claude-kit-doctrine.md and your

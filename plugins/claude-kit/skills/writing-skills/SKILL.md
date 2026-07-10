@@ -51,6 +51,8 @@ A skill you wrote and never tested is a guess. The honest test is to watch an ag
 
 Run several reps, since one sample lies, and read every flagged result yourself, since template echoes masquerade as both failures and successes. This is the standard for any change to behavior-shaping content, the kit's own skills included.
 
+**Doctrine-adjacent rules have a contaminated RED.** A test subagent inherits the global CLAUDE.md, doctrine included, so a rule that restates or sharpens doctrine can show no RED failure: the agent already complies, fed by the inherited copy, and that contamination is production-faithful rather than a test defect. Absence of failure there is weak evidence, not proof the rule is dead weight. Judge such a rule on its distinct value instead: point-of-action encoding survives compaction and reaches contexts the doctrine does not (a headless worker mid-loop, a session whose doctrine was summarized away). If you ship a rule whose RED did not reproduce, record that it stands on that rationale, not on a demonstrated failure; a rule with neither a reproduced RED nor that rationale is the guidance-from-imagination antipattern, so leave it out.
+
 ## Antipatterns
 
 - A narrative ("the time we fixed X") instead of a reusable technique.

@@ -31,9 +31,15 @@ notice-retention condition for this source-form redistribution.
     `<assistant>` blocks positionally instead of counting `<assistant>` blocks,
     and the prompt template marks the trailing next-turn `<user>` as
     not-to-be-summarized (models regularly append one unrequested summary for
-    that anchor, which the upstream count-only check rejects).
-- `compact-cli.ts`, `retrieve.ts`: new in this kit (agent-invokable CLI entry
-  and cache retrieval; upstream uses a UserPromptSubmit hook and an MCP
+    that anchor, which the upstream count-only check rejects);
+  - a failed summarizer spawn surfaces its stdout tail when stderr is empty
+    (the CLI reports "Not logged in" on stdout, which upstream's
+    stderr-only message rendered as an empty reason); both streams are
+    control-sequence-stripped and capped at 500 characters before they reach
+    the error, because they derive from the untrusted transcript.
+- `compact-cli.ts`, `retrieve.ts`, `ledger.ts`: new in this kit
+  (agent-invokable CLI entry with threshold check/guard, cache retrieval, and
+  compaction telemetry; upstream uses a UserPromptSubmit hook and an MCP
   server instead).
 
 Known accepted limitation in the verbatim `omission.ts`: cache lookup resolves

@@ -164,13 +164,30 @@ async function generateSummaries(
     ]);
 
     if (exitCode !== 0) {
-      throw new Error(`Summary generation failed: ${stderr.trim()}`);
+      // The CLI reports some failures (notably "Not logged in") on stdout
+      // with an empty stderr; surface whichever stream carries the reason.
+      // Both streams derive from the untrusted transcript, so control
+      // sequences are stripped and the tail is capped before the text reaches
+      // a terminal or an orchestrating agent's error handling.
+      const reason =
+        sanitizeSpawnOutput(stderr) || sanitizeSpawnOutput(stdout);
+      throw new Error(`Summary generation failed: ${reason}`);
     }
 
     return parseSummaries(stdout, turns.length);
   } finally {
     await unlink(analysis.transcriptPath).catch(() => undefined);
   }
+}
+
+// Strips ANSI escape and other control sequences (newlines kept) and caps the
+// tail at 500 characters, so untrusted spawn output cannot steer a terminal
+// or flood an error message.
+function sanitizeSpawnOutput(text: string): string {
+  return text
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/g, "")
+    .trim()
+    .slice(-500);
 }
 
 async function buildCompactedRows(

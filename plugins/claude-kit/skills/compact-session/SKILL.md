@@ -9,12 +9,21 @@ Native compaction flattens history into one lossy blob at a moment the harness p
 
 ## Prerequisites
 
-- **Bun** must be on PATH (`bun --version`). If it is missing, say so and continue uncompacted; do not install anything unprompted. (Windows/winget installs vary: some machines get a `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` shim, others only the payload under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Oven-sh.Bun*\...\bun.exe`. `doctor.ps1` at the kit repo root probes both and `-Fix` wires the user PATH durably.)
+- **Bun** must be on PATH (`bun --version`). If it is missing, say so and continue uncompacted; do not install anything unprompted. (Windows/winget installs vary: some machines get a `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` shim, others only the payload under `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Oven-sh.Bun*\...\bun.exe`. The kit doctor probes both, `-Fix` wires the user PATH durably, and `-Fix` offers a consented winget install when Bun is absent.)
 - **`claude` must resolve to a native executable**, not an npm `.cmd` shim: the engine passes transcript-derived text as arguments, and a `.cmd` shim would route them through cmd.exe's parser (an injection surface for hostile pasted content).
+- **The CLI must be logged in on the machine** (`claude /login` in a terminal, once). The Desktop app's local agent mode authenticates through the host, not the CLI's own credential store, so a machine that has only ever run Desktop sessions fails the summarizer spawn with "Not logged in" (observed live 2026-07-10). `--check` and the skip guard still work without it; only the summarizer needs the login.
 - The engine lives beside this skill in `engine/`. Reference it via this skill's base directory.
-- After installing the kit on a new Windows machine, `doctor.ps1` (or `doctor.cmd` while scripts are still policy-blocked) at the kit repo root verifies all of the above in one pass.
+- After installing or updating the kit on a Windows machine, the kit-doctor skill verifies all of the above in one pass (the doctor ships in the plugin payload at `<plugin>\doctor\doctor.cmd`; repo-root `doctor.cmd` forwards to it on a clone).
 
 ## When to compact
+
+The decision is numeric, and the engine answers it: at a boundary, run `--check` (below) and act on its `recommendation` field. The thresholds it applies, calibrated 2026-07-10 from measured compaction ROI across 55 sessions (post-compaction floors 50-57k tokens; sub-100k-delta events break-even to negative; every late compaction measured 3-5x its cost in avoidable context re-billing):
+
+- **At or above 200k context, compact at the next boundary.** There is no harness pressure before the 1M cap, so nothing else will stop the drift; every boundary that passes above this line re-bills 3-5x the post-compaction floor on all further calls.
+- **Below 150k, the engine skips the run itself** (exit 2): the summarizer spend plus the post-compaction reload eats a delta that small. `--force` is the override when I explicitly ask for a compaction anyway.
+- **A boundary that ends the run earns no compaction at any size.** Savings accrue only from calls that follow.
+
+The placement rules stand unchanged underneath the numbers:
 
 - At a section boundary in a long run: the Chapter is written, the gate is green, and the plan doc is current. That is the canonical compaction point, because the plan doc already holds everything a summary could lose.
 - Never mid-debugging-chain or mid-section: the uncompacted detail of an in-flight investigation is exactly what a summary softens.
@@ -25,13 +34,15 @@ Native compaction flattens history into one lossy blob at a moment the harness p
 The current session's ID is embedded in the scratchpad path; the transcript is `~/.claude/projects/<sanitized-cwd>/<session-id>.jsonl`.
 
 ```
-bun <skill-base-dir>/engine/compact-cli.ts --transcript <path> [--keep N] [--summarizer-model <model id>]
+bun <skill-base-dir>/engine/compact-cli.ts --transcript <path> [--keep N] [--summarizer-model <model id>] [--check] [--min-context <tokens>] [--force]
 ```
 
+- `--check` is the boundary decision: it reads the transcript's last billed main-chain context and prints JSON with `contextTokens` and a `recommendation` of `compact` or `skip`, exits 0, and spawns nothing, so it may run from any cwd and needs no login. (A transcript with no billed usage rows yet exits 1 instead: nothing to measure.) Run it at every boundary; compact when it says `compact`.
+- A compaction run below the 150k-token minimum exits 2 with the reason on stderr, the same contract as nothing-to-compact: report it and continue uncompacted. `--force` bypasses the guard; `--min-context <tokens>` adjusts it per run. Both thresholds are named constants at the top of `engine/compact-cli.ts` (`CHECK_TRIGGER_TOKENS`, `MIN_COMPACTION_CONTEXT_TOKENS`); tune them there as the ledger accumulates evidence.
 - `--keep N` preserves the most recent N turns unmodified and defaults to 1, which protects the in-flight turn. Pass a larger N to keep more of the freshest working context, or an explicit `--keep 0` to summarize everything (only for a cleanly ended session).
 - Run the command with cwd inside the repo the transcript belongs to; the CLI enforces this (summarizer session resolution is project-scoped, and a wrong cwd would otherwise risk summarizing the wrong conversation).
 - The summarizer defaults to `claude-sonnet-5` with hooks disabled, tools denied, a 240s timeout, and `ANTHROPIC_API_KEY` scrubbed from its environment (an inherited key disables the claude.ai login auth and fails or API-bills the run; scrubbing keeps it on the subscription; a machine whose only auth is an API key cannot summarize). Do not pass Haiku as the summarizer: at real transcript scale it reproducibly breaks the XML output contract (three distinct failures in three attempts on a ~380-row transcript during QA), and even when it succeeds its summaries soften framing. Failures are contained (the source is untouched), but they waste the run.
-- Success prints JSON with `destinationSessionId` and the `/resume` command. Failure or nothing-to-compact exits nonzero with the reason on stderr, and the source session is untouched; report it and continue uncompacted.
+- Success prints JSON with `destinationSessionId` and the `/resume` command, and appends one metadata line (session IDs, context-before tokens, byte sizes, duration; never conversation content) to the compaction ledger at `~/.claude/magic-compact/ledger.jsonl`. Failure, nothing-to-compact, or a guard skip exits nonzero with the reason on stderr, and the source session is untouched; report it and continue uncompacted.
 - **The context display lags one call after resume.** The harness estimates `/context` from the transcript's latest billed-usage row rather than re-tokenizing, and the engine copies rows verbatim, usage numbers included, so a freshly resumed compacted session shows the source session's token count until the first new API call writes a real usage row. That stale first reading is cosmetic, not a failed compaction; judge success by the engine's JSON result, and expect the display to correct itself on the next turn.
 
 ## The two modes
@@ -43,8 +54,8 @@ bun <skill-base-dir>/engine/compact-cli.ts --transcript <path> [--keep N] [--sum
 **Chain mode**, for autonomous multi-section runs - the standard posture for spec execution: executing-work enters it unless the spec header records `Run Mode: interactive` (the override for a run I am watching). The supervisor session (the one I started) stays thin and orchestrates; the heavy execution lives in worker sessions driven headlessly. The worker runs the executing-work skill in full - including its delegation rules, so the worker itself dispatches fresh-context implementers per section rather than implementing inline. That division is what makes the chain cheap: carried context is re-billed on every later call while a subagent's churn is paid once, so a worker that implements inline accumulates exactly the history compaction then has to fight, and a worker that orchestrates stays thin enough that compaction is a safety valve, not a treadmill. Per section:
 
 1. Worker executes the section (`claude -p --resume <worker-id> --model <tier> --output-format json`, spawned in the background, with the section directive piped via stdin rather than interpolated into the command line; plan text can carry quotes and metacharacters that break inline quoting).
-2. At the section close, compact the worker with the engine. The old worker transcript remains as the backup, relabeled `[UNCOMPACTED]`.
-3. Resume the **compacted** worker ID for the next section. No human step anywhere in the chain.
+2. At the section close, run `--check` on the worker transcript. On a `compact` recommendation, compact the worker with the engine; the old worker transcript remains as the backup, relabeled `[UNCOMPACTED]`. On `skip`, do nothing: a skipped boundary costs nothing, and the measured break-even for a compaction is a delta the check already accounts for.
+3. Resume the **compacted** worker ID for the next section (or the original worker ID when the check said skip). No human step anywhere in the chain.
 
 The plan doc remains the recovery spine in both modes: a compacted session plus a current plan doc loses nothing that matters.
 
@@ -76,5 +87,6 @@ Two integrity rules for reading a compacted transcript:
 ## Housekeeping
 
 - The omission cache lives at `~/.claude/magic-compact/<destination-session-id>.json`. It is local plain JSON and may hold tool output verbatim (secrets included, if any transited a tool); treat it with transcript-level sensitivity. Deleting a stale cache file only breaks omission retrieval for that session's transcript, nothing else.
+- The compaction ledger at `~/.claude/magic-compact/ledger.jsonl` is append-only metadata (one line per successful compaction: session IDs, context-before tokens, byte sizes, duration; no conversation content). It is the tuning feed for the trigger and guard thresholds: joining each line's `destinationSessionId` against that transcript's first new usage row gives the realized delta per event. Deleting it loses tuning history only.
 - Superseded `[UNCOMPACTED]` source sessions accumulate in the resume picker; they are safe to delete once their compacted successor has proven itself over a section or two. Reap their matching omission cache files in the same pass, so cached tool I/O does not outlive the sessions it came from. Name both when closing out so I can reap them.
 - A compaction killed mid-run can orphan its analysis copy: an unlabeled duplicate session in the project dir holding the complete source history. If a stray duplicate appears after a failed or killed compaction, that is what it is; delete it.

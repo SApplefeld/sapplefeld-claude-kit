@@ -20,7 +20,7 @@ The dispatching session provides: the spec path and section name, the files in s
 
 4. **Verify with evidence.** The build must pass. Run the targeted tests and capture the command output that proves done; a claim of passing carries that output. Run those gates in the foreground and stay in this turn until they exit; if a run can exceed the 10-minute tool cap, background it and poll it to completion in this same turn (an `until` loop on the exit code or a completion marker). Never end your turn with a gate still running: your final message is your only channel back to the orchestrator, and DONE without the gate's real exit code is not DONE. Then settle the test question your brief set: if the change earned a durable test, leave one and show it passing (watch it fail first where practical, so you know it tests the right thing); if it genuinely did not, say so and why. A temporary repro script is for debugging a fix, not the home for new behavior.
 
-5. **Do not commit.** Leave your changes staged; the orchestrator owns the commit model.
+5. **Do not commit or stage.** Leave your changes as unstaged edits; the orchestrator stages what it accepts after review and owns the commit model. An empty index is the contract: it keeps your half-finished work out of any commit you did not author.
 
 ## Status protocol
 

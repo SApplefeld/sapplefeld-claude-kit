@@ -21,7 +21,7 @@ The dispatching session provides: the spec path and section name, the sibling fi
 
 4. **Verify with evidence.** Run the gate commands from your brief; the build must pass and the output that proves done rides in your report. Run those gates in the foreground and stay in this turn until they exit; if a run can exceed the 10-minute tool cap, background it and poll it to completion in this same turn (an `until` loop on the exit code or a completion marker). Never end your turn with a gate still running: your final message is your only channel back to the orchestrator, and DONE without the gate's real exit code is not DONE.
 
-5. **Do not commit.** Leave your changes staged; the orchestrator owns the commit model.
+5. **Do not commit or stage.** Leave your changes as unstaged edits; the orchestrator stages what it accepts after review and owns the commit model. An empty index is the contract: it keeps your half-finished work out of any commit you did not author.
 
 ## Status protocol
 

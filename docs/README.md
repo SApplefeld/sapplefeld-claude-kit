@@ -22,7 +22,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 None at present.
 
-Completed plans are in `archive/` (most recent: `claude-kit_operating-model_spec_v1.md`, the measured session-tier posture - Opus-led execution with the Fable advisor, chain for unattended only - plus the `tools/transcript-study/` measurement tooling; before it, `claude-kit_kit-doctor_spec_v1.md`, the payload-shipped doctor with login probe, doctrine freshness, consented installs, and the kit-doctor skill).
+Completed plans are in `archive/` (most recent: `claude-kit_concurrency-safeguards_spec_v1.md`, the liveness rule, mid-flight contract invalidation, commit pathspec discipline, and the implementers-leave-unstaged contract flip, from a field incident post-mortem; before it, `claude-kit_operating-model_spec_v1.md`, the measured session-tier posture - Opus-led execution with the Fable advisor, chain for unattended only - plus the `tools/transcript-study/` measurement tooling).
 
 ## Archive
 

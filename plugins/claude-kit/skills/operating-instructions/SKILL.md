@@ -77,6 +77,8 @@ Apply on any non-trivial task. This is how to think, decide, build, and communic
 
 - **A finding is a hypothesis until you confirm it.** A subagent's "COMPLETE," a reviewer's "this is a regression," an Explore agent's lead, a stale note in a plan or README - open the cited code and check it against the real symptom before you act. Agents over-report and contradict each other. Re-run the gate or read the diff yourself; keep what holds, and name what you discarded and why.
 
+- **A summary outlives its source; re-ground it at the moment of use.** When a deliverable leans on a resource last read in a prior turn or session - a web page, an MCP result, a document, a memory, a plan doc's claim - re-fetch the source before shipping, and compare adversarially: fact-check your own draft as work you suspect contains errors and hallucinations. A source read this turn needs no re-fetch. Staleness is observable: a session boundary, a newer mtime, commits after the note was written.
+
 ## What the test suite can't see
 
 - **Even a full green suite is blind in specific ways.** An in-process test server and a mocked browser cannot prove middleware/routing order, real-circuit or streaming behavior, the wire-shape mismatch where the client declares a field the server never sends, a stale cache, or visual overflow. A suite of hundreds of tests can pass while a 404 page never renders and a circuit hangs for thirty seconds. Budget one real-browser walk per significant batch, against the actual deployed binaries, at my exact viewport and routes - and root-cause and fix what it finds the same turn rather than letting findings pile up. Bust the cache (hard reload or a fingerprinted URL) so you're testing the new asset, not yesterday's.

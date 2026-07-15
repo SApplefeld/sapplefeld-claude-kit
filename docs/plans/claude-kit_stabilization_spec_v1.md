@@ -140,7 +140,7 @@ Tests: the finishing reviews return no Critical; the archive/index/backlog refle
 
 ## Open Questions
 
-- Section 2's `/goal` verification outcome decides delete-vs-rename; the section carries both branches.
+- Section 2's `/goal` verification outcome decides delete-vs-rename; the section carries both branches. RESOLVED 2026-07-15 (claude-code-guide): `/goal` is a real built-in Claude Code command (a session-scoped prompt-based Stop hook), so Section 2 takes the keep-and-name-accurately branch, not delete.
 
 ## Related
 
@@ -149,4 +149,12 @@ Tests: the finishing reviews return no Critical; the archive/index/backlog refle
 
 ## Chapters
 
-(Appended by executing-work as sections complete. Leave empty at creation.)
+### Chapter 1 - 2026-07-15
+Completed: Section 1 - Resolve the three live contradictions
+Implemented By: implementer-sonnet (main session applied one review-driven inline fix)
+Metrics: 1 review round (adversarial + blind, both fresh-context); 0 NEEDS_CONTEXT; 0 escalations; advisor off (kit plugin not installed in this cloud workspace, so `/advisor` is unavailable; recorded per session)
+Decisions / Surprises: Commit model treated as Commit-and-Push for this run per Scott (recorded header is Review-Only, which assumed a local session); push deferred to finishing-work. Scott authorized removing the doctrine mirror's legacy leading blank line (was Out of Scope, "pending nod"); the regeneration now matches doctrine-refresh.js strip semantics exactly, so the mirror lost one leading byte. `/goal` Open Question resolved to keep-and-name-accurately (it is a real built-in). Both reviewers flagged that edit (b) leaves sibling Run Mode restatements stale in compact-session and brainstorming; these are Section 4's "Run Mode posture" owner-collapse cluster and are carried forward as known residuals (see Next).
+Review Findings: Critical (adversarial) executing-work:81 stale self-reference "(the standard posture per the Run Mode check)" introduced by edit (b) - FIXED inline to "(per the Run Mode check)". Major/Critical (both reviewers) compact-session:54 and brainstorming:35 Run Mode restatements - DEFERRED to Section 4 (their designated owner-collapse), recorded here. Minor: whether an attendance-inferred `interactive` is backfilled into the header (verbatim spec text; the "ask" fallback covers the undeterminable case - noted, no change). Noted (pre-existing, not a §1 regression): doctrine's "trade-off and reversal cost" phrase in the drift-routing clause is richer than finishing-work step 4's "record and surface for awareness"; spec declared finishing-work the owner and said not to edit it, so left as-is for Scott's call if he wants them aligned.
+Preserve-contract checks: `grep "over every section"` and `grep "present every drift item"` return nothing in skills/ and home/ (clean); mirror byte-identical after regeneration (`node .kit/scratch/regen-doctrine.js check` -> IDENTICAL, 37457 bytes); header-less spec still routes an autonomous unwatched resume to chain (executing-work:50 "on an autonomous resume with no one watching, chain").
+Next: Section 2 - Dangling and stale references. CARRY FORWARD to Section 4: reconcile compact-session/SKILL.md:54 and brainstorming/SKILL.md:35 Run Mode restatements to defer to executing-work's attendance model (preserve-contract: header-less autonomous resume still chains).
+Commit Model: Commit-and-Push (commit now; push at finishing-work per Scott)

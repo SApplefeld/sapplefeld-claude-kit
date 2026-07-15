@@ -54,7 +54,7 @@ function stripFrontmatter(text) {
         if (lines[i].trim() === '---') { end = i; break; }
     }
     if (end === -1) return text;                      // no closing fence: leave as-is
-    return lines.slice(end + 1).join('\n').replace(/^\n/, '');
+    return lines.slice(end + 1).join('\n').replace(/^\r?\n/, '');
 }
 
 function main() {

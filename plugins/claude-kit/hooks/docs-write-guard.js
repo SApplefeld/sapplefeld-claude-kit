@@ -12,9 +12,11 @@
 // rather than on report filenames (the orchestrator improvised several docs/
 // paths; a role rule does not chase them).
 //
-// Covers Write/Edit/MultiEdit (exact, by file_path) and Bash (heuristic, by a
-// write-redirect into docs/ in the command). Exotic shell writes (python,
-// sed -i) are out of reach here and are caught by the Stop-scan backstop.
+// Covers Write/Edit/MultiEdit (exact, by file_path) and shell commands
+// (heuristic): a Bash write-redirect/tee into docs/, and a PowerShell Out-File /
+// Set-Content / Add-Content / Tee-Object cmdlet targeting docs/. Exotic writes
+// (python, sed -i, Copy-Item, a path passed through a variable) are out of reach
+// here and are caught by the Stop-scan backstop.
 //
 // SAFETY: this hook can BLOCK a tool call, so it fails OPEN. Any parse error,
 // unrecognized payload, or inability to positively identify a non-curator
@@ -48,10 +50,23 @@ function targetsDocs(s) {
     return /(^|[\\/])docs[\\/]/i.test(String(s || ''));
 }
 
-// A shell command that redirects or tees output into a docs/ path. Heuristic:
-// covers >, >>, tee, and heredocs (cat > docs/x <<EOF); misses python/sed -i.
-function bashWritesDocs(cmd) {
-    return /(?:>>?|tee(?:\s+-a)?\s)\s*["']?(?:[^\s"'|;&><]*[\\/])?docs[\\/]/i.test(String(cmd || ''));
+// A shell command that writes into a docs/ path. Two heuristics, either a hit:
+//   Bash: a >, >>, tee, or heredoc redirect into docs/ (cat > docs/x <<EOF).
+//   PowerShell: an Out-File / Set-Content / Add-Content / Tee-Object cmdlet, in
+//   command position, with a docs/ path that is positional or reached across a
+//   short bounded run of parameters, including -FilePath / -Path / -LiteralPath
+//   joined by a space or a colon (-Path docs/x or -FilePath:docs/x).
+// Both require a separator before docs (so "mydocs/" does not match). Known misses,
+// all backstopped by the Stop-scan: non-redirect writers (python, sed -i,
+// Copy-Item, a path passed through a variable), and, in the other direction, a
+// residual false hit on a cmdlet name sitting in command position inside a quoted
+// string (a docs path merely named in prose, e.g. a commit message). The
+// command-position anchor keeps an embedded name (Reset-Content) from matching.
+function commandWritesDocs(cmd) {
+    const c = String(cmd || '');
+    const redirect = /(?:>>?|tee(?:\s+-a)?\s)\s*["']?(?:[^\s"'|;&><]*[\\/])?docs[\\/]/i;
+    const cmdlet = /(?:^|[\s;|&(])(?:Out-File|Set-Content|Add-Content|Tee-Object)\b\s+(?:-\w+(?::\S+)?(?:\s+(?!-)[^\s"';|&]+)?\s+){0,4}(?:-(?:FilePath|Path|LiteralPath)[:\s]\s*)?["']?(?:[^\s"']*[\\/])?docs[\\/]/i;
+    return redirect.test(c) || cmdlet.test(c);
 }
 
 function main() {
@@ -67,7 +82,7 @@ function main() {
 
     let hit = false;
     if (fp) hit = targetsDocs(fp);
-    if (!hit && input.command) hit = bashWritesDocs(input.command);
+    if (!hit && input.command) hit = commandWritesDocs(input.command);
     if (!hit) return;          // not a docs/ write: allow
 
     process.stderr.write(

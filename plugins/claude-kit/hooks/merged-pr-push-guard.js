@@ -21,6 +21,10 @@ function readStdin() {
     try { return fs.readFileSync(0, 'utf8'); } catch { return ''; }
 }
 
+// Run a shell command and capture stdout. The command strings passed here are
+// fixed literals; the only variable, the branch, is allowlisted in prState before
+// it is interpolated. That discipline is load-bearing: interpolating any raw
+// payload field into one of these strings reopens the command-injection class.
 function sh(cmd, cwd, timeout) {
     return execSync(cmd, {
         cwd,
@@ -46,6 +50,12 @@ function targetBranch(cmd, cwd) {
     let ref = toks.length >= 2 ? toks[1] : null;
     let branch = null;
     if (ref) {
+        // Normalize the refspec token before parsing: drop a wrapping quote pair,
+        // then a leading + (force-push marker). A quoted or forced ref then reaches
+        // the allowlist as its plain name, and +:dst collapses to the :dst deletion
+        // form recognized below.
+        ref = ref.replace(/^(['"])(.*)\1$/, '$2');
+        ref = ref.replace(/^\+/, '');
         if (ref.includes(':')) {
             const parts = ref.split(':');
             if (parts[0] === '' || parts[0] === '+') return null; // :dst or +:dst = deletion
@@ -61,6 +71,16 @@ function targetBranch(cmd, cwd) {
 
 // MERGED | OPEN | UNKNOWN, by asking the host. UNKNOWN on any failure (fail-open).
 function prState(branch, cwd) {
+    // The branch is parsed from the model's own push command and interpolated into
+    // the host CLI strings below, so it must pass a strict allowlist before any host
+    // query: letters, digits, dot, underscore, slash, hyphen, and never a leading
+    // hyphen. A branch that fails cannot be told apart from an injection attempt, so
+    // it is UNKNOWN (allow). az resolves to a .cmd shim on Windows and Node's
+    // execFileSync cannot spawn a .cmd without a shell, so validating the branch,
+    // not an arg-array exec, is what closes the injection path here; the host calls
+    // keep the execSync string form.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(branch)) return 'UNKNOWN';
+
     let host = '';
     try { host = sh('git remote get-url origin', cwd, 3000).trim(); } catch { return 'UNKNOWN'; }
     try {

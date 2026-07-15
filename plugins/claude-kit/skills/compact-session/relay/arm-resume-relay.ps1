@@ -86,7 +86,7 @@ else {
     Write-Host "  Target  : $windowFile present; left untouched (holds the AHK WinTitle for the CLI window)."
     Write-Host "            window.txt is read at watcher startup; restart the watcher after changing it."
 }
-Write-Host "  Requests: $relayDir\request.txt (3 lines: uuid, transcript path, prompt)"
+Write-Host "  Requests: $relayDir\request.txt (3-4 lines: uuid, transcript path, prompt, optional ahk_id target)"
 Write-Host "  Log     : $relayDir\relay.log"
 Write-Host "  Dry run : create $relayDir\dryrun.on to validate without typing"
 Write-Host "  Disarm  : delete the Startup shortcut and exit the AutoHotkey tray icon"

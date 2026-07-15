@@ -6,10 +6,12 @@ Persistent
 ; boundary and types "/resume <id>" plus the continue prompt into the Claude
 ; desktop window, so an unattended run continues without a human at the keys.
 ;
-; Request contract (request.txt, exactly three UTF-8 lines):
+; Request contract (request.txt, three or four UTF-8 lines):
 ;   line 1: session UUID
 ;   line 2: absolute transcript path (filename must be "<uuid>.jsonl")
 ;   line 3: single-line continue prompt
+;   line 4: optional target window as "ahk_id <hwnd>", the requesting session's
+;           own window; absent means use the fallback window
 ;
 ; A "dryrun.on" flag file in the relay directory validates and logs without
 ; focusing or typing. The only text ever sent to the window is the fixed
@@ -37,16 +39,21 @@ DRYRUN_FLAG := RELAY_DIR "\dryrun.on"
 ; session).
 DRYRUN_MARKER := "[doctor-dryrun]"
 
-; The target must be a Claude Code CLI window, named by a window.txt in the
-; relay directory holding an AHK WinTitle expression, e.g. for a Windows
-; Terminal running the CLI: claude ahk_exe WindowsTerminal.exe
-; There is no default: the /resume slash command does not exist in the Claude
-; Desktop app, so typing at a guessed window risks
-; delivering the prompt into whatever conversation is open. Unconfigured means
-; the watcher validates and fails requests to failed\ without ever typing.
-TARGET_WINDOW := ""
+; Each request names the exact window to type into (line 4, an "ahk_id <hwnd>"
+; expression the requesting session captured for its own terminal), so
+; concurrent sessions in separate windows each resume into their own. A request
+; without that line falls back to FALLBACK_WINDOW, read from window.txt at
+; startup; when window.txt is absent or blank the fallback is a process-only
+; match, which the exactly-one-window guard below keeps safe by refusing to
+; type whenever more than one window matches. The Desktop app is never a valid
+; target: the /resume slash command does not exist there.
+FALLBACK_WINDOW := "ahk_exe WindowsTerminal.exe"
 if FileExist(RELAY_DIR "\window.txt") {
-    try TARGET_WINDOW := Trim(FileRead(RELAY_DIR "\window.txt", "UTF-8"), " `t`r`n")
+    try {
+        configuredWindow := Trim(FileRead(RELAY_DIR "\window.txt", "UTF-8"), " `t`r`n")
+        if (configuredWindow != "")
+            FALLBACK_WINDOW := configuredWindow
+    }
 }
 POLL_INTERVAL_MS := 10000
 MAX_ATTEMPTS := 3
@@ -129,8 +136,8 @@ ProcessRequest() {
     }
 
     lines := StrSplit(Trim(raw, " `t`r`n"), "`n")
-    if lines.Length != 3 {
-        Fail("request must be exactly 3 lines, got " lines.Length)
+    if (lines.Length != 3 && lines.Length != 4) {
+        Fail("request must be 3 or 4 lines, got " lines.Length)
         return
     }
 
@@ -158,17 +165,32 @@ ProcessRequest() {
         Fail("empty continue prompt")
         return
     }
-    if (TARGET_WINDOW = "") {
-        Fail("no window.txt configured; refusing to type at a guessed window")
+    ; Line 4, when present, is the requesting session's own captured window
+    ; ("ahk_id <hwnd>") and takes precedence, so concurrent sessions each resume
+    ; into their own window. Only that exact shape is accepted: the sole
+    ; producer is capture-window.ps1, so anything else is a malformed request,
+    ; not a free-form WinTitle to trust at the keyboard. A 3-line request uses
+    ; the fallback window.
+    target := FALLBACK_WINDOW
+    if (lines.Length = 4) {
+        requestedTarget := Trim(lines[4], " `t`r")
+        if !RegExMatch(requestedTarget, "^ahk_id \d+$") {
+            Fail("malformed target window on line 4: " requestedTarget)
+            return
+        }
+        target := requestedTarget
+    }
+    if (target = "") {
+        Fail("no target window: empty fallback and no per-request target")
         return
     }
-    ; The target expression must resolve to exactly one window. A process-only
-    ; match (the seeded default) can match several Windows Terminal windows;
-    ; typing into whichever is active would deliver the resume to the wrong
-    ; session, so refuse and let the retry flow surface it.
-    matchedWindows := WinGetList(TARGET_WINDOW)
+    ; The target must resolve to exactly one window. A per-request ahk_id names
+    ; one window (or none, if it has since closed); a process-only fallback can
+    ; match several, and typing into whichever is active would deliver the
+    ; resume to the wrong session, so refuse and let the retry flow surface it.
+    matchedWindows := WinGetList(target)
     if (matchedWindows.Length = 0) {
-        Fail("target window not found: " TARGET_WINDOW)
+        Fail("target window not found: " target)
         return
     }
     if (matchedWindows.Length != 1) {
@@ -183,8 +205,8 @@ ProcessRequest() {
         return
     }
 
-    Log("resuming " sessionId)
-    if !EnsureActive() {
+    Log("resuming " sessionId " at " target)
+    if !EnsureActive(target) {
         Fail("Claude window did not activate")
         return
     }
@@ -193,19 +215,19 @@ ProcessRequest() {
     ; Typing has begun: from here every keystroke group re-verifies focus and
     ; a lost window is a hard failure, never a retry.
     Sleep(MENU_SETTLE_MS)
-    if !EnsureActive() {
+    if !EnsureActive(target) {
         HardFail(raw, "focus lost after typing /resume; run /resume " sessionId " manually")
         return
     }
     Send("{Enter}")
     Sleep(SESSION_LOAD_MS)
-    if !EnsureActive() {
+    if !EnsureActive(target) {
         HardFail(raw, "focus lost before continue prompt; session " sessionId " resumed but prompt not sent")
         return
     }
     SendText(prompt)
     Sleep(500)
-    if !EnsureActive() {
+    if !EnsureActive(target) {
         HardFail(raw, "focus lost before final Enter; prompt typed but not submitted")
         return
     }
@@ -216,13 +238,13 @@ ProcessRequest() {
     Archive(PROCESSED_DIR, "done")
 }
 
-EnsureActive() {
-    if WinActive(TARGET_WINDOW)
+EnsureActive(target) {
+    if WinActive(target)
         return true
-    if !WinExist(TARGET_WINDOW)
+    if !WinExist(target)
         return false
-    WinActivate(TARGET_WINDOW)
-    return WinWaitActive(TARGET_WINDOW, , 5) != 0
+    WinActivate(target)
+    return WinWaitActive(target, , 5) != 0
 }
 
 Fail(reason) {

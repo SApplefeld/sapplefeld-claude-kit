@@ -1,6 +1,6 @@
 ---
 name: cold
-description: Neutral, evidence-first evaluation of a decision or judgment where my own preference, ownership, enthusiasm, or a desired conclusion is baked into the framing. Use for non-code go/no-go calls - especially high-stakes, hard-to-reverse, or emotionally-loaded personal and business decisions - and for moments like "is this a good idea?", "should I do X?", "am I being rational about Y?", or "are you sure?" asked with no new evidence. Strips the framing, answers the de-framed question, and names the strongest objection to what I want to hear. NOT for code, diffs, specs, or architecture (use the adversarial-reviewer agent), executing already-agreed work, or neutral lookups.
+description: "Neutral, evidence-first evaluation of a decision or judgment where my own preference, ownership, enthusiasm, or a desired conclusion is baked into the framing. Use for non-code go/no-go calls - especially high-stakes, hard-to-reverse, or emotionally-loaded personal and business decisions - and for moments like 'is this a good idea?', 'should I do X?', 'am I being rational about Y?', or 'are you sure?' asked with no new evidence. NOT for code, diffs, specs, or architecture (use the adversarial-reviewer agent), executing already-agreed work, or neutral lookups."
 ---
 
 # Cold Evaluation

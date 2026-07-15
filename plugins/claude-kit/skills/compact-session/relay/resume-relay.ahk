@@ -34,7 +34,7 @@ DRYRUN_FLAG := RELAY_DIR "\dryrun.on"
 ; relay directory holding an AHK WinTitle expression, e.g. for a Windows
 ; Terminal running the CLI: claude ahk_exe WindowsTerminal.exe
 ; There is no default: the /resume slash command does not exist in the Claude
-; Desktop app (verified live 2026-07-08), so typing at a guessed window risks
+; Desktop app, so typing at a guessed window risks
 ; delivering the prompt into whatever conversation is open. Unconfigured means
 ; the watcher validates and fails requests to failed\ without ever typing.
 TARGET_WINDOW := ""
@@ -112,7 +112,7 @@ ProcessRequest() {
     sessionId := Trim(lines[1], " `t`r")
     ; Normalize separators: SplitPath only splits on backslashes, and request
     ; writers on this machine produce forward-slash paths from Unix-style
-    ; shells (observed live: a valid request rejected for exactly this).
+    ; shells (a valid request can be rejected for exactly this).
     transcriptPath := StrReplace(Trim(lines[2], " `t`r"), "/", "\")
     prompt := Trim(lines[3], " `t`r")
 

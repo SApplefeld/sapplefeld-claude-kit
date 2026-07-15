@@ -5,7 +5,7 @@ description: "Guide to writing in the style of Scott Applefeld. Use whenever ask
 
 # Scott's Writing Structure - Outline Skill
 
-Rules reverse-engineered from a set of the author's own documents (technical proposals, benefit analyses, architecture docs, and email replies).
+Rules for writing in the author's voice, drawn from samples of his own work: technical proposals, benefit analyses, architecture docs, and email replies.
 
 Follow these rules when drafting in Scott's voice. Where the samples disagree, the dominant pattern is listed first and the exception is flagged.
 

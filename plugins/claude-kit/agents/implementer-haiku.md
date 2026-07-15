@@ -1,6 +1,6 @@
 ---
 name: implementer-haiku
-description: Scoped implementation agent, Haiku tier. Use to implement a single pure-transcription Section of Work from an approved spec - the brief names an exact sibling to clone with substitutions and a self-surfacing gate (a build or existing test that fails loudly if the output is wrong). Dispatch with a task brief containing the spec path, section name, the sibling file to mirror, files in scope, acceptance criteria, style-skill file paths, and build/test commands. Escalates any judgment call rather than guessing.
+description: "Scoped implementation agent, Haiku tier. Use to implement a single pure-transcription Section of Work from an approved spec - the brief names an exact sibling to clone with substitutions and a self-surfacing gate (a build or existing test that fails loudly if the output is wrong). Dispatch with a task brief containing the spec path, section name, the sibling file to mirror, files in scope, acceptance criteria, style-skill file paths, and build/test commands. Escalates any judgment call rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: haiku
 ---

@@ -1,6 +1,6 @@
 ---
 name: council-member
-description: Read-only design-stage reviewer dispatched by the design-council skill, one per lens. Takes an evidence-grounded position on competing approaches at an architecture fork, names its strongest objections, and in cross-examination rounds engages opposing objections - conceding, rebutting with evidence, or revising. Not a code reviewer (use adversarial-reviewer); it evaluates approaches, not diffs.
+description: "Read-only design-stage reviewer dispatched by the design-council skill, one per lens. Takes an evidence-grounded position on competing approaches at an architecture fork, names its strongest objections, and in cross-examination rounds engages opposing objections - conceding, rebutting with evidence, or revising. Not a code reviewer (use adversarial-reviewer); it evaluates approaches, not diffs."
 tools: Read, Grep, Glob, Bash
 ---
 

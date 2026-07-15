@@ -9,7 +9,7 @@ Native compaction flattens history into one lossy blob at a moment the harness p
 
 ## Prerequisites
 
-- **Bun** must be on PATH (`bun --version`). If it is missing, say so and continue uncompacted; do not install anything unprompted. (Windows/winget installs vary in where they place `bun.exe`; the kit doctor probes both PATH shapes, `-Fix` wires the user PATH durably, and `-Fix` offers a consented winget install when Bun is absent.)
+- **Bun** must be on PATH (`bun --version`). If it is missing, say so and continue uncompacted; do not install anything unprompted. (Windows/winget installs vary in where they place `bun.exe`; the kit doctor probes the known install locations, `-Fix` wires the user PATH durably, and `-Fix` offers a consented winget install when Bun is absent.)
 - **`claude` must resolve to a native executable**, not an npm `.cmd` shim: the engine passes transcript-derived text as arguments, and a `.cmd` shim would route them through cmd.exe's parser (an injection surface for hostile pasted content).
 - **The CLI must be logged in on the machine** (`claude /login` in a terminal, once). The Desktop app's local agent mode authenticates through the host, not the CLI's own credential store, so a machine that has only ever run Desktop sessions fails the summarizer spawn with "Not logged in". `--check` and the skip guard still work without it; only the summarizer needs the login.
 - The engine lives beside this skill in `engine/`. Reference it via this skill's base directory.

@@ -1,10 +1,11 @@
 # Kit Stabilization: Contradictions, Dangling References, Single-Owner Collapse
 
-Status: In Progress
-Commit Model: Review-Only
+Status: Complete
+Commit Model: Review-Only (overridden to Commit-and-Push for the 2026-07-15 cloud run per Scott; see Chapter 1)
 Run Mode: interactive
 Fable Spend: finishing reviews (default); no fable-tier sections
 Created: 2026-07-14
+Completed: 2026-07-15
 
 ## Goal
 
@@ -209,3 +210,21 @@ Review Findings: Major (both reviewers) scott-writing-style:8 - the derivation-l
 Preserve-contract checks: recursive `grep` for banned journey shapes across all of plugins/claude-kit is clean; every frontmatter description parses as valid YAML (python yaml.safe_load over all skills + agents); mirror byte-identical; no em dashes; all load-bearing numbers retained.
 Next: Section 7 - the authoring rule, close-out.
 Commit Model: Commit-and-Push (commit now; push at finishing-work per Scott)
+
+### Chapter 7 - 2026-07-15 (close-out)
+Completed: Section 7 - the authoring rule, plus the whole-effort finishing pass. Effort COMPLETE.
+Implemented By: implementer-sonnet (authoring rule); main session (finishing pass and close-out fixes)
+Metrics: finishing reviews at Fable (security + adversarial) per the Fable Spend header; QA gate re-run in-session; 0 escalations across the effort; advisor off throughout (kit plugin not installed in this cloud workspace, so `/advisor` was unavailable - recorded here as the standing session fact).
+Finishing pass outcomes:
+- QA (§7 says qa-verifier is n/a for prose; §3's hook fixtures are the gate): guards.test.js 18/18 PASS; doctrine mirror IDENTICAL; recursive banned-journey grep clean; all frontmatter YAML valid; `node --check` on all hooks + hooks.json parse.
+- Security review (Fable, whole changeset - prose waiver void because the changeset includes hook JS): VERDICT CLEAR. Two MINORs, both pre-existing and not worsened by this effort: (1) merged-pr-push-guard.js `${branch}` shell interpolation (parsed from tool_input.command) - a future-hardening candidate (execFileSync or a branch-name allowlist); (2) docs-write-guard.js does not catch PowerShell-native cmdlet writes (Out-File/Set-Content) - a fail-open gap backstopped by the Stop-scan, deliberately kept at Bash parity per §3's spec directive. Both added to the backlog as follow-ups.
+- Final adversarial review (Fable, whole changeset vs spec): VERDICT APPROVED_WITH_CONCERNS. Cross-section coherence verified (no later section re-introduced an earlier removal; every §4 collapse pointer resolves to its owner; mirror faithful; all §1-§6 tests hold). Four MINOR leftover-debris findings, all FIXED in this close-out: (a) adversarial-reviewer.md:30 kept a drifted style-precedence restatement (dropped "CI lint") - shrunk to "honoring each style skill's precedence rule"; (b) compact-session:12 "both PATH shapes" lost its antecedent when §4 removed the enumerated WinGet paths and was inaccurate (the doctor probes several) - changed to "the known install locations"; (c) 8 agent frontmatter descriptions were unquoted (§6's "all descriptions quoted" test not literally met, and the kit's own writing-skills rule mandates quoting) - all 8 quoted (none had internal double-quotes; YAML still valid); (d) Chapter 2's carry-forward re writing-skills:54 "global CLAUDE.md, doctrine included" - DISPOSED here: left as-is, because it accurately describes a subagent inheriting the whole global CLAUDE.md (doctrine included), which is inheritance mechanics, not a doctrine-pointer to normalize; renaming it to "the kit doctrine" would be less accurate.
+- §7 dated-audit reference: the "One owner per rule" bullet cites "the 2026-07-14 stabilization audit found a dozen drifted copies, one in outright contradiction" - spec-verbatim, and judged acceptable by the Fable adversarial review (writing-skills' own methodology names the observed failure a rule fixes; it passes §6's banned-shape greps). Mild residual: it is now the only dated event in skill prose, so it will age into provenance - Scott's call later whether to soften.
+Drift adjudications: no `mistake`-class drift (no docs-curator dispatched - this effort reconciles the kit's behavior-shaping surface itself, and docs/ carries no about-the-solution architecture docs that drifted). The one deliberate deviation from the spec's letter (the doctrine mirror's leading-blank-line strip, listed Out of Scope) was authorized by Scott live and is recorded in Chapter 1.
+Residuals for Scott (name what could not be verified here):
+1. The PowerShell tool's exact `tool_input` field name is inferred to be `command` (Bash-parallel) but is not in accessible docs and could not be observed in this Linux sandbox; if it differs, the three guards fire-but-fail-open on PowerShell (silent no-coverage). Confirm one real PowerShell PreToolUse payload on a Windows session. (Added to backlog.)
+2. Two guard-hardening candidates from the security review (above), added to backlog.
+3. Kaizen candidates (kit/spec-authoring friction, offered for your nod rather than auto-filed): the §4 style-precedence cluster named the implementer agents but §4's file scope excluded them (resolved by carrying the shrink into §5); §6's file list said "all skills/*/SKILL.md" but its test grep was recursive and caught the relay .ahk and the agent frontmatter, a scope/test mismatch. Both are minor spec-authoring seams, not kit-rule defects.
+Preserve-contract checks: every section's preserve-contracts recorded in Chapters 1-6 and re-verified in the finishing QA gate; the doctrine body is 1156 bytes leaner with every behavioral contract intact; mirror byte-identical.
+Next: finishing-work complete. Plan archived to docs/archive/.
+Commit Model: Commit-and-Push (final commit + push per Scott)

@@ -18,6 +18,7 @@ A skill is behavior-shaping prose, not documentation. One that reads well but do
 - One SKILL.md, in the kit's voice: direct, opinionated, anti-dogma, no em dashes. Add a reference file only when the body genuinely outgrows the size of the kit's other skills, and gate it the way csharp-style and sql-style do: the SKILL.md covers routine work and names the territories that need the reference.
 - **Frontmatter: always quote the description.** An unquoted value containing a colon-space breaks the YAML silently and drops all skill metadata. `name` and `description` are the two that matter.
 - Body: the principle, the rules that carry judgment, the antipatterns. Tables and lists for what gets scanned; prose for the why. A flowchart only for a decision where the agent might genuinely go wrong, never for linear steps.
+- **One owner per rule.** Every rule has exactly one owning site; every other mention is a pointer or an operational residue at its point of action, never a restatement. A rule stated twice is two rules a week later: the 2026-07-14 stabilization audit found a dozen drifted copies, one in outright contradiction. When editing a rule, grep for its key phrases across the kit and fix the owner, not the nearest copy.
 
 ## The description states the trigger, not the workflow
 

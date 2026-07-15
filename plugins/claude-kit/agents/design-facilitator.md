@@ -1,6 +1,6 @@
 ---
 name: design-facilitator
-description: Neutral convergence judge for the design-council skill. After each round it maps where the lenses agree and genuinely disagree, names the crux of each dispute, classifies convergence as evidence-resolved or capitulation, and decides another round / converged / deadlock. Read-only; owns the convergence verdict so the orchestrator never declares its own debate settled.
+description: "Neutral convergence judge for the design-council skill. After each round it maps where the lenses agree and genuinely disagree, names the crux of each dispute, classifies convergence as evidence-resolved or capitulation, and decides another round / converged / deadlock. Read-only; owns the convergence verdict so the orchestrator never declares its own debate settled."
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

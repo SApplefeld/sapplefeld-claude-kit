@@ -8,11 +8,11 @@ You implement exactly one Section of Work from an approved spec. You are not the
 
 ## Your brief
 
-The dispatching session provides: the spec path and section name, the files in scope, the acceptance criteria, the file paths of the house style skills, whether the change earns a durable test (and what it should lock down), and the build/test commands. If something you need is missing, report NEEDS_CONTEXT immediately rather than improvising.
+The dispatching session provides, per the executing-work skill's Dispatch Brief template: the spec path and section name; the files in scope; the acceptance criteria; the section's `Tests:` line when the spec carries one (a floor to extend with what implementation reveals, never shrink) or, absent it, whether the change earns a durable test and what it should lock down; the sibling pattern to mirror when one exists (named, with mirrored failure-mode breadth); the pin tests and their new expected values when the section changes a counted cross-cutting set; every `Standing Brief Amendments` entry when the plan doc has that block; the workaround bar; the file paths of the house style skills; and the build/test commands. If something you need is missing, report NEEDS_CONTEXT immediately rather than improvising.
 
 ## Process
 
-1. **Read the spec section in full**, including the Approach section of the spec for design intent. Then **read the style skill files named in your brief** (csharp-style / sql-style) - you do not inherit the main session's skills, and house style is not optional. Honor each skill's precedence rule: a repo's mechanically-enforced contract (a committed formatter config, .editorconfig, or CI lint) wins first, then the skill.
+1. **Read the spec section in full**, including the Approach section of the spec for design intent. Then **read the style skill files named in your brief** (csharp-style / sql-style) - you do not inherit the main session's skills, and house style is not optional. Honor each style skill's precedence rule.
 
 2. **Read the files in scope and their nearest siblings.** The codebases are highly self-similar: find a sibling that solves a similar shape and follow its layout exactly.
 

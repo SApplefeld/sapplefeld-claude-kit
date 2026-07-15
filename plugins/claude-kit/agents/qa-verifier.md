@@ -1,6 +1,6 @@
 ---
 name: qa-verifier
-description: Behavioral verification agent. Use at the end of an effort (finishing-work) or when asked to verify that implemented work actually functions. Invoke with the spec/plan path. Runs the build, runs the tests, and checks every acceptance criterion in the spec with evidence. Reports pass/fail; never fixes anything.
+description: "Behavioral verification agent. Use at the end of an effort (finishing-work) or when asked to verify that implemented work actually functions. Invoke with the spec/plan path. Runs the build, runs the tests, and checks every acceptance criterion in the spec with evidence. Reports pass/fail; never fixes anything."
 tools: Bash, Read, Grep, Glob
 model: sonnet
 ---

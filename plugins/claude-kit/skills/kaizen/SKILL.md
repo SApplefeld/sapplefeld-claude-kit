@@ -18,7 +18,7 @@ Notes and briefs live inside the kit's working clone, so git is the sync-and-com
 
 ## Capturing (the cheap half)
 
-Capture is manual, not an always-on posture: when you (or rarely I) notice the kit got in the way, propose a one-line note, and on my nod append it. You do not load this skill to capture; the global rule in CLAUDE.md carries the bar.
+Capture is manual, not an always-on posture: when you (or rarely I) notice the kit got in the way, propose a one-line note, and on my nod append it. You do not load this skill to capture; the kit doctrine (imported via `~/.claude/CLAUDE.md`) carries the bar.
 
 Capture happens while you are working in some other project, so the kit clone is elsewhere on disk. Find it via the machine-local signpost `~/.claude/claude-kit.local.json` (written by `doctor -Fix` on Windows, `setup.sh` on POSIX), which records `kitRepoPath`. Append the note to `<kitRepoPath>/kaizen/notes-<machine>.md`, where `<machine>` is the hostname. If the signpost is missing (first-run setup has not happened on this machine), fall back to `~/.claude-kaizen/notes-<machine>.md` and say so, so it gets folded in later.
 

@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Root-cause debugging discipline. Use whenever investigating a bug, failure, unexpected behavior, failing test, or production incident - BEFORE proposing any fix. Triggers include "bug", "broken", "failing", "why is this happening", error reports, and especially any situation where a previous fix attempt did not work. Skip only for trivial fixes where the cause is directly visible.
+description: "Root-cause debugging discipline. Use whenever investigating a bug, failure, unexpected behavior, failing test, or production incident - BEFORE proposing any fix. Triggers include 'bug', 'broken', 'failing', 'why is this happening', error reports, and especially any situation where a previous fix attempt did not work. Skip only for trivial fixes where the cause is directly visible."
 ---
 
 # Systematic Debugging

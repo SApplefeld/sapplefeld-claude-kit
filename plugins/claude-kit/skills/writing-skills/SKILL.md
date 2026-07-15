@@ -18,12 +18,13 @@ A skill is behavior-shaping prose, not documentation. One that reads well but do
 - One SKILL.md, in the kit's voice: direct, opinionated, anti-dogma, no em dashes. Add a reference file only when the body genuinely outgrows the size of the kit's other skills, and gate it the way csharp-style and sql-style do: the SKILL.md covers routine work and names the territories that need the reference.
 - **Frontmatter: always quote the description.** An unquoted value containing a colon-space breaks the YAML silently and drops all skill metadata. `name` and `description` are the two that matter.
 - Body: the principle, the rules that carry judgment, the antipatterns. Tables and lists for what gets scanned; prose for the why. A flowchart only for a decision where the agent might genuinely go wrong, never for linear steps.
+- **One owner per rule.** Every rule has exactly one owning site; every other mention is a pointer or an operational residue at its point of action, never a restatement. A rule stated twice is two rules a week later: the 2026-07-14 stabilization audit found a dozen drifted copies, one in outright contradiction. When editing a rule, grep for its key phrases across the kit and fix the owner, not the nearest copy.
 
 ## The description states the trigger, not the workflow
 
 The description is how a future session decides whether to load the skill. Write it as "Use when..." plus the symptoms that pull it in, and stop. Do not summarize the skill's process there: an agent that reads a process summary acts on the summary and skips the body, so a step the body insists on gets dropped.
 
-The kit has a live specimen. executing-work's description ends with a recap of working "section by section with adversarial subagent review and Chapter checkpoints," a process summary a loading agent can act on in place of the section loop the body actually defines. A description that summarizes "code review between tasks" has been observed to yield one review where the body specified two. Name when the skill applies; let the body say what to do.
+A description that summarizes the workflow gets acted on in place of the body: a summary reading "code review between tasks" yields one review where the body specifies two.
 
 ## Match the form to the failure
 

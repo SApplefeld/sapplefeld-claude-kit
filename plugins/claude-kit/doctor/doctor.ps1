@@ -16,14 +16,32 @@
 #                             clone) and offers consented installs (bun via
 #                             winget).
 #   .\doctor.ps1 -Fix -Yes    Answers yes to every install prompt (unattended).
-#   .\doctor.ps1 -NoProbe     Skips the CLI login probe (the one check that
-#                             spends a model call and needs the network).
+#   .\doctor.ps1 -NoProbe     Skips the two state-writing probes: the CLI login
+#                             probe (spends a model call, needs the network) and
+#                             the resume-relay round-trip (writes a synthetic
+#                             marker-protected request through the live watcher).
 #
 # If scripts are blocked entirely, use the wrapper beside this file:
 #   doctor.cmd [-Fix] [-Yes] [-NoProbe]
 # Exit code: 0 when nothing FAILs (warnings allowed), 1 otherwise.
 
 param([switch]$Fix, [switch]$Yes, [switch]$NoProbe)
+
+# Windows PowerShell 5.1 inherits PSModulePath from whatever parent launched it.
+# A pwsh 7+ parent (the Claude Code harness, a pwsh terminal) puts its own
+# module directories first, and those shadow 5.1's built-in modules: cmdlet
+# autoload then finds the pwsh edition of Microsoft.PowerShell.Security and
+# fails to load it ("command was found in the module ... but the module could
+# not be loaded"), taking Get-ExecutionPolicy down with it. Reset this process's
+# PSModulePath to the 5.1 default set; the change dies with the process.
+# [Environment]::GetFolderPath follows a OneDrive-redirected Documents folder.
+if ($PSVersionTable.PSVersion.Major -le 5) {
+    $env:PSModulePath = @(
+        (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "WindowsPowerShell\Modules"),
+        (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules"),
+        (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules")
+    ) -join ";"
+}
 
 $script:failCount = 0
 $script:warnCount = 0
@@ -94,12 +112,37 @@ Write-Host ""
 # --- kit needs. The Process scope is excluded from the computation: doctor.cmd
 # --- launches with -ExecutionPolicy Bypass, and including it would make the
 # --- check report Bypass on a machine where a plain .ps1 is still blocked.
-$effectivePolicy = "Restricted"
+$effectivePolicy = $null
+$policyProbeError = $null
 foreach ($scope in @("LocalMachine", "CurrentUser", "UserPolicy", "MachinePolicy")) {
-    $scopedPolicy = Get-ExecutionPolicy -Scope $scope
-    if ($scopedPolicy -ne "Undefined") { $effectivePolicy = $scopedPolicy }
+    try { $scopedPolicy = Get-ExecutionPolicy -Scope $scope -ErrorAction Stop }
+    catch {
+        if (-not $policyProbeError) { $policyProbeError = $_.Exception.Message }
+        continue
+    }
+    # Store the string form: Get-ExecutionPolicy returns an enum whose
+    # Unrestricted member is value 0, so keeping the enum would make every
+    # later truthiness check (-not $effectivePolicy) silently discard it.
+    if ($null -ne $scopedPolicy -and "$scopedPolicy" -ne "Undefined") { $effectivePolicy = "$scopedPolicy" }
 }
-if ($effectivePolicy -in @("Restricted", "AllSigned")) {
+if (-not $effectivePolicy -and $policyProbeError) {
+    # Every scope query failed, so the true policy is unknown: report that,
+    # never a fabricated value. The .cmd entry points still work regardless
+    # (they launch with -ExecutionPolicy Bypass); plain .ps1 launches may not.
+    Report "WARN" "Execution policy" @(
+        "Could not query the policy: $policyProbeError",
+        "doctor.cmd and the relay arm path still run (Bypass at launch); a plain .ps1 launch is unverified on this machine."
+    )
+}
+elseif (-not $effectivePolicy) {
+    # All scopes genuinely Undefined: the OS default (Restricted on client
+    # Windows) is in effect, and the FAIL branch below says so.
+    $effectivePolicy = "Restricted"
+}
+if (-not $effectivePolicy) {
+    # WARN path above already reported; skip the policy branches.
+}
+elseif ($effectivePolicy -in @("Restricted", "AllSigned")) {
     if ($Fix) {
         try {
             Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force -ErrorAction Stop
@@ -531,7 +574,7 @@ else {
     }
     elseif ($NoProbe) {
         # Structural detection only. The round-trip probe writes relay state
-        # (a dry-run flag and a synthetic request), which -NoProbe opts out of.
+        # (a synthetic marker-protected request), which -NoProbe opts out of.
         $issues = @()
         $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
         if (-not $windowConfigured) { $issues += "window.txt not configured; the watcher is idle until it names the CLI window (then restart the watcher)" }
@@ -589,8 +632,13 @@ else {
             # running watcher and confirm it logs the resume it would have typed.
             $probeGuid = [guid]::NewGuid().ToString()
             $tempTranscript = Join-Path $env:TEMP ($probeGuid + ".jsonl")
-            $requestBody = $probeGuid + "`n" + $tempTranscript + "`n" + "doctor resume-relay probe"
-            $dryrunCreatedByProbe = $false
+            # The [doctor-dryrun] prompt prefix is the containment: the watcher
+            # validates and logs a marked request but never types it. The marker
+            # travels inside the request, so no ambient flag lifetime has to
+            # outlive an unsynchronized watcher poll (the flag-based protocol
+            # lost that race on 2026-07-15 and typed a probe into a live
+            # session; concurrent doctor runs also shared one flag).
+            $requestBody = $probeGuid + "`n" + $tempTranscript + "`n" + "[doctor-dryrun] doctor resume-relay probe"
             $probeWroteRequest = $false
             $probeSucceeded = $false
             $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -612,16 +660,15 @@ else {
                     $detail = @("watcher process not running (re-run $armScript or log off/on); round-trip not probed.")
                 }
                 else {
-                    # dryrun.on MUST exist before request.txt is written: a request
-                    # consumed without dryrun.on and with window.txt configured is
-                    # typed into the real terminal. The flag content is stamped so
-                    # the watcher can self-heal a flag orphaned by a killed probe.
-                    [System.IO.File]::WriteAllText($dryrunFlag, ("doctor-probe " + (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")), $utf8NoBom)
-                    $dryrunCreatedByProbe = $true
-
-                    if (-not (Test-Path $dryrunFlag)) {
+                    # Compatibility gate: the deployed watcher must understand the
+                    # [doctor-dryrun] marker, or the probe request would be typed
+                    # for real. Probing an older watcher is refused, never risked.
+                    $deployedAhk = Join-Path $relayDir "resume-relay.ahk"
+                    $deployedText = ""
+                    try { $deployedText = [System.IO.File]::ReadAllText($deployedAhk) } catch {}
+                    if (-not $deployedText.Contains("[doctor-dryrun]")) {
                         $status = "WARN"
-                        $detail = @("could not create the dry-run flag ($dryrunFlag); refused to write a request that could be typed into the terminal.")
+                        $detail = @("deployed watcher predates the [doctor-dryrun] marker; probing it could type into the terminal, so the round-trip was not probed. Re-arm to update: $armScript")
                     }
                     else {
                         # The watcher validates the transcript by existence and by
@@ -671,6 +718,7 @@ else {
                                 $detail = @(
                                     "round-trip not confirmed within 30s; the watcher may predate the current window.txt, or no matching Windows Terminal window is open (or more than one matches, which the watcher refuses).",
                                     "The watcher reads window.txt only at startup: restart it (re-run $armScript) after changing the file.",
+                                    "The probe request is marker-protected ([doctor-dryrun]); an unconfirmed round-trip means it was not processed, never that it was typed.",
                                     "Check the watcher log ($logFile) and window.txt ($windowFile)."
                                 )
                             }
@@ -683,23 +731,19 @@ else {
                 $detail = @("round-trip probe errored: $($_.Exception.Message)")
             }
             finally {
-                # Teardown order is a safety invariant. Remove the temp transcript
-                # and the probe's own request first (content-checked so a real
-                # request that just landed is never deleted). Then remove the
-                # probe's dry-run flag: immediately on success (the watcher already
-                # consumed the request), but after a full poll cycle otherwise, so
-                # a watcher that read the request just before deletion still sees
-                # the flag and never types. A pre-existing flag is never touched
-                # (the probe never created one; it WARNed and skipped instead).
+                # Teardown removes only what the probe created: the temp
+                # transcript and its own request (content-checked so a real
+                # request that just landed is never deleted). The probe writes
+                # no ambient state: its dry-run containment is the in-request
+                # marker, so there is no flag lifetime to sequence and nothing
+                # here races the watcher. dryrun.on is never touched (it is the
+                # user's disarm-all switch; a pre-existing one WARN-skips the
+                # probe before this point).
                 Remove-Item $tempTranscript -Force -ErrorAction SilentlyContinue
                 if (Test-Path $requestFile) {
                     $curRequest = ""
                     try { $curRequest = [System.IO.File]::ReadAllText($requestFile) } catch {}
                     if ($curRequest -eq $requestBody) { Remove-Item $requestFile -Force -ErrorAction SilentlyContinue }
-                }
-                if ($dryrunCreatedByProbe) {
-                    if ($probeWroteRequest -and -not $probeSucceeded) { Start-Sleep -Seconds 12 }
-                    Remove-Item $dryrunFlag -Force -ErrorAction SilentlyContinue
                 }
                 # Remove only the probe's own archive entries (content carries the
                 # probe GUID); any other archived request belongs to the user.

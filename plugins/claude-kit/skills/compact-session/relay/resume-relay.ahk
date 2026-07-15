@@ -29,6 +29,13 @@ LOG_FILE := RELAY_DIR "\relay.log"
 PROCESSED_DIR := RELAY_DIR "\processed"
 FAILED_DIR := RELAY_DIR "\failed"
 DRYRUN_FLAG := RELAY_DIR "\dryrun.on"
+; A request whose prompt line starts with this token is a diagnostic probe:
+; validate and log it, never type it. The marker rides inside the request, so
+; the decision is atomic with the read; ambient flag state (dryrun.on) cannot
+; express per-request intent and its lifetime races the poll (a doctor probe
+; escaped containment exactly that way on 2026-07-15 and typed into a live
+; session).
+DRYRUN_MARKER := "[doctor-dryrun]"
 
 ; The target must be a Claude Code CLI window, named by a window.txt in the
 ; relay directory holding an AHK WinTitle expression, e.g. for a Windows
@@ -169,7 +176,7 @@ ProcessRequest() {
         return
     }
 
-    if FileExist(DRYRUN_FLAG) {
+    if (FileExist(DRYRUN_FLAG) || InStr(prompt, DRYRUN_MARKER) = 1) {
         Log("DRYRUN: would resume " sessionId " and send prompt (" StrLen(prompt) " chars)")
         MarkHandled(raw, PROCESSED_DIR, "dryrun")
         Archive(PROCESSED_DIR, "dryrun")

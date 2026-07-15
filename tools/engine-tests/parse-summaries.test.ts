@@ -105,6 +105,52 @@ describe("parseSummaries, indexed path", () => {
     );
   });
 
+  test("complete response with one mismatched anchor degrades that turn to verbatim", () => {
+    // The production shape: turn 0's template anchor is mangled command
+    // boilerplate the summarizer paraphrases instead of echoing. The set is
+    // complete, so alignment is positionally sound; only the mismatched turn
+    // loses its summary.
+    const response = indexedResponse([0, 1, 2, 3], {
+      anchorText: n => (n === 0 ? "The /clear command was run" : `anchor ${n}`),
+    });
+    const anchors = anchorsFor(4, n =>
+      n === 0 ? "command-name/clear/command-name command-message" : `anchor ${n}`,
+    );
+    const map = parseSummaries(response, 4, anchors);
+    expect(map.size).toBe(3);
+    expect(map.has(0)).toBe(false);
+    expect(map.get(1)).toBe("summary for turn 1");
+  });
+
+  test("complete response with a blanked anchor degrades instead of throwing", () => {
+    const response = indexedResponse([0, 1, 2], {
+      anchorText: n => (n === 1 ? "" : `anchor ${n}`),
+    });
+    const map = parseSummaries(response, 3, anchorsFor(3));
+    expect(map.size).toBe(2);
+    expect(map.has(1)).toBe(false);
+  });
+
+  test("complete response with most anchors mismatched throws the degradation ceiling", () => {
+    const response = indexedResponse([0, 1, 2, 3], {
+      anchorText: n => `rewritten ${n}`,
+    });
+    expect(() => parseSummaries(response, 4, anchorsFor(4))).toThrow(
+      /more than half/,
+    );
+  });
+
+  test("sparse response with a mismatched anchor still throws as renumbered", () => {
+    // Renumber-and-drop manifests as a sparse set with shifted anchors; the
+    // degrade path never applies there.
+    const response = indexedResponse([0, 1, 2], {
+      anchorText: n => (n === 2 ? "anchor 3" : `anchor ${n}`),
+    });
+    expect(() => parseSummaries(response, 4, anchorsFor(4))).toThrow(
+      /appears renumbered/,
+    );
+  });
+
   test("sparse response with no echoed user anchors throws", () => {
     const response = indexedResponse([0, 2, 3], { userIndices: null });
     expect(() => parseSummaries(response, 4, anchorsFor(4))).toThrow(

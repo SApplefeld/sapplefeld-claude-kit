@@ -617,14 +617,17 @@ export function getUserPromptText(turn: Turn): string {
 // degrades to preserve-verbatim instead of failing the whole compaction, and
 // the echoed <user index> anchor text is cross-checked against the template's
 // anchors so a renumbered response cannot silently attach summaries to the
-// wrong turns. A duplicate or over-range index, more than half the turns
-// missing, an anchor mismatch, or a sparse response with no verifiable
-// anchors is a garbage response and throws. One extra pair at exactly
-// expectedCount is ignored: models regularly continue the numbering onto the
-// trailing next-turn anchor. Fallback path: a response with no indexed
-// assistant blocks at all (a model that ignored the attributes) is parsed by
-// position under the legacy exact-count contract, tolerating attributes on
-// the tags it pairs.
+// wrong turns. Within a complete index set, a turn whose echoed anchor
+// disagrees also degrades to preserve-verbatim (the set being complete rules
+// out a dropped-turn shift, so the mismatch reads as a paraphrased anchor,
+// not misalignment). A duplicate or over-range index, more than half the
+// turns missing or degraded, an anchor mismatch within a sparse set, or a
+// sparse response with no verifiable anchors is a garbage response and
+// throws. One extra pair at exactly expectedCount is ignored: models
+// regularly continue the numbering onto the trailing next-turn anchor.
+// Fallback path: a response with no indexed assistant blocks at all (a model
+// that ignored the attributes) is parsed by position under the legacy
+// exact-count contract, tolerating attributes on the tags it pairs.
 export function parseSummaries(
   responseText: string,
   expectedCount: number,
@@ -668,11 +671,16 @@ export function parseSummaries(
     // Anchor cross-check: an index attribute alone cannot prove alignment (a
     // model that renumbers AND drops a turn stays fully in range), so each
     // echoed <user index="K"> snippet is compared against the template's
-    // anchor for turn K. A complete, verified or unverifiable-but-complete
-    // set is accepted (complete means positionally sound); a SPARSE set is
-    // accepted only when every present pair's anchor verifies, because a
-    // sparse set with unverifiable alignment is indistinguishable from a
-    // renumbered one.
+    // anchor for turn K. The set's completeness picks the failure mode. A
+    // COMPLETE set is positionally sound (every requested turn has exactly
+    // one summary, so a dropped-turn shift is impossible): a mismatching or
+    // blanked echo there is treated as the model paraphrasing an anchor it
+    // could not reproduce (machine-generated command/notification boilerplate
+    // survives getUserPromptText poorly), and that turn degrades to
+    // preserve-verbatim instead of failing the run, subject to the same
+    // more-than-half ceiling as missing turns. A SPARSE set is accepted only
+    // when every present pair's anchor verifies, because a sparse set with a
+    // mismatched or missing echo is indistinguishable from renumber-and-drop.
     const echoedAnchors = new Map<number, string>();
     for (const match of summary.matchAll(
       /<user\s+index=["']?(\d+)["']?\s*>([\s\S]*?)<\/user>/g,
@@ -683,6 +691,7 @@ export function parseSummaries(
       }
     }
     if (anchors.length > 0) {
+      const mismatched: number[] = [];
       for (const [index] of indexed) {
         const echoed = echoedAnchors.get(index);
         if (echoed === undefined) {
@@ -694,10 +703,25 @@ export function parseSummaries(
           continue;
         }
         if (!anchorsAgree(anchors[index] ?? "", echoed)) {
-          throw new Error(
-            `Echoed anchor for summary index ${index} does not match the requested turn; the response appears renumbered.`,
-          );
+          if (missingCount > 0) {
+            throw new Error(
+              `Echoed anchor for summary index ${index} does not match the requested turn; the response appears renumbered.`,
+            );
+          }
+          mismatched.push(index);
         }
+      }
+      for (const index of mismatched) {
+        indexed.delete(index);
+      }
+      if (
+        mismatched.length > 0
+        && (expectedCount - indexed.size) * 2 > expectedCount
+      ) {
+        throw new Error(
+          `${mismatched.length} echoed anchors do not match their requested turns; `
+            + `degrading them to verbatim would leave more than half of the ${expectedCount} turns unsummarized.`,
+        );
       }
     }
     return indexed;

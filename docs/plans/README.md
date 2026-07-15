@@ -11,4 +11,6 @@ This folder holds active plans only: specs that are open or in progress. A plan 
 
 ## Current
 
-None at present. Completed plans are in `../archive/` (most recent: `claude-kit_concurrency-safeguards_spec_v1.md`).
+- `claude-kit_stabilization_spec_v1.md` (In Progress): the 2026-07-14 stabilization effort.
+
+Completed plans are in `../archive/` (most recent: `claude-kit_concurrency-safeguards_spec_v1.md`).

@@ -43,6 +43,8 @@ Explore the problem space WITH me in conversation, then capture the agreement as
 
    A section only earns a cheap tier if its spec is precise enough that an implementer with no conversation context can build it from the section text alone; the same test one level up separates fable from fable (inline). Write to that standard or assign a higher tier. Tier assignments are planning-time recommendations; executing-work may upgrade a tier after a failed attempt, never downgrade mid-effort.
 
+   Where a section carries real behavioral risk, give it a `Tests:` line: the behaviors that must be locked and the risk driving each, in both directions when a guard or flag is involved. Three constraints keep it from confining the implementer: it states **intent, never design** (what to lock, never fixtures, seams, or structure - those are implementation knowledge the plan does not have); it is a **floor, never a ceiling** (the implementer's settle-the-test-question duty continues past it for whatever implementation reveals); and it is **amendable on contact with the code** like any other spec claim, with the delta flagged in the Chapter. The cheaper the tier, the more the line matters: haiku already requires its gate named, sonnet inherits judgment it does not have to re-derive, and for a fable-tier section the line is planning-Fable orienting implementing-Fable.
+
    A `fable` tier is also spend authorization: Fable bills per call to API credits, so name the expected Fable surface (fable-tier sections; the finishing reviews run at Fable by default) in the spec's `Fable Spend` header line at approval time. A `none (cost hold)` entry keeps the whole effort at the session model, with any tier downgrade flagged in the Chapter rather than applied silently. A Fable **advisor** is the standing default on every below-fable session (set once with `/advisor fable`, it persists in settings and reaches every dispatched implementer and headless worker), so the header does not name it - it is presumed, with each consultation re-reading the transcript at Fable rates. `none (cost hold)` is the explicit override: it keeps the effort at the session model AND turns the advisor off for the run.
 
 ## Spec format
@@ -67,6 +69,7 @@ sessions (and post-compaction recovery) understand intent, not just steps.
 ### 1. <Section name>
 Model: haiku | sonnet | opus | fable | fable (inline)
 What gets built. Acceptance criteria as verifiable statements. Files in scope.
+Tests: <optional> the behaviors this section must lock and the risk driving each, e.g. "at minimum, lock both guard directions; a silent bypass is the expensive failure."
 ### 2. ...
 
 ## Out of Scope

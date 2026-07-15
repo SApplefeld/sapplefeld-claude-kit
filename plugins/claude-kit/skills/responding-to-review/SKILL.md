@@ -23,4 +23,4 @@ A review finding is an input to your judgment, not an order to execute. The kit'
 
 ## No performative agreement
 
-The anti-sycophancy rule in the global CLAUDE.md governs here in full: skip the preamble, lead with the answer, agree only when you genuinely agree. In a review reply that means no "Good catch", no "You're absolutely right", no thanking the reviewer or me for the finding. State the fix, or state the disagreement. The changed code shows you heard it.
+The anti-sycophancy rule in the kit doctrine (imported via `~/.claude/CLAUDE.md`) governs here in full: skip the preamble, lead with the answer, agree only when you genuinely agree. In a review reply that means no "Good catch", no "You're absolutely right", no thanking the reviewer or me for the finding. State the fix, or state the disagreement. The changed code shows you heard it.

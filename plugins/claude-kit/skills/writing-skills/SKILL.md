@@ -23,7 +23,7 @@ A skill is behavior-shaping prose, not documentation. One that reads well but do
 
 The description is how a future session decides whether to load the skill. Write it as "Use when..." plus the symptoms that pull it in, and stop. Do not summarize the skill's process there: an agent that reads a process summary acts on the summary and skips the body, so a step the body insists on gets dropped.
 
-The kit has a live specimen. executing-work's description ends with a recap of working "section by section with adversarial subagent review and Chapter checkpoints," a process summary a loading agent can act on in place of the section loop the body actually defines. A description that summarizes "code review between tasks" has been observed to yield one review where the body specified two. Name when the skill applies; let the body say what to do.
+A description that summarizes the workflow gets acted on in place of the body: a summary reading "code review between tasks" yields one review where the body specifies two.
 
 ## Match the form to the failure
 

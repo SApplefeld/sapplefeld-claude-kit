@@ -64,6 +64,24 @@ handledContent := ""
 handledDir := ""
 handledTag := ""
 
+; Self-heal a dry-run flag orphaned by a doctor probe that was killed mid-run.
+; The probe stamps its flag "doctor-probe <ISO-8601 local timestamp>"; such a
+; flag older than 10 minutes is stale and removed so it cannot silently disarm
+; the relay. A user-created flag (any other content) is never touched.
+if FileExist(DRYRUN_FLAG) {
+    probeFlag := ""
+    try probeFlag := Trim(FileRead(DRYRUN_FLAG, "UTF-8"), " `t`r`n")
+    if (SubStr(probeFlag, 1, 12) = "doctor-probe") {
+        stamp := RegExReplace(SubStr(probeFlag, 13), "[^0-9]", "")
+        if (StrLen(stamp) >= 14 && DateDiff(A_Now, SubStr(stamp, 1, 14), "Minutes") >= 10) {
+            try {
+                FileDelete(DRYRUN_FLAG)
+                Log("self-heal: removed stale doctor-probe dryrun.on")
+            }
+        }
+    }
+}
+
 Log("watcher started, polling every " POLL_INTERVAL_MS // 1000 "s")
 SetTimer(Poll, POLL_INTERVAL_MS)
 
@@ -137,8 +155,17 @@ ProcessRequest() {
         Fail("no window.txt configured; refusing to type at a guessed window")
         return
     }
-    if !WinExist(TARGET_WINDOW) {
+    ; The target expression must resolve to exactly one window. A process-only
+    ; match (the seeded default) can match several Windows Terminal windows;
+    ; typing into whichever is active would deliver the resume to the wrong
+    ; session, so refuse and let the retry flow surface it.
+    matchedWindows := WinGetList(TARGET_WINDOW)
+    if (matchedWindows.Length = 0) {
         Fail("target window not found: " TARGET_WINDOW)
+        return
+    }
+    if (matchedWindows.Length != 1) {
+        Fail("target window expression matches " matchedWindows.Length " windows; refusing to type")
         return
     }
 

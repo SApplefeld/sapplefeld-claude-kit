@@ -58,6 +58,7 @@ Crafted-transcript guard tests both directions, `--check` on real transcripts, o
 
 - `claude-kit_compact-session_spec_v1.md` (archive sibling): the effort that vendored the engine this one tunes.
 - `claude-kit_resume-relay_spec_v1.md` (archive sibling): the unattended `/resume` these thresholds gate.
+- `claude-kit_summarizer-robustness_spec_v1.md` (archive sibling, 2026-07-15): fixed the summarizer contract these thresholds feed into; the thresholds themselves are unchanged by it.
 
 ## Chapters
 

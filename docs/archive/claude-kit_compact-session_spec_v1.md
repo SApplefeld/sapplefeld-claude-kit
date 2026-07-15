@@ -57,6 +57,7 @@ Acceptance: reviews returned and adjudicated in the Chapter; gate re-run green; 
 - Upstream: https://github.com/aerovato/magic-compact (issues #5, #6 filed from this effort)
 - Doctrine hooks: `executing-work` (section loop), `operating-instructions` (orchestration and cost rules)
 - `../archive/claude-kit_fable-metering_spec_v1.md`: the cost/model-tier rules that this effort's hard pin---model rule for headless spawns builds on
+- `claude-kit_summarizer-robustness_spec_v1.md` (archive sibling, 2026-07-15): replaced this engine's summarizer contract (indexed template pairs, anchor cross-check, sparse fallback, 600s timeout) after the first-line anchor scheme failed on real orchestrator transcripts
 
 ## Chapters
 

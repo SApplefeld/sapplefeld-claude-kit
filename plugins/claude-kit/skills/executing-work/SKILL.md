@@ -103,7 +103,15 @@ For each Section of Work, in order:
    - **Branch-and-PR:** commit the section's code together with its Chapter (the plan doc update from step 6) to the feature branch, so the record rides with the change into the eventual merge. The PR happens in finishing-work. Pushing here is not merging: nothing is final until that merge.
    - **Commit-and-Push:** commit the section and push to origin. (If concurrency put you on a worktree branch, the merge to main and teardown happen in finishing-work, not here.)
 
-8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. The decision is the engine's, not a reflex: run the compact-session skill's `--check` against the session transcript at each close and compact only on a `compact` recommendation (a `skip` boundary costs nothing; compacting below the check's minimum measurably costs more than it saves). In chain mode (per the Run Mode check), compact the worker session on that verdict and resume the compacted successor for the next section. In an interactive session this step is a no-op mid-run: compacting the live session needs my typed `/resume`, and halting for it violates the completion contract, so offer the compaction line only when the check recommends it and the turn genuinely ends (a true-blocker stop, effort close, or my request). Exception: with the resume relay armed (the compact-session skill's relay mode), the workstation performs the resume itself, so a boundary compaction plus a relay request IS a valid way to end the turn mid-plan; the relayed continue prompt starts the next section in the compacted session, and the contract is carried across the boundary by the plan doc, not broken.
+8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. Every close runs the same two observations, and the Chapter's Compaction line records their results, so a close that skipped them is visibly incomplete:
+   - **Probe the relay.** The relay is armed when the directory `%LOCALAPPDATA%\claude-kit\resume-relay\` exists (PowerShell: `Test-Path "$env:LOCALAPPDATA\claude-kit\resume-relay"`). The compact-session skill owns what an armed relay does; this probe only answers armed or absent. Never conclude "unrelayed" without running it: the probe is one command, and a wrong "absent" silently forfeits every compaction for the rest of the run, each forfeited boundary re-billing 3-5x the post-compaction floor on every later call.
+   - **Run the engine check.** The compact-session skill's `--check` against the session transcript; read its `recommendation`. The decision is the engine's, not a reflex (compacting below its minimum measurably costs more than it saves).
+
+   Then act on the pair:
+   - Check says `skip`: continue to the next section; a skipped boundary costs nothing.
+   - Check says `compact`, chain mode (per the Run Mode check): compact the worker session and resume the compacted successor for the next section.
+   - Check says `compact`, interactive, relay armed: compact and write the relay request per the compact-session skill's relay mode, and end the turn. That IS a valid way to end the turn mid-plan: the workstation performs the resume, the relayed continue prompt starts the next section in the compacted session, and the contract is carried across the boundary by the plan doc, not broken.
+   - Check says `compact`, interactive, relay absent: continue uncompacted. Compacting the live session needs my typed `/resume`, and halting for it violates the completion contract; offer the compaction line when the turn genuinely ends (a true-blocker stop, effort close, or my request).
 
 Then continue to the next section. Do not stop here.
 
@@ -130,11 +138,12 @@ Implemented By: <main session | implementer-haiku | implementer-sonnet | impleme
 Metrics: <review rounds; NEEDS_CONTEXT count; escalations; advisor <model | off>>
 Decisions / Surprises: <anything resolved or discovered; "none" is acceptable>
 Review Findings: <Critical/Major addressed; Majors justified; Minors noted>
+Compaction: <context tokens at close; relay armed|absent; check compact|skip|not run: reason; action compacted|relayed|deferred|none>
 Next: <next section, or "finishing-work">
 Commit Model: <Review-Only | Branch-and-PR | Commit-and-Push>
 ```
 
-Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader. The Metrics line doubles as the data feed for the kit's open experiments (the tier-band and advisor questions in `docs/backlog.md`), so record it even when every count is zero.
+Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader. The Metrics line doubles as the data feed for the kit's open experiments (the tier-band and advisor questions in `docs/backlog.md`), so record it even when every count is zero. The Compaction line is step 8's audit trail: it proves the boundary observations ran, and a `not run` there carries its reason.
 
 ## When all sections are complete
 

@@ -1,0 +1,1 @@
+2026-07-15 SCOTT-DESKTOP claude-kit: kit-doctor's relay check only warns and hands the user arm-resume-relay to run manually, which then just writes the default Window.txt; it should assume that default without the extra run, or arm the relay itself under -Fix consent like the other repairs.

@@ -855,7 +855,6 @@ else {
 # Stop (leaving the leash dead while every other check reads green). node is
 # load-bearing for the entire hook layer (every hook is a 'node ...' command), so
 # its absence is a FAIL, not a skip.
-$kitGoalStopFwd = $kitGoalStopHook -replace '\\', '/'
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($null -eq $nodeCmd) {
     Report "FAIL" "Kit goal hook loads" @(
@@ -867,8 +866,10 @@ elseif (-not $hookFileExists) {
     Report "INFO" "Kit goal hook loads" @("Skipped (kit-goal-stop.js absent; the Kit goal hook check above already FAILs on that).")
 }
 else {
-    # The hook guards its main() behind require.main, so require() has no side effect.
-    $hookOutput = & cmd /c "`"$($nodeCmd.Source)`" -e `"require('$kitGoalStopFwd')`" 2>&1"
+    # The hook guards its main() behind require.main, so require() has no side
+    # effect. The path is passed as argv, never interpolated into the -e source,
+    # so a plugin path containing an apostrophe cannot break the require() string.
+    $hookOutput = & $nodeCmd.Source -e "require(process.argv[1])" $kitGoalStopHook 2>&1
     if ($LASTEXITCODE -eq 0) {
         Report "PASS" "Kit goal hook loads" @("kit-goal-stop.js and its kit-goal-lib.js dependency load cleanly under node.")
     }
@@ -893,28 +894,37 @@ if ($isClone) {
             # match so body prose containing "in progress" or "complete" cannot
             # misclassify the plan.
             $planSafe = Get-SanitizedRepoString $goalState.plan
-            $planFull = Join-Path $repoRoot ([string]$goalState.plan)
-            $planExists = Test-Path -LiteralPath $planFull
-            $planStatus = "unknown"
-            if ($planExists) {
-                try {
-                    $head = Get-Content -LiteralPath $planFull -Raw -ErrorAction Stop
-                    if ($head.Length -gt 2048) { $head = $head.Substring(0, 2048) }
-                    $inProgress = $head -match "(?im)^status:\s*in\s*progress"
-                    $complete = ($head -match "(?im)^status:\s*complete") -and -not $inProgress
-                    if ($complete) { $planStatus = "complete" }
-                    elseif ($inProgress) { $planStatus = "in progress" }
-                }
-                catch {}
-            }
-            if (-not $planExists -or $planStatus -eq "complete") {
-                Report "WARN" "Kit goal state" @(
-                    "A kit goal is armed for $planSafe but that plan is Complete or archived.",
-                    "Clear it (node `"$pluginRoot\hooks\kit-goal.js`" clear, or /kit-goal clear) or it will leash this repo's sessions."
-                )
+            $planRaw = [string]$goalState.plan
+            if ($planRaw -match '(^|[\\/])\.\.([\\/]|$)') {
+                # armGoal never writes a traversing path, so a plan containing a
+                # '..' segment means a hand-edited or corrupt state file; do not
+                # follow it out of the repo to read an arbitrary file.
+                Report "WARN" "Kit goal state" @("$goalStatePath names a plan path containing '..' ($planSafe); refusing to inspect it. Clear the goal (/kit-goal clear) if it is stale.")
             }
             else {
-                Report "PASS" "Kit goal state" @("Armed for $planSafe (active).")
+                $planFull = Join-Path $repoRoot $planRaw
+                $planExists = Test-Path -LiteralPath $planFull
+                $planStatus = "unknown"
+                if ($planExists) {
+                    try {
+                        $head = Get-Content -LiteralPath $planFull -Raw -ErrorAction Stop
+                        if ($head.Length -gt 2048) { $head = $head.Substring(0, 2048) }
+                        $inProgress = $head -match "(?im)^status:\s*in\s*progress"
+                        $complete = ($head -match "(?im)^status:\s*complete") -and -not $inProgress
+                        if ($complete) { $planStatus = "complete" }
+                        elseif ($inProgress) { $planStatus = "in progress" }
+                    }
+                    catch {}
+                }
+                if (-not $planExists -or $planStatus -eq "complete") {
+                    Report "WARN" "Kit goal state" @(
+                        "A kit goal is armed for $planSafe but that plan is Complete or archived.",
+                        "Clear it (node `"$pluginRoot\hooks\kit-goal.js`" clear, or /kit-goal clear) or it will leash this repo's sessions."
+                    )
+                }
+                else {
+                    Report "PASS" "Kit goal state" @("Armed for $planSafe (active).")
+                }
             }
         }
     }

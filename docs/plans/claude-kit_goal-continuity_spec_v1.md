@@ -1,6 +1,6 @@
 # Goal Continuity: /kit-goal Arming and the Leash Across Session Swaps
 
-Status: Approved
+Status: In Progress
 Commit Model: Commit-and-Push
 Fable Spend: spec authored session-led; section tiers below
 Created: 2026-07-16
@@ -68,6 +68,8 @@ Model: fable (inline; Scott present)
 A real plan, goal armed via `/kit-goal`, run to a genuine 200k-plus relay boundary: verify the boundary stop is approved, the relay swaps sessions, the successor is leashed from its first turn, and the run continues to the next section. This is also the GREEN validation for the Phase 1 skill wording, which currently stands on the observed 2026-07-16 incident and the documented evaluator behavior rather than a demonstrated pass.
 Acceptance: one uninterrupted goal-armed run crossing at least one relay boundary with the leash provably continuous (a test stop attempt in the successor gets blocked).
 
+Execution notes (supervised; a future autonomous session must NOT attempt this - it needs Scott and a real long run): (1) the updated plugin must be LIVE on the machine, not just committed - the hook loads from the installed plugin cache, so let the marketplace auto-update fire and start a fresh session, or install the built zip; confirm with the doctor (`[PASS] Kit goal hook` and `Kit goal hook loads`). (2) Relay armed (verified ARMED on this machine 2026-07-16); run `relay/preflight.ps1` -> OK. (3) A CLI session in its own Windows Terminal window. (4) A real multi-section In-Progress plan that will cross 200k context. Arm with `/kit-goal docs/plans/<plan>.md`, run it, and at the first >=200k boundary confirm the turn ends cleanly (the kit hook approves clause (c) on the fresh relay request - unlike native /goal, which deferred here). After the relay swaps sessions, the acceptance test is: provoke a stop in the successor before it finishes and confirm the kit-goal-stop hook BLOCKS it (proving the successor inherited the leash from turn 1 with no re-arm). Then let the run finish; the hook auto-clears the goal at Complete. After a pass, run finishing-work to flip this plan to Complete and archive it.
+
 ### 5. Doctor and docs
 Model: sonnet
 kit-doctor probes for whatever Section 3 shipped (hook wired, state readable, stale-goal detection), plus README and index updates.
@@ -123,4 +125,14 @@ Decisions / Surprises: The doctor's node-require probe was retargeted from kit-g
 Review Findings: 2 MAJOR fixed (doctor load-checks the enforcing hook, not just the lib; missing-node is a FAIL). 2 MINOR fixed (an explicit "hooks.json not found" gap message). 1 MINOR accepted: the stale-goal Status classifier degrades to PASS on an unreadable plan or a non-line-start/>2KB Status header, but it faithfully mirrors kit-goal-lib.js's planHead (a shared convention with the enforcement path, not a doctor-only bug; kit plans use plain line-start `Status:` headers), and PASS-on-ambiguity is the right "don't nag" direction for a diagnostic. Verified: doctor reports the surface green on this healthy install and FAILs (exit 1) when kit-goal-stop.js is renamed away.
 Compaction: context still above the 200k trigger; relay armed; check compact; action deferred - same as Chapter 3 (the active native /goal lacks the clause-(c) carve-out, so a relay handoff would risk a stale resume). The remaining work (finishing pass, Section 4 handoff) is bounded and the durable artifacts carry the state.
 Next: finishing pass (whole-changeset qa-verifier + security sweep over Sections 2/3/5), then 4. Live fire, which is supervised and needs Scott - this session stops BLOCKED there. Plan stays In Progress; it reaches Complete only after the Section 4 live-fire.
+Commit Model: Commit-and-Push
+
+### Chapter 6 - 2026-07-16
+Completed: Finishing pass (whole-changeset QA + security) over Sections 1/2/3/5; Section 4 handed off as supervised
+Implemented By: main session (orchestration) + qa-verifier + security-reviewer
+Metrics: qa-verifier PASS (32/32 tests; §§2/3/5 acceptance verified with evidence); whole-changeset security-reviewer CLEAR; 2 doctor hardening fixes applied; advisor off (Opus-led session)
+Decisions / Surprises: The code is complete (Sections 1/2/3/5 committed 41160fa, b71796d, 6806b04, d3cc781; the finishing hardening lands in this commit). Section 4 (live-fire) is a supervised 200k-plus relay-boundary run that needs Scott and a real long session; it cannot run autonomously and is not counted against the code's acceptance. Status flipped Approved -> In Progress to reflect the actual mid-effort state; it reaches Complete only after Section 4, which finishing-work closes out then (flip + archive via curating-docs + backlog prune). Whole-changeset security CLEAR surfaced two doctor defense-in-depth fixes, applied here: (1) the hook load-check passes the hook path as argv (`node -e "require(process.argv[1])" <path>`) instead of interpolating it into the -e source, so a plugin path containing an apostrophe cannot false-FAIL it (also drops the cmd /c layer); (2) the stale-goal check rejects a '..' segment in goal-state.json's plan before building a filesystem path (armGoal cannot write a traversing path, but a hand-crafted state file could otherwise make the doctor stat an arbitrary file; content was never echoed). A third security note (clause-c relay basename matches cross-project) is accepted as the deliberate fail-open direction. Verified: doctor green on healthy install, the '..' guard WARNs instead of following the path, argv-require resolves a backslash path, 32 tests green.
+Review Findings: qa-verifier PASS; whole-changeset security CLEAR (3 MINOR: 2 doctor fixes applied, 1 accepted). No Critical/Major outstanding across the effort.
+Compaction: context above trigger; relay armed; deferred - the active native /goal lacks the clause-(c) carve-out (same as Chapters 3/5). The effort is at a clean handoff point; a future Section 4 run is Scott's supervised step.
+Next: 4. Live fire - SUPERVISED, needs Scott (runbook in the Section 4 Execution notes above). This session stops BLOCKED there.
 Commit Model: Commit-and-Push

@@ -1,0 +1,70 @@
+# Goal Continuity: /kit-goal Arming and the Leash Across Session Swaps
+
+Status: Approved
+Commit Model: Commit-and-Push
+Fable Spend: spec authored session-led; section tiers below
+Created: 2026-07-16
+
+## Goal
+
+Native `/goal` enforcement and relay compaction now compose: the goal template's handoff carve-out (executing-work, The completion contract) lets the evaluator approve a boundary stop, so a relay-armed compaction ends the turn cleanly instead of racing the Stop hook. That wording fix shipped with this spec's changeset (executing-work goal template and step 8 branches, compact-session relay precondition).
+
+Two gaps remain, and this effort closes them:
+
+1. **The leash is discontinuous across the swap.** Goal state is session-scoped, so the compacted successor starts goalless. Until it is re-armed, the successor runs on the completion contract alone, exactly the "stopped after one big chapter" exposure `/goal` exists to prevent.
+2. **Arming is manual boilerplate.** The canonical goal text must be composed and pasted per run. The target ergonomic: `/kit-goal docs/plans/<plan>.md` arms the run in one line.
+
+## Facts (code.claude.com/docs/en/goal.md)
+
+- `/goal` is a wrapper around a session-scoped prompt-based Stop hook. At each stop attempt, the condition plus the conversation go to the configured small model (Haiku default), which returns yes or no.
+- Conditional clauses in the condition text are honored (bounding clauses such as "or stop after 20 turns" are documented).
+- `/goal clear` clears the goal (aliases: stop, off, reset, none, cancel). Only the evaluator declares completion; the session cannot end its own goal.
+- A goal carries over when resuming the same session. A compacted successor is a new session ID, so inheritance is not expected there; Section 1 confirms.
+- A custom slash command cannot alias a built-in directly: command files expand to prompt text, they do not execute other commands. The two viable `/kit-goal` routes are the SlashCommand tool (if it can invoke `/goal`) and a kit-native mechanism that does not need `/goal` at all.
+
+## The Section 3 fork (decided 2026-07-16: A, kit-native)
+
+Scott chose fork A: a deterministic kit-owned implementation of the plan methodology, keeping native `/goal` in reserve for goals that are not plan-based. Fork B stands only as the fallback if A's Stop-hook UX fails live fire.
+
+**A. Kit-native goal (recommended).** `/kit-goal <plan>` writes a project-scoped goal state file; a kit Stop hook enforces it deterministically: allow the stop when (a) the armed plan's Status is Complete or the plan is archived, (b) the last assistant message leads with `BLOCKED:`, or (c) a resume-relay request was written in the last few minutes; otherwise block with a reason naming the plan. Why it wins: the successor session inherits the leash structurally (same project, same hook), no typed keystrokes, arming is fully automatic, deterministic conditions cannot be sweet-talked, and it works wherever hooks run, Desktop included. Costs and open design points: it duplicates a native feature and the kit maintains it; the blast is project-wide, so the hook must scope to sessions actually working the armed plan (candidate predicate: the session transcript references the plan path); it must handle `stop_hook_active` without looping; and the clause-(c) window must tolerate the watcher archiving `request.txt` within its 10-second poll (accept a recent `processed\` entry, or a dedicated boundary marker).
+
+**B. Watcher goal-line extension.** The relay request contract gains an optional goal line; after typing the resume, the watcher types `/goal <condition>` into the successor, then the continue prompt. Why it loses: it adds two typing stages to a keystroke path whose focus losses are already hard failures, it covers only the relay path (a crash or native auto-compaction still drops the leash), and arming stays manual. It remains the fallback if A's Stop-hook UX proves troublesome in live fire.
+
+With A, the goal template's single owner moves to the `/kit-goal` command and executing-work's template block becomes a pointer to it, per the one-owner rule.
+
+## Sections of Work
+
+### 1. Feasibility probe (supervised, goal-capable machine)
+Model: fable (inline; interactive with Scott present)
+One probe: whether a relayed compacted successor inherits an active native goal. Expected no (goal state is session-scoped); a yes means the kit hook is belt and braces rather than the sole leash across a swap, which changes Section 3's live-fire emphasis, not its design. The fork-B probes (SlashCommand reaching built-ins, AHK driving `/goal` through the slash menu) are dropped with fork B; revisit them only if fork A fails live fire.
+Acceptance: the probe answered with observed evidence recorded in the Chapter.
+
+### 2. /kit-goal arming command
+Model: sonnet
+A `/kit-goal <plan path>` command that validates the plan exists, composes the canonical goal condition from the template, and arms it by writing the kit-native goal state (fork A). Move template ownership here; executing-work points to it.
+Acceptance: one command arms a run against a named plan with no hand-composed boilerplate; a missing or Complete plan is refused with the reason.
+
+### 3. Continuity mechanism (fork A)
+Model: opus
+Goal state file, Stop hook in `plugins/claude-kit/hooks/` wired via `hooks.json`, the deterministic allow conditions above, `/kit-goal clear`, auto-clear on plan Complete, and session-start surfacing ("kit goal armed for <plan>") so no session is surprised by the hook.
+Acceptance: with the mechanism armed, a mid-plan stop without (a), (b), or (c) is blocked with a reason; a clause-(c) boundary stop passes; a successor session in the same project is enforced with no re-arm step.
+
+### 4. Live fire (supervised)
+Model: fable (inline; Scott present)
+A real plan, goal armed via `/kit-goal`, run to a genuine 200k-plus relay boundary: verify the boundary stop is approved, the relay swaps sessions, the successor is leashed from its first turn, and the run continues to the next section. This is also the GREEN validation for the Phase 1 skill wording, which currently stands on the observed 2026-07-16 incident and the documented evaluator behavior rather than a demonstrated pass.
+Acceptance: one uninterrupted goal-armed run crossing at least one relay boundary with the leash provably continuous (a test stop attempt in the successor gets blocked).
+
+### 5. Doctor and docs
+Model: sonnet
+kit-doctor probes for whatever Section 3 shipped (hook wired, state readable, stale-goal detection), plus README and index updates.
+Acceptance: doctor reports the new surface green on a healthy install and names the failure on a broken one.
+
+## Related
+
+- `docs/archive/claude-kit_resume-relay_spec_v1.md`: the watcher this composes with.
+- `docs/archive/claude-kit_compact-session_spec_v1.md` and `docs/archive/claude-kit_summarizer-robustness_spec_v1.md`: the compaction engine and its hardening.
+- Phase 1 (goal template carve-out and relay precondition) shipped in this spec's changeset, in the executing-work and compact-session skills.
+
+## Chapters
+
+(none yet)

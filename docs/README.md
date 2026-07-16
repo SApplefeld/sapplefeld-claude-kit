@@ -20,7 +20,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-None. All plans are archived.
+- `plans/claude-kit_goal-continuity_spec_v1.md` (Approved): `/kit-goal` arming and goal-leash continuity across relay session swaps.
 
 Completed plans are in `archive/` (most recent: `claude-kit_summarizer-robustness_spec_v1.md`, the 2026-07-15 compaction fix - the summarizer's degenerate first-line anchors made orchestrator-session compactions fail on a count mismatch, resolved with indexed template pairs, an echoed-anchor cross-check, a sparse preserve-verbatim fallback, and a 600s summarizer timeout, live-verified on the 933k-token transcript that failed in the wild, plus the relay window.txt default, the watcher's single-window typing guard, and kit-doctor's dryrun resume round-trip probe; before it, `claude-kit_stabilization_spec_v1.md`, the 2026-07-14 audit reconciliation - three live contradictions resolved, dangling references fixed, PowerShell guard coverage, a dozen single-owner rule collapses, a writing-standards conformance sweep, and the one-owner-per-rule authoring rule).
 

@@ -41,6 +41,12 @@ Red flags that you are about to stop wrongly: "say the word and continue", "hold
 
 When you stop, lead the message with `BLOCKED: <exactly what you need from me>` so I see it in seconds rather than discovering a silent halt hours later. A progress update is not a stop and must not be written as one. The `/goal` Stop hook is a backstop, not the mechanism; this contract is the mechanism.
 
+**The goal template.** `/goal` enforcement is an LLM evaluator judging the goal condition against the conversation at each stop attempt, so the condition text decides what a run may do at a compaction boundary. The canonical goal for a plan run bakes in the relay handoff:
+
+> `/goal Work docs/plans/<plan>.md to completion using executing-work. This goal is met when (a) every section is complete and closed out, or (b) you are BLOCKED on a decision only I can make and have documented what you need from me and how I can provide it, or (c) you have just compacted at a section boundary and written the resume-relay request, handing off to a successor session that continues this plan.`
+
+Clause (c) is what lets step 8's relay path end the turn under a goal: the evaluator can only approve what the conversation shows, so a clause-(c) stop states the compaction result and the request write plainly in the closing message. A goal armed without the carve-out cannot bless that stop; step 8's defer branch handles it. Goal state is session-scoped and does not carry to a relayed successor, so until re-armed the successor runs on this contract alone; that gap is expected, not a defect.
+
 **Handoff.** When execution begins inside a conversation that was just brainstorming, say so in one line ("Spec approved, switching to autonomous execution of all N sections") so I see the mode change and can scope it down ("just §1") if I want. I should never have to set an external goal to get full execution.
 
 ## Before starting (or resuming)
@@ -110,7 +116,8 @@ For each Section of Work, in order:
    Then act on the pair:
    - Check says `skip`: continue to the next section; a skipped boundary costs nothing.
    - Check says `compact`, chain mode (per the Run Mode check): compact the worker session and resume the compacted successor for the next section.
-   - Check says `compact`, interactive, relay armed: compact and write the relay request per the compact-session skill's relay mode, and end the turn. That IS a valid way to end the turn mid-plan: the workstation performs the resume, the relayed continue prompt starts the next section in the compacted session, and the contract is carried across the boundary by the plan doc, not broken.
+   - Check says `compact`, interactive, relay armed, and either no `/goal` is active or the active goal carries the handoff carve-out (clause (c) of the goal template above; the goal text I typed is in the conversation, so read it): compact and write the relay request per the compact-session skill's relay mode, state plainly in the closing message that the compaction and the request write satisfy the goal's handoff clause (the evaluator approves from the conversation), and end the turn. That IS a valid way to end the turn mid-plan: the workstation performs the resume, the relayed continue prompt starts the next section in the compacted session, and the contract is carried across the boundary by the plan doc, not broken.
+   - Check says `compact`, interactive, relay armed, but the active goal lacks the carve-out: continue uncompacted, exactly as if the relay were absent. The relay's clean-turn precondition (compact-session, relay mode) cannot be met under a goal that will not approve the boundary stop; do not write a request. Record `deferred: goal blocks the turn` in the Compaction line.
    - Check says `compact`, interactive, relay absent: continue uncompacted. Compacting the live session needs my typed `/resume`, and halting for it violates the completion contract; offer the compaction line when the turn genuinely ends (a true-blocker stop, effort close, or my request).
 
 Then continue to the next section. Do not stop here.

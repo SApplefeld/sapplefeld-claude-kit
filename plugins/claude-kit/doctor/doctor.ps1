@@ -13,8 +13,10 @@
 #   .\doctor.ps1              Check only; prints PASS/WARN/FAIL with remediations.
 #   .\doctor.ps1 -Fix         Also applies the safe durable repairs (execution
 #                             policy, bun PATH wiring, signpost + git hooks on a
-#                             clone) and offers consented installs (bun via
-#                             winget).
+#                             clone), offers consented installs (bun via
+#                             winget), and repairs an armed resume relay
+#                             (consent-gated re-arm or watcher refresh, deferred
+#                             while a request is pending).
 #   .\doctor.ps1 -Fix -Yes    Answers yes to every install prompt (unattended).
 #   .\doctor.ps1 -NoProbe     Skips the two state-writing probes: the CLI login
 #                             probe (spends a model call, needs the network) and
@@ -530,11 +532,12 @@ else {
 
 # --- Resume relay (optional). Reports armed state and the AutoHotkey v2
 # --- dependency, and runs a dry-run round-trip probe through the watcher (-NoProbe
-# --- skips the state-writing probe and does structural detection only). Arming and
-# --- the AHK install stay a deliberate act via the arm script: under -Fix the
-# --- doctor re-arms only after an explicit consent prompt, and never while a real
-# --- request is pending (arming restarts the watcher, which drops its in-flight
-# --- request memory).
+# --- skips the state-writing probe and does structural detection only). First-time
+# --- arming and the AHK install stay a deliberate act via the arm script: under
+# --- -Fix the doctor re-arms or refreshes only after an explicit consent prompt,
+# --- and never while a real request is pending (arming restarts the watcher, which
+# --- drops its in-flight request memory). An armed relay also self-refreshes at
+# --- session start when stale and idle (the relay-refresh hook).
 $relayDir = Join-Path $env:LOCALAPPDATA "claude-kit\resume-relay"
 $armScript = Join-Path $relaySourceDir "arm-resume-relay.ps1"
 $ahkPaths = @(
@@ -565,14 +568,46 @@ else {
     if (-not (Test-Path $shortcut)) { $structuralIssues += "Startup shortcut missing (re-run $armScript)" }
     # Stale watcher: a kit update refreshes this plugin's watcher but not the
     # deployed copy the running process was started from, so the machine keeps
-    # running old code with no signal. A hash mismatch is that gap.
+    # running old code with no signal. A hash mismatch is that gap. Under -Fix
+    # the doctor repairs it (consent-gated) via the arm script's refresh mode,
+    # skipping while a request is pending (a restart could interrupt typing or
+    # drop the watcher's typed-request memory); the relay-refresh SessionStart
+    # hook heals the same gap silently whenever the relay is idle.
     $sourceWatcher = Join-Path $relaySourceDir "resume-relay.ahk"
+    $watcherStale = $false
     if ((Test-Path $watcherCopy) -and (Test-Path $sourceWatcher)) {
         try {
-            if ((Get-FileHash -LiteralPath $watcherCopy -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceWatcher -Algorithm SHA256).Hash) {
-                $structuralIssues += "deployed watcher differs from this plugin's resume-relay.ahk (a kit update since the last arm leaves the old watcher running); re-run $armScript to refresh it"
-            }
+            $watcherStale = ((Get-FileHash -LiteralPath $watcherCopy -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceWatcher -Algorithm SHA256).Hash)
         } catch {}
+    }
+    $refreshNote = $null
+    if ($watcherStale -and $Fix -and -not (Test-Path $requestFile)) {
+        if (Get-Consent "The deployed relay watcher is stale (a kit update since the last arm). Refresh and restart it now?") {
+            $refreshExit = -1
+            try {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $armScript -RefreshOnly *> $null
+                $refreshExit = $LASTEXITCODE
+            } catch {}
+            $rehashFailed = $false
+            try {
+                $watcherStale = ((Get-FileHash -LiteralPath $watcherCopy -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceWatcher -Algorithm SHA256).Hash)
+            } catch { $rehashFailed = $true }
+            if (-not $watcherStale -and -not $rehashFailed) {
+                $refreshNote = "deployed watcher was stale; refreshed and restarted from this plugin's payload."
+            }
+            elseif ($refreshExit -eq 2) {
+                $refreshNote = "refresh ran but deferred: a request arrived while it was running; re-run once the relay is idle."
+            }
+            elseif ($refreshExit -eq 3) {
+                $refreshNote = "refresh declined: the relay is not armed for refresh (Startup shortcut or AutoHotkey missing); re-arm with $armScript."
+            }
+            elseif ($rehashFailed) {
+                $refreshNote = "refresh exit code $refreshExit, but the post-refresh hash re-check failed; the stale WARN below is unverified."
+            }
+        }
+    }
+    if ($watcherStale) {
+        $structuralIssues += "deployed watcher differs from this plugin's resume-relay.ahk (a kit update since the last arm leaves the old watcher running); run doctor -Fix, or $armScript, to refresh it (an armed relay also self-refreshes at session start when idle)"
     }
 
     $status = $null
@@ -777,6 +812,7 @@ else {
         if ($status -eq "PASS") { $status = "WARN" }
         $detail = $detail + $structuralIssues
     }
+    if ($refreshNote) { $detail = @($refreshNote) + $detail }
     Report $status "Resume relay" $detail
 
     # Failed relay requests: unattended runs that never auto-resumed. The

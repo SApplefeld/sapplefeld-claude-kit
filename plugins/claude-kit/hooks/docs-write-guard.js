@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // PreToolUse guard: keep non-curator subagents from writing into docs/.
 //
-// The kit's access model: only the main session and the docs-curator agent
+// The kit's access model: only a main session (interactive, or the bare
+// "claude" agent type a background job runs as) and the docs-curator agent
 // curate docs/. Reviewers, qa, and implementers must not write there; their
 // reports and scratch belong in .kit/ (gitignored), and the durable record is
 // the plan's Chapter. This enforces that invariant mechanically, as the teeth
@@ -44,6 +45,16 @@ function isCurator(t) {
     return /(^|[:/])docs-curator$/i.test(t);
 }
 
+// A user-launched background session presents as the bare catch-all "claude"
+// agent type. It is the main session of its job, not a dispatched subagent, so
+// it authors plan docs like any main session. Exact match only: namespaced ids
+// ("claude-kit:adversarial-reviewer") and named types stay governed. Tradeoff,
+// accepted: a deliberately dispatched catch-all "claude" agent shares the type
+// and therefore also passes.
+function isBackgroundMain(t) {
+    return /^claude$/i.test(t);
+}
+
 // A filesystem path that points inside a docs/ directory. Absolute or relative,
 // Windows or POSIX separators. "mydocs/" does not match (separator required).
 function targetsDocs(s) {
@@ -74,8 +85,9 @@ function main() {
     try { p = JSON.parse(readStdin() || '{}'); } catch { return; } // parse fail: allow
 
     const t = subagentType(p);
-    if (!t) return;            // main session or undetermined: allow
-    if (isCurator(t)) return;  // docs-curator curates docs/: allow
+    if (!t) return;                    // main session or undetermined: allow
+    if (isBackgroundMain(t)) return;   // background job's main session: allow
+    if (isCurator(t)) return;          // docs-curator curates docs/: allow
 
     const input = p.tool_input || p.toolInput || (p.tool && p.tool.input) || {};
     const fp = input.file_path || input.path;

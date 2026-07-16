@@ -44,6 +44,7 @@ Acceptance: one full unattended cycle (request file to running next turn) observ
 ## Related
 
 - `../archive/claude-kit_compact-session_spec_v1.md`: the engine and modes this relay completes; its billing-contingency note is the reason interactive mode is the mode worth automating.
+- `claude-kit_relay-auto-refresh_spec_v1.md`: builds on this plan; makes the deployed watcher self-refreshing after kit updates (SessionStart hook + doctor -Fix repair).
 
 ## Chapters
 

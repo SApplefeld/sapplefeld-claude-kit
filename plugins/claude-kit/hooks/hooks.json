@@ -36,6 +36,15 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/doctrine-refresh.js\""
           }
         ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/relay-refresh.js\""
+          }
+        ]
       }
     ],
     "PreToolUse": [

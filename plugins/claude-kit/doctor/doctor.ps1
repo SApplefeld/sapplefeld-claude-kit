@@ -800,6 +800,129 @@ else {
     }
 }
 
+# --- Kit goal continuity. Fork A's deterministic Stop-hook leash needs
+# --- kit-goal-stop.js present and wired into hooks.json's Stop array, or the
+# --- leash silently never fires; the lib it depends on must load cleanly
+# --- under node; and a clone can be left holding a stale armed goal (the plan
+# --- went Complete or was archived without an intervening Stop event to
+# --- trigger the hook's own auto-clear), which would leash every session in
+# --- that repo against a plan nobody is finishing.
+function Get-SanitizedRepoString {
+    param([string]$Value)
+    # Repo-controlled strings (a plan path from goal-state.json) are stripped
+    # to printable ASCII and length-capped before reaching this trusted output
+    # channel, matching kit-goal.js's own sanitize() convention.
+    $clean = [string]$Value -replace '[^\x20-\x7E]', ''
+    if ($clean.Length -gt 120) { $clean = $clean.Substring(0, 120) }
+    return $clean
+}
+
+$kitGoalStopHook = Join-Path $pluginRoot "hooks\kit-goal-stop.js"
+$hooksJsonPath = Join-Path $pluginRoot "hooks\hooks.json"
+$hookFileExists = Test-Path -LiteralPath $kitGoalStopHook
+$hookWired = $false
+$hooksJsonError = $null
+if (Test-Path -LiteralPath $hooksJsonPath) {
+    try {
+        $hooksJsonData = Get-Content $hooksJsonPath -Raw | ConvertFrom-Json
+        foreach ($entry in @($hooksJsonData.hooks.Stop)) {
+            foreach ($h in @($entry.hooks)) {
+                if ($h.command -match "kit-goal-stop\.js") { $hookWired = $true }
+            }
+        }
+    }
+    catch {
+        $hooksJsonError = $_.Exception.Message
+    }
+}
+if ($hookFileExists -and $hookWired) {
+    Report "PASS" "Kit goal hook" @("kit-goal-stop.js present and wired in hooks.json's Stop array.")
+}
+else {
+    $gaps = @()
+    if (-not $hookFileExists) { $gaps += "kit-goal-stop.js not found at $kitGoalStopHook" }
+    if (-not $hookWired) {
+        if (-not (Test-Path -LiteralPath $hooksJsonPath)) { $gaps += "hooks.json not found at $hooksJsonPath" }
+        elseif ($hooksJsonError) { $gaps += "hooks.json unparseable: $hooksJsonError" }
+        else { $gaps += "hooks.json's Stop array does not reference kit-goal-stop.js" }
+    }
+    Report "FAIL" "Kit goal hook" ($gaps + @("The kit-native goal leash (fork A) cannot enforce a run without this wiring."))
+}
+
+# Load-check the enforcing hook itself, not just its dependency: kit-goal-stop.js
+# require()s kit-goal-lib.js, so one probe covers both, and a syntax error or bad
+# require in the hook is caught here rather than silently failing at the next
+# Stop (leaving the leash dead while every other check reads green). node is
+# load-bearing for the entire hook layer (every hook is a 'node ...' command), so
+# its absence is a FAIL, not a skip.
+$kitGoalStopFwd = $kitGoalStopHook -replace '\\', '/'
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if ($null -eq $nodeCmd) {
+    Report "FAIL" "Kit goal hook loads" @(
+        "node is not on PATH, so kit-goal-stop.js (and every kit hook, all of which are 'node ...' commands) cannot run.",
+        "Install Node.js and ensure 'node' resolves on PATH."
+    )
+}
+elseif (-not $hookFileExists) {
+    Report "INFO" "Kit goal hook loads" @("Skipped (kit-goal-stop.js absent; the Kit goal hook check above already FAILs on that).")
+}
+else {
+    # The hook guards its main() behind require.main, so require() has no side effect.
+    $hookOutput = & cmd /c "`"$($nodeCmd.Source)`" -e `"require('$kitGoalStopFwd')`" 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        Report "PASS" "Kit goal hook loads" @("kit-goal-stop.js and its kit-goal-lib.js dependency load cleanly under node.")
+    }
+    else {
+        Report "FAIL" "Kit goal hook loads" @("require('kit-goal-stop.js') failed (exit $LASTEXITCODE):", ($hookOutput | Select-Object -First 3))
+    }
+}
+
+if ($isClone) {
+    $goalStatePath = Join-Path $repoRoot ".kit\goal-state.json"
+    if (-not (Test-Path -LiteralPath $goalStatePath)) {
+        Report "INFO" "Kit goal state" @("No kit goal armed in this clone.")
+    }
+    else {
+        $goalState = $null
+        try { $goalState = Get-Content $goalStatePath -Raw | ConvertFrom-Json } catch {}
+        if ($null -eq $goalState -or -not $goalState.plan) {
+            Report "WARN" "Kit goal state" @("$goalStatePath exists but is unparseable or missing a 'plan' field; a stuck goal may be leashing sessions with no readable state.")
+        }
+        else {
+            # Mirrors kit-goal-lib.js's planHead: an anchored, line-start Status
+            # match so body prose containing "in progress" or "complete" cannot
+            # misclassify the plan.
+            $planSafe = Get-SanitizedRepoString $goalState.plan
+            $planFull = Join-Path $repoRoot ([string]$goalState.plan)
+            $planExists = Test-Path -LiteralPath $planFull
+            $planStatus = "unknown"
+            if ($planExists) {
+                try {
+                    $head = Get-Content -LiteralPath $planFull -Raw -ErrorAction Stop
+                    if ($head.Length -gt 2048) { $head = $head.Substring(0, 2048) }
+                    $inProgress = $head -match "(?im)^status:\s*in\s*progress"
+                    $complete = ($head -match "(?im)^status:\s*complete") -and -not $inProgress
+                    if ($complete) { $planStatus = "complete" }
+                    elseif ($inProgress) { $planStatus = "in progress" }
+                }
+                catch {}
+            }
+            if (-not $planExists -or $planStatus -eq "complete") {
+                Report "WARN" "Kit goal state" @(
+                    "A kit goal is armed for $planSafe but that plan is Complete or archived.",
+                    "Clear it (node `"$pluginRoot\hooks\kit-goal.js`" clear, or /kit-goal clear) or it will leash this repo's sessions."
+                )
+            }
+            else {
+                Report "PASS" "Kit goal state" @("Armed for $planSafe (active).")
+            }
+        }
+    }
+}
+else {
+    Report "INFO" "Kit goal state" @("Skipped (installed plugin cache, not a repo clone; no specific repo to inspect).")
+}
+
 # --- Summary.
 Write-Host ""
 if ($script:failCount -gt 0) {

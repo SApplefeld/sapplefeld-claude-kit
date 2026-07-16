@@ -24,6 +24,7 @@ claude-kit/                          (repo = the marketplace)
         kaizen/                      Capture kit friction, reflect into briefs, apply improvements
         design-council/              Opt-in multi-lens pressure-test for a hard-to-reverse design fork
         cold/                        Neutral evidence-first lens for non-code judgment calls
+        kit-goal/                    /kit-goal <plan> arms a deterministic project-scoped completion leash
         csharp-style/                C# house style + detailed reference
         sql-style/                   T-SQL house style + detailed reference
         scott-writing-style/         Document/prose style guide
@@ -109,6 +110,8 @@ Some environments - for example a work Cowork/Chat account that can't reach this
 Brainstorming produces a spec in `docs/plans/<project>_spec_v1.md` with a recorded commit model: Review-Only (stage, Scott reviews the diff), Branch-and-PR (feature branch and a PR, for shared repos), or Commit-and-Push (land on main and auto-tear-down any worktree branch it used). At a hard, hard-to-reverse design fork it can offer a read-only design council (`design-council`) that pressure-tests the candidate approaches through blind, independent lens positions and facilitator-run convergence rounds, returning a recommendation or a clean fork for Scott, offered and never automatic. Executing-work runs the spec section by section under the completion contract (it drives every remaining unblocked section to done rather than pausing at boundaries): implement, verify with evidence, a paired review (spec-anchored adversarial plus blind diff-only, with security review added on sensitive surfaces), update the plan, append a Chapter, commit per the model. Finishing-work closes the effort: qa-verifier, security-reviewer, final adversarial-reviewer pass, docs-curator with Drift Report, plan closed, changes presented, pushed, or opened as a PR per the model.
 
 Compaction recovery is deterministic: the SessionStart hook fires on startup, resume, and after every compaction, finds in-progress plans, and instructs the session to re-read them - Chapters included - before any work proceeds.
+
+`/kit-goal docs/plans/<plan>.md` arms a project-scoped completion leash for a run in one line, enforced by a deterministic Stop hook (no LLM evaluator) whose state lives in `.kit/` and so survives a compaction or session swap - unlike native `/goal`, which is session-scoped and starts a compacted successor goalless. The hook allows a stop only when the plan is Complete or archived, the last message is `BLOCKED:`, or a resume-relay handoff for that plan just fired; otherwise it blocks with a reason naming the plan. Clear an armed goal with `/kit-goal clear`.
 
 ## MODEL TIERING
 

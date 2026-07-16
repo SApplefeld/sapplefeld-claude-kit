@@ -322,5 +322,10 @@ function main() {
     process.stdout.write(JSON.stringify({ decision: 'block', reason }));
 }
 
-try { main(); } catch { /* never trap the session: any error allows the stop */ }
-process.exit(0);
+// Run as the Stop hook only when invoked directly. A require() of this file
+// (the kit-doctor load-check) then verifies it parses and its kit-goal-lib.js
+// dependency resolves, without executing the hook.
+if (require.main === module) {
+    try { main(); } catch { /* never trap the session: any error allows the stop */ }
+    process.exit(0);
+}

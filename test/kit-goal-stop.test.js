@@ -11,7 +11,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -51,9 +51,11 @@ function writeTranscript(full, planRel, assistantTexts) {
 }
 
 // Run the hook with the given payload and a chosen LOCALAPPDATA. Returns the
-// spawnSync result (stdout, stderr, status).
-function runHook(payload, localAppData) {
-    const env = { ...process.env };
+// spawnSync result (stdout, stderr, status). Clause-(b) retries are disabled by
+// default so block-path tests stay fast and an ambient KIT_GOAL_STOP_RETRY_MS
+// cannot warp the suite's timing; pass extraEnv to exercise a real schedule.
+function runHook(payload, localAppData, extraEnv) {
+    const env = { ...process.env, KIT_GOAL_STOP_RETRY_MS: '0', ...(extraEnv || {}) };
     if (localAppData !== undefined) env.LOCALAPPDATA = localAppData;
     return spawnSync(process.execPath, [HOOK], {
         input: JSON.stringify(payload),
@@ -359,6 +361,108 @@ test('stop_hook_active true: still blocks (the leash re-evaluates every stop att
         assert.strictEqual(res.status, 0);
         const out = JSON.parse(res.stdout);
         assert.strictEqual(out.decision, 'block', 'a stop-hook continuation must not release the leash');
+    } finally {
+        rmDir(repo);
+        rmDir(local);
+    }
+});
+
+test('a mid-append partial final line makes the last turn indeterminate: allow', () => {
+    // The harness appends the turn's final entries (assistant text, stop-time
+    // metadata) around the same moment the Stop hook runs. A read that lands
+    // mid-append sees a truncated JSON fragment as the last line; the last turn
+    // is then indeterminate and the stop must be allowed, not answered from the
+    // previous turn's text. The file is far below the 1MB tail cap, so this
+    // exercises the mid-write guard, not the cap-truncation guard.
+    const { repo, transcript, local } = armedRepo(['Making progress.']);
+    try {
+        fs.appendFileSync(transcript,
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"te');
+        const res = runHook({ cwd: repo, transcript_path: transcript }, local);
+        assert.strictEqual(res.stdout, '', 'a mid-write tail must be indeterminate (allow), not read as the prior turn');
+        assert.strictEqual(res.status, 0);
+    } finally {
+        rmDir(repo);
+        rmDir(local);
+    }
+});
+
+test('clause (b) tolerates the stop-time flush race: a BLOCKED entry landing just after the stop still allows', async () => {
+    // Live-observed race: the hook can evaluate before the harness's append of
+    // the final assistant text entry is readable, so a genuine 'BLOCKED:' exit
+    // was answered from the previous turn and blocked. The hook re-reads after
+    // a short delay; an entry that lands inside that window must be honored.
+    // Probabilistic pin: if child spawn plus first read ever exceeds the 250ms
+    // append delay, the first read already sees the entry and the retry path is
+    // not exercised that run; the test can green vacuously on a slow machine
+    // but can never falsely fail (any ordering yields an allow).
+    const { repo, transcript, local } = armedRepo(['Working; about to surface a blocker.']);
+    try {
+        const env = { ...process.env, LOCALAPPDATA: local, KIT_GOAL_STOP_RETRY_MS: '900' };
+        const child = spawn(process.execPath, [HOOK], { env });
+        let stdout = '';
+        child.stdout.on('data', (d) => { stdout += d; });
+        const closed = new Promise((resolve) => child.on('close', resolve));
+        child.stdin.write(JSON.stringify({ cwd: repo, transcript_path: transcript }));
+        child.stdin.end();
+        // Land the BLOCKED entry after the hook's first read, inside its retry window.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        fs.appendFileSync(transcript, JSON.stringify({
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'BLOCKED: needs a supervised step.' }] }
+        }) + '\n');
+        await closed;
+        assert.strictEqual(stdout, '', 'the late-landing BLOCKED entry must be seen by the clause-(b) re-read');
+    } finally {
+        rmDir(repo);
+        rmDir(local);
+    }
+});
+
+test('a partial final line that completes into a non-BLOCKED entry inside the retry window: block', async () => {
+    // The other half of the mid-append guard: a partial tail is retried, not
+    // allowed on first sighting, so when the in-flight append resolves to an
+    // ordinary (non-BLOCKED) turn inside the window, the leash correctly holds.
+    const { repo, transcript, local } = armedRepo(['Making progress.']);
+    try {
+        const full = JSON.stringify({
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'Just progress, not a blocker.' }] }
+        });
+        fs.appendFileSync(transcript, full.slice(0, 40));
+        const env = { ...process.env, LOCALAPPDATA: local, KIT_GOAL_STOP_RETRY_MS: '900' };
+        const child = spawn(process.execPath, [HOOK], { env });
+        let stdout = '';
+        child.stdout.on('data', (d) => { stdout += d; });
+        const closed = new Promise((resolve) => child.on('close', resolve));
+        child.stdin.write(JSON.stringify({ cwd: repo, transcript_path: transcript }));
+        child.stdin.end();
+        // Complete the in-flight entry inside the hook's retry window.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        fs.appendFileSync(transcript, full.slice(40) + '\n');
+        await closed;
+        const out = JSON.parse(stdout);
+        assert.strictEqual(out.decision, 'block', 'a partial tail resolving to a non-BLOCKED turn must still block');
+    } finally {
+        rmDir(repo);
+        rmDir(local);
+    }
+});
+
+test('KIT_GOAL_STOP_RETRY_MS parsing fails open and never throws: 0, garbage, and mixed junk all still block promptly', () => {
+    // The env boundary of the retry schedule: a disable ('0'), pure garbage, and
+    // a mixed junk list must all degrade to "no retries" (or sane clamped
+    // delays), never to a throw, which the top-level catch would turn into a
+    // silent allow on every leashed stop.
+    const { repo, transcript, local } = armedRepo(['Making progress.']);
+    try {
+        for (const raw of ['0', 'garbage', '-5,abc']) {
+            const res = runHook({ cwd: repo, transcript_path: transcript }, local,
+                { KIT_GOAL_STOP_RETRY_MS: raw });
+            assert.strictEqual(res.status, 0, `retry env '${raw}' must not crash the hook`);
+            const out = JSON.parse(res.stdout);
+            assert.strictEqual(out.decision, 'block', `retry env '${raw}' must still block`);
+        }
     } finally {
         rmDir(repo);
         rmDir(local);

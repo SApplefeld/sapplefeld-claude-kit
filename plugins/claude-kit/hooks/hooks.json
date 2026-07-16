@@ -86,6 +86,14 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-docs-hygiene.js\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-goal-stop.js\""
+          }
+        ]
       }
     ]
   }

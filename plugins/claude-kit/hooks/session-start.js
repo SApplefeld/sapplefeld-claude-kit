@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { readGoal } = require('./kit-goal-lib.js');
 
 // Read Hook Input from stdin.
 function readStdin() {
@@ -179,8 +180,21 @@ function main() {
         // Never let the relay check break recovery or the session.
     }
 
+    // Armed-goal surfacing is additive and must never affect plan recovery.
+    // When a kit goal is armed for this project, a Stop hook holds the session
+    // to completion; surface it so no session is surprised by that hold.
+    let goalArmed = null;
+    try {
+        const goal = readGoal(cwd);
+        if (goal && goal.plan) {
+            goalArmed = goal.plan.replace(/[^\x20-\x7E]/g, '').slice(0, 120);
+        }
+    } catch {
+        // Never let the goal check break recovery or the session.
+    }
+
     // Emit Additional Context.
-    if (activePlans.length === 0 && kaizenCount === 0 && completedUnarchived === 0 && !relayFailures) return;
+    if (activePlans.length === 0 && kaizenCount === 0 && completedUnarchived === 0 && !relayFailures && !goalArmed) return;
 
     const blocks = [];
 
@@ -208,6 +222,10 @@ function main() {
 
     if (relayFailures) {
         blocks.push(`${relayFailures.count} resume-relay request(s) failed in the last 24h on this machine (newest: ${relayFailures.newest}). An unattended run may have compacted but never auto-resumed. Check %LOCALAPPDATA%\\claude-kit\\resume-relay\\failed\\ (each file names the stalled session on its first line) and resume it with 'claude --resume <session-id>' in its repo, or run the kit-doctor skill. Reminder, not a blocker.`);
+    }
+
+    if (goalArmed) {
+        blocks.push(`A kit goal is armed for ${goalArmed} in this project. If you are working that plan, a Stop hook holds the session to completion, allowing a stop only on plan Complete, a leading 'BLOCKED:', or a section-boundary relay handoff. Reminder, not a blocker.`);
     }
 
     process.stdout.write(JSON.stringify({

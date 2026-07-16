@@ -48,12 +48,17 @@ function planHead(cwd, planRel) {
     try {
         const buf = Buffer.alloc(2048);
         const bytes = fs.readSync(fd, buf, 0, 2048, 0);
-        const head = buf.toString('utf8', 0, bytes);
-        // Anchor to a line start (m flag) so body prose that happens to contain
-        // "Status: Complete" or "in progress" cannot misclassify the plan; the
-        // Status header sits on its own line near the top by convention.
-        const inProgress = /^status:\s*in\s*progress/im.test(head);
-        const complete = /^status:\s*complete/im.test(head) && !inProgress;
+        let head = buf.toString('utf8', 0, bytes);
+        if (head.charCodeAt(0) === 0xFEFF) head = head.slice(1);
+        // Classify from the Status header only: anchored to a line start (m flag)
+        // so body prose cannot match, and the value must sit on the same line as
+        // the header ([^\S\r\n]* is horizontal whitespace only, never a newline),
+        // so a bare "Status:" line above a line beginning "Complete" or "in
+        // progress" does not misclassify the plan. A leading UTF-8 BOM (PowerShell
+        // Set-Content writes one) is stripped above so the anchor sees the header.
+        // The Status header sits on its own line near the top by convention.
+        const inProgress = /^status:[^\S\r\n]*in[^\S\r\n]*progress/im.test(head);
+        const complete = /^status:[^\S\r\n]*complete/im.test(head) && !inProgress;
         let status = 'unknown';
         if (complete) status = 'complete';
         else if (inProgress) status = 'in progress';
@@ -126,11 +131,18 @@ function armGoal(cwd, planArg) {
     const state = {
         plan: rel,
         condition: composeCondition(rel),
-        armedAt: new Date().toISOString()
+        armedAt: new Date().toISOString(),
+        // Which session currently holds the leash, or null when unclaimed. A
+        // fresh arm (including re-arming an already-armed goal after a crash)
+        // starts unbound: the next stop that resolves to a leashed session
+        // claims it, so re-arm is always a clean rebind opportunity.
+        boundSession: null
     };
     try {
         fs.mkdirSync(path.dirname(gp), { recursive: true });
-        const tmp = gp + '.tmp';
+        // The tmp name carries this process's pid so two writers (e.g. a CLI
+        // arm racing a Stop hook's bind) never collide on the same tmp path.
+        const tmp = gp + '.tmp.' + process.pid;
         fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n', 'utf8');
         fs.renameSync(tmp, gp);
     } catch (err) {
@@ -138,6 +150,48 @@ function armGoal(cwd, planArg) {
     }
 
     return { ok: true, plan: rel };
+}
+
+// Bind (or rebind) the armed goal to a session id, recording which session
+// holds the leash. Reads the current goal state, sets boundSession, and
+// rewrites the file atomically (tmp + rename, matching armGoal). Returns
+// { ok:true } on success, or { ok:false, reason } when no goal is armed, the
+// session id is unusable, or the write fails. Never throws. The session id is
+// written into goal-state.json, which the hooks surface into the model's
+// context, so a control character (a newline could smuggle instructions) is
+// rejected, matching normalizePlanArg's sanitize-before-store rule; a length
+// cap likewise rejects an oversized value (the Stop hook can feed this a raw
+// line read from a relay file, which a corrupt or hostile file could pad to
+// kilobytes).
+//
+// Concurrency posture: this read-modify-write is not locked, so two stops
+// resolving to different sessions at nearly the same moment are last-writer-
+// wins; the loser simply reads the winner's binding at its own next stop and
+// allows (a bystander, or a successor that reclaims via the genealogy ledger).
+// A clear that lands between this function's read and its write can be
+// resurrected by this write, recoverable by clearing again. Enforcement never
+// depends on this write succeeding: a failed bind still leashes the current
+// stop and is retried at the next one.
+function bindSession(cwd, sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '' || sessionId.length > 128
+        || /[\x00-\x1F]/.test(sessionId)) {
+        return { ok: false, reason: 'session id is invalid' };
+    }
+    const state = readGoal(cwd);
+    if (!state || !state.plan) {
+        return { ok: false, reason: 'no goal is armed' };
+    }
+    state.boundSession = sessionId;
+    const gp = goalPath(cwd);
+    try {
+        fs.mkdirSync(path.dirname(gp), { recursive: true });
+        const tmp = gp + '.tmp.' + process.pid;
+        fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n', 'utf8');
+        fs.renameSync(tmp, gp);
+    } catch (err) {
+        return { ok: false, reason: 'could not write goal state: ' + (err && err.message ? err.message : String(err)) };
+    }
+    return { ok: true };
 }
 
 // Delete the goal-state file if present. Returns { ok:true, cleared:true } when
@@ -162,4 +216,4 @@ function clearGoal(cwd) {
     }
 }
 
-module.exports = { goalPath, readGoal, armGoal, clearGoal, composeCondition, planHead };
+module.exports = { goalPath, readGoal, armGoal, bindSession, clearGoal, composeCondition, planHead };

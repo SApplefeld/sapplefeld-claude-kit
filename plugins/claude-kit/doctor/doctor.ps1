@@ -945,8 +945,8 @@ if ($isClone) {
                     try {
                         $head = Get-Content -LiteralPath $planFull -Raw -ErrorAction Stop
                         if ($head.Length -gt 2048) { $head = $head.Substring(0, 2048) }
-                        $inProgress = $head -match "(?im)^status:\s*in\s*progress"
-                        $complete = ($head -match "(?im)^status:\s*complete") -and -not $inProgress
+                        $inProgress = $head -match "(?im)^status:[^\S\r\n]*in[^\S\r\n]*progress"
+                        $complete = ($head -match "(?im)^status:[^\S\r\n]*complete") -and -not $inProgress
                         if ($complete) { $planStatus = "complete" }
                         elseif ($inProgress) { $planStatus = "in progress" }
                     }

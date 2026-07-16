@@ -141,8 +141,17 @@ function main() {
                 const buf = Buffer.alloc(2048);
                 const bytes = fs.readSync(fd, buf, 0, 2048, 0);
                 fs.closeSync(fd);
-                const head = buf.toString('utf8', 0, bytes);
-                if (/status:\s*in\s*progress/i.test(head)) {
+                let head = buf.toString('utf8', 0, bytes);
+                if (head.charCodeAt(0) === 0xFEFF) head = head.slice(1);
+                // Classify from the Status header only: anchored to a line start
+                // (m flag) so body prose cannot match, and the value must sit on
+                // the same line as the header ([^\S\r\n]* is horizontal whitespace
+                // only, never a newline), so a bare "Status:" line above a line
+                // beginning "complete" or "in progress" does not misclassify the
+                // plan. A leading UTF-8 BOM (PowerShell Set-Content writes one) is
+                // stripped above so the anchor sees the header. The header sits on
+                // its own line near the top by convention.
+                if (/^status:[^\S\r\n]*in[^\S\r\n]*progress/im.test(head)) {
                     // The header is repo-controlled data bound for a trusted context
                     // channel: whitelist the commit model and sanitize the filename so
                     // a hostile plan doc cannot inject instructions.
@@ -151,7 +160,7 @@ function main() {
                         file: file.replace(/[^\x20-\x7E]/g, '').slice(0, 120),
                         model: model ? model[1] : 'unknown'
                     });
-                } else if (/status:\s*complete/i.test(head)) {
+                } else if (/^status:[^\S\r\n]*complete/im.test(head)) {
                     // A Complete plan should have moved to docs/archive/. One still
                     // in plans/ is a missed close-out step: count it for a soft nudge.
                     completedUnarchived++;

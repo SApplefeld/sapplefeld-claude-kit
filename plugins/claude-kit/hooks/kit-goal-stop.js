@@ -21,8 +21,24 @@
 //
 // Allow order:
 //   0.  no goal armed: allow (the hot path for every session everywhere).
-//   0b. scoping: the session transcript must reference the armed plan, else an
-//       unrelated session in this project is allowed (never leashed).
+//   0b. scoping by session identity. The goal binds to exactly one session:
+//         - Bound to THIS session: leashed, proceed to enforcement.
+//         - Bound to another session: allow, UNLESS the compaction genealogy
+//           ledger shows this session is a (multi-hop) successor of the bound
+//           session, in which case the leash follows the swap (rebind) and this
+//           session is enforced. A session that merely mentions the plan but is
+//           not the bound session or its successor is never leashed.
+//         - Unbound: the first session whose genuine user-typed text carries the
+//           plan path inside a <command-args> span (the /kit-goal arming
+//           invocation, including a re-arm after a crash) claims the binding and
+//           is enforced; every other session is allowed. Plain prose merely
+//           mentioning the path never claims, nor does harness-injected feedback
+//           (isMeta) or an assistant echo: a resumed relay successor does not
+//           need this claim either, since clause (c)'s rebind and the genealogy
+//           ledger already cover it.
+//       Binding is best-effort: a failed bind write still enforces this stop and
+//       is retried at the next stop, so a persistence hiccup never releases a
+//       genuinely leashed session.
 //   a.  plan Status is Complete, or the plan file is gone (archived): auto-clear
 //       the goal and allow.
 //   b.  the last assistant message leads with 'BLOCKED:': allow. The harness can
@@ -32,9 +48,16 @@
 //       and a persistent partial tail stays indeterminate: allow.
 //   c.  a resume-relay handoff for this plan was written in the last few minutes
 //       by a session other than this one: allow (a section-boundary compaction
-//       swap is in flight). A handoff whose destination is THIS session does not
-//       count: that is the request that resumed us, not us handing off, and the
-//       resumed successor must stay leashed through the recency window.
+//       swap is in flight), and rebind the leash to the handoff's destination
+//       session so the resumed successor holds it. A handoff whose destination
+//       is THIS session does not count: that is the request that resumed us, not
+//       us handing off, and the resumed successor must stay leashed through the
+//       recency window. The scan reads newest-first, and the first handoff
+//       naming this plan's basename ends it (whether it allows-and-rebinds
+//       elsewhere or is excluded as our own spawning handoff): an older archived
+//       handoff for the same plan is never consulted once a newer one has
+//       answered. A handoff naming a different plan is not an answer and falls
+//       through to the next-older archive.
 //   else: block with a reason naming the plan and the three ways out.
 //
 // The hook re-evaluates these conditions on EVERY stop attempt, including inside
@@ -48,7 +71,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { readGoal, planHead, clearGoal } = require('./kit-goal-lib.js');
+const os = require('os');
+const { readGoal, planHead, clearGoal, bindSession } = require('./kit-goal-lib.js');
 
 // A resume-relay handoff counts as recent for this window (ms). Five minutes
 // tolerates the watcher's 10-second poll archiving request.txt to processed\.
@@ -65,9 +89,9 @@ function readStdin() {
 }
 
 // Read a transcript with a size cap: for a large file, the head plus tail (the
-// resume continue prompt and executing-work turns naming the plan live at both
-// ends). Returns '' on any error or a non-regular file (a blocking read on a
-// FIFO would hang, which no try/catch can rescue).
+// arming invocation and any re-arm can each land near either end of a long-
+// running session). Returns '' on any error or a non-regular file (a blocking
+// read on a FIFO would hang, which no try/catch can rescue).
 function readTranscriptCapped(transcriptPath) {
     try {
         const st = fs.statSync(transcriptPath);
@@ -92,40 +116,107 @@ function readTranscriptCapped(transcriptPath) {
     }
 }
 
-// Extract genuine message text (a string content, or {type:'text'} blocks) from
-// a user/assistant message and test whether it contains the needle. Path
-// separators in the text are normalized to '/' so a Windows-style reference
-// matches the forward-slash plan path. tool_use and tool_result blocks are
-// ignored: they carry tool I/O, which can echo the plan path without the session
-// working the plan.
-function messageTextIncludes(message, needle) {
+// Compare two session ids as opaque, case-insensitive strings (session UUIDs
+// are surfaced in mixed case across the harness and the relay records). Some
+// genealogy source ids are non-UUID labels; they compare the same way.
+function sameSessionId(a, b) {
+    if (!a || !b) return false;
+    return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+}
+
+// Remove local-command output and caveat blocks from user-slot text. When a user
+// runs a slash command the CLI echoes its stdout (and a caveat) back into the
+// user turn inside <local-command-stdout>/<local-command-caveat> wrappers; that
+// is the CLI's own output, not something the user typed, so it must not bind the
+// leash (e.g. /kit-goal status prints the armed plan path, and a catted file or
+// grep hit can echo a literal <command-args> string as data). The deliberate
+// slash-command invocation record (<command-name>/<command-args>) is NOT
+// stripped: the plan path a user types as a command argument is exactly how the
+// arming session claims the binding. A close tag must name the same wrapper as
+// its opener (the backreference), so a coincidental mismatched-name closing tag
+// inside real output cannot terminate the strip early and leave the rest of that
+// output, or content past it, looking like ordinary typed text. The paired match
+// is greedy: it runs to the LAST same-name close tag in the entry, so echoed
+// output that embeds a literal same-name close tag followed by a fake
+// <command-name>/<command-args> claim cannot end the strip early and expose that
+// claim. The accepted trade-off is that genuine typed text sitting between two
+// same-name blocks in one entry is over-stripped, which errs toward NOT claiming
+// (the safe direction). An opener with no matching closer anywhere in the
+// (possibly capped) text is a truncated echo (cut by the read cap, or caught
+// mid-write); it is stripped to end-of-text rather than left holding whatever it
+// happened to contain.
+function stripLocalCommandOutput(text) {
+    return text
+        .replace(/<local-command-([a-z]+)>[\s\S]*<\/local-command-\1>/gi, ' ')
+        .replace(/<local-command-[a-z]+>[\s\S]*$/gi, ' ');
+}
+
+// Extract genuine user-typed text from a user message (a string content, or
+// {type:'text'} blocks), strip local-command output, and test whether it is a
+// kit-goal invocation whose <command-args> span carries the needle. Separators
+// are normalized to '/' so a Windows-style reference matches the forward-slash
+// plan path. tool_use and tool_result blocks are ignored: they carry tool I/O,
+// which can echo the plan path outside any command invocation. The command-args
+// only count when they belong to a kit-goal invocation: the same content must
+// carry a <command-name> whose value is exactly '/kit-goal' or ends with
+// ':kit-goal' (the plugin-namespaced form, e.g. '/claude-kit:kit-goal'), so
+// another command that legitimately takes a path argument (e.g. /graphify
+// docs/plans/<plan>.md) cannot steal the binding from the arming session.
+function userCommandArgsInclude(message, needle) {
     if (!message) return false;
     const c = message.content;
-    if (typeof c === 'string') return c.replace(/\\/g, '/').includes(needle);
-    if (!Array.isArray(c)) return false;
-    for (const b of c) {
-        if (b && b.type === 'text' && typeof b.text === 'string'
-            && b.text.replace(/\\/g, '/').includes(needle)) return true;
+    let text = '';
+    if (typeof c === 'string') {
+        text = c;
+    } else if (Array.isArray(c)) {
+        for (const b of c) {
+            if (b && b.type === 'text' && typeof b.text === 'string') text += '\n' + b.text;
+        }
+    } else {
+        return false;
+    }
+    const stripped = stripLocalCommandOutput(text).replace(/\\/g, '/');
+    const nameMatch = /<command-name>([^<]*)<\/command-name>/i.exec(stripped);
+    if (!nameMatch) return false;
+    const name = nameMatch[1].trim();
+    if (name !== '/kit-goal' && !name.endsWith(':kit-goal')) return false;
+    const args = /<command-args>([\s\S]*?)<\/command-args>/gi;
+    let m;
+    while ((m = args.exec(stripped))) {
+        if (m[1].includes(needle)) return true;
     }
     return false;
 }
 
-// Scoping predicate: does this session's transcript reference the armed plan in
-// genuine conversation? Matches the full repo-relative plan path (e.g.
-// docs/plans/foo.md), separator-normalized, only in user-typed prompt text or
-// assistant message text. Two deliberate exclusions:
-//   - It does NOT raw-substring-match the whole transcript: the session-start
-//     goal surfacing injects the plan path into EVERY session's transcript as an
-//     attachment, so a raw match would leash every session in the project rather
-//     than the one working the plan. Attachments and tool_result blocks are
-//     skipped for that reason; the arming signals (the /kit-goal <plan> command
-//     and the resume continue-prompt) are both user text and survive.
-//   - It matches the dir-qualified path, not just the basename, so an unrelated
-//     session that merely names a same-basename file in prose (routine in the
-//     kit repo itself) is not leashed to whatever goal is armed.
-// False if there is no path or it is unreadable: a session we cannot scope is
-// never leashed.
-function transcriptReferencesPlan(transcriptPath, planRel) {
+// Scoping predicate for an unbound goal: does this session's transcript show the
+// user typing the armed plan path as a slash-command argument? Matches the full
+// repo-relative plan path (e.g. docs/plans/foo.md), separator-normalized, and
+// only inside a <command-args>...</command-args> span of a USER entry (the
+// /kit-goal arming invocation, including a re-arm after a crash). A plain prose
+// mention of the path never claims: without this, any bystander session that
+// happens to type or discuss the path (or that echoes it back, e.g. reading the
+// session-start goal surfacing aloud) could steal the binding from the session
+// actually working the plan. Deliberate exclusions:
+//   - Assistant entries are skipped entirely: an assistant echo of the plan path
+//     must never self-leash the session.
+//   - isMeta entries are skipped: harness-injected records (e.g. this very Stop
+//     hook's own block reason, replayed back as "Stop hook feedback: ...") land
+//     in the transcript as a user-type entry but are not something the user
+//     typed, and this hook's reason text names the plan path in full.
+//   - Attachment and tool_result entries are skipped: the session-start
+//     surfacing injects the plan path into EVERY session's transcript as an
+//     attachment, and tool output can echo it, neither of which is the user
+//     working the plan.
+//   - Local-command output inside a user turn is stripped before the
+//     <command-args> scan (the CLI's own echo of a slash command's stdout could
+//     otherwise carry a literal, fake <command-args> string as quoted data),
+//     and sub-agent (sidechain) turns do not count.
+//   - It matches the dir-qualified path, not just the basename, so a session
+//     that merely names a same-basename file is not leashed.
+// A resumed relay successor does not need this claim: clause (c)'s rebind and
+// the genealogy ledger already carry the leash to it. False if there is no path
+// or it is unreadable: a session we cannot scope is never leashed.
+function userCommandArgsClaimPlan(transcriptPath, planRel) {
     try {
         if (!transcriptPath || !planRel) return false;
         const needle = String(planRel).replace(/\\/g, '/');
@@ -137,13 +228,61 @@ function transcriptReferencesPlan(transcriptPath, planRel) {
             if (!t) continue;
             let entry;
             try { entry = JSON.parse(t); } catch { continue; }
-            if (!entry || (entry.type !== 'user' && entry.type !== 'assistant')) continue;
-            if (messageTextIncludes(entry.message, needle)) return true;
+            if (!entry || entry.type !== 'user' || entry.isSidechain || entry.isMeta === true) continue;
+            if (userCommandArgsInclude(entry.message, needle)) return true;
         }
         return false;
     } catch {
         return false;
     }
+}
+
+// Walk the compaction genealogy from the bound session toward the stopping
+// session. The ledger (~/.claude/magic-compact/ledger.jsonl, JSONL) records one
+// { sourceSessionId, destinationSessionId } per compaction swap, so a relayed
+// successor is a new session id reachable from its predecessor by following
+// source -> destination. Returns true when the chain rooted at boundSession
+// reaches sessionId within a bounded number of hops (a compacted successor
+// legitimately inherits the leash), false otherwise. An absent or unreadable
+// ledger is an empty chain (false). Session ids compare case-insensitively as
+// opaque strings; non-UUID source labels compare the same way. The hop cap plus
+// a visited-set cycle guard bound the walk on a large or self-referential
+// ledger. KIT_GOAL_LEDGER_PATH overrides the path for tests.
+function ledgerChainReaches(boundSession, sessionId) {
+    if (!boundSession || !sessionId) return false;
+    const target = String(sessionId).trim().toLowerCase();
+    const ledgerPath = process.env.KIT_GOAL_LEDGER_PATH
+        || path.join(os.homedir(), '.claude', 'magic-compact', 'ledger.jsonl');
+    let content;
+    try { content = fs.readFileSync(ledgerPath, 'utf8'); } catch { return false; }
+    const edges = new Map();
+    for (const line of content.split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+        let entry;
+        try { entry = JSON.parse(t); } catch { continue; }
+        if (!entry || typeof entry.sourceSessionId !== 'string'
+            || typeof entry.destinationSessionId !== 'string') continue;
+        const src = entry.sourceSessionId.trim().toLowerCase();
+        const dst = entry.destinationSessionId.trim().toLowerCase();
+        if (!edges.has(src)) edges.set(src, []);
+        edges.get(src).push(dst);
+    }
+    const HOP_CAP = 20;
+    const start = String(boundSession).trim().toLowerCase();
+    const seen = new Set([start]);
+    let frontier = [start];
+    for (let hop = 0; hop < HOP_CAP && frontier.length; hop++) {
+        const next = [];
+        for (const node of frontier) {
+            for (const d of (edges.get(node) || [])) {
+                if (d === target) return true;
+                if (!seen.has(d)) { seen.add(d); next.push(d); }
+            }
+        }
+        frontier = next;
+    }
+    return false;
 }
 
 // Does the last main-thread assistant turn's text lead with 'BLOCKED:'? Returns
@@ -272,54 +411,66 @@ function readRelayHeadOrThrow(filePath) {
     }
 }
 
-// Does a relay request/archive body count as an allow signal for this session?
-// It must name the plan basename, and its destination (line 1, the session UUID
-// the watcher resumes into) must not be THIS session: the handoff that spawned
-// the successor is not the successor's own license to stop, or the recency
-// window would leave every freshly resumed session unleashed for its first
-// minutes. When either UUID is unavailable the exclusion is skipped, restoring
-// the plain recency-plus-plan match (fail open).
-function relayBodyAllowsSession(body, base, sessionId) {
-    if (!body.includes(base)) return false;
-    if (!sessionId) return true;
-    const destination = body.split('\n', 1)[0].trim().toLowerCase();
-    return !destination || destination !== String(sessionId).trim().toLowerCase();
+// Does a relay request/archive body name this plan by its full repo-relative
+// path? Returns null when it does not (a different plan; the scan should keep
+// walking to the next-older archive), or the destination session UUID (line 1,
+// possibly '') when it does. The match is on the separator-normalized
+// repo-relative path (docs/plans/<name>.md), not the bare basename: request.txt
+// is a machine-global queue, so a handoff from another repo whose plan shares
+// this basename must not release or rebind this repo's leash. The compact-session
+// contract requires relay continue prompts to carry the repo-relative path, so a
+// conforming handoff still matches. A plan-matching body always ends the scan
+// right where it is found: it is the newest available record for this plan, so
+// it alone decides, whether or not resolveRelayDestination below then excludes it.
+function matchRelayBody(body, planRel) {
+    if (!body.replace(/\\/g, '/').includes(planRel)) return null;
+    return body.split('\n', 1)[0].trim();
+}
+
+function resolveRelayDestination(destination, sessionId) {
+    return sameSessionId(destination, sessionId) ? null : destination;
 }
 
 // Was a resume-relay handoff for this plan written in the last few minutes by a
 // session other than this one? Windows-only (the relay watcher is a desktop AHK
-// script). Returns true when a fresh request/archive names this plan and is not
-// this session's own spawning handoff, false when no relay tree or no matching
+// script). Returns the destination session UUID (the successor to rebind the
+// leash to) when a fresh request/archive names this plan and is not this
+// session's own spawning handoff, or null when no relay tree or no matching
 // handoff exists (absence of a handoff is not a reason to release the leash).
 // THROWS only when a FRESH request.txt exists but cannot be read, since that
 // could be this session's own handoff and blocking it would race the relay; the
 // top-level catch then allows.
 function recentRelayHandoffForPlan(planRel, sessionId) {
-    if (process.platform !== 'win32') return false;
+    if (process.platform !== 'win32') return null;
     const local = process.env.LOCALAPPDATA;
-    if (!local) return false;
-    const base = path.basename(planRel);
-    if (!base) return false;
+    if (!local) return null;
+    const needle = String(planRel || '').replace(/\\/g, '/');
+    if (!needle) return null;
     const root = path.join(local, 'claude-kit', 'resume-relay');
     const cutoff = Date.now() - RELAY_WINDOW_MS;
 
     // (a) The live request.txt, if present and fresh. request.txt is a single
     // machine-global queue shared across projects, so only OUR plan's request
-    // counts: a match allows; a different plan's fresh request must NOT mask our
-    // own just-archived handoff, so fall through to the processed scan rather
-    // than returning. Unreadable throws (it may be ours), which the top-level
-    // catch turns into an allow.
+    // counts: a match ends the scan here (allow, or excluded as our own
+    // handoff); a different plan's fresh request must NOT mask our own
+    // just-archived handoff, so fall through to the processed scan rather than
+    // returning. Unreadable throws (it may be ours), which the top-level catch
+    // turns into an allow.
     const request = path.join(root, 'request.txt');
     let reqStat = null;
     try { reqStat = fs.statSync(request); } catch { reqStat = null; }
     if (reqStat && reqStat.isFile() && reqStat.mtimeMs >= cutoff) {
-        if (relayBodyAllowsSession(readRelayHeadOrThrow(request), base, sessionId)) return true;
+        const destination = matchRelayBody(readRelayHeadOrThrow(request), needle);
+        if (destination !== null) return resolveRelayDestination(destination, sessionId);
     }
 
     // (b) The newest processed\ archives. Filenames are timestamp-prefixed
     // (yyyyMMdd-HHmmss-<tag>.txt) by the watcher, so a lexical sort is
     // chronological: scan the newest by name and stat only those, never the
-    // whole directory.
+    // whole directory. The first archive naming this plan ends the scan (see
+    // matchRelayBody): an older archive for the same plan is never consulted
+    // once a newer one has answered, or a stale rebind could walk the leash
+    // backward onto a predecessor session that already handed off.
     const processedDir = path.join(root, 'processed');
     let names;
     try {
@@ -329,21 +480,21 @@ function recentRelayHandoffForPlan(planRel, sessionId) {
             .reverse()
             .slice(0, PROCESSED_SCAN_LIMIT);
     } catch {
-        return false;
+        return null;
     }
     for (const name of names) {
         try {
             const full = path.join(processedDir, name);
             const st = fs.statSync(full);
-            if (st.isFile() && st.mtimeMs >= cutoff
-                && relayBodyAllowsSession(readRelayHeadOrThrow(full), base, sessionId)) {
-                return true;
+            if (st.isFile() && st.mtimeMs >= cutoff) {
+                const destination = matchRelayBody(readRelayHeadOrThrow(full), needle);
+                if (destination !== null) return resolveRelayDestination(destination, sessionId);
             }
         } catch {
             // An unreadable archive entry is not this session's live handoff; skip.
         }
     }
-    return false;
+    return null;
 }
 
 // Is the plan file truly gone (moved to the archive), as opposed to momentarily
@@ -372,9 +523,31 @@ function main() {
 
     const planRel = goal.plan;
     const transcriptPath = payload.transcript_path || payload.transcriptPath;
+    const sessionId = payload.session_id || payload.sessionId;
 
-    // Scoping: only leash a session whose transcript references the armed plan.
-    if (!transcriptReferencesPlan(transcriptPath, planRel)) return;
+    // Scoping by session identity: the goal binds to one session, so a bystander
+    // that merely mentions the plan is never leashed. Resolving the binding may
+    // claim it for this session (a best-effort write: a failed bind still
+    // enforces this stop and retries next stop). Only an affirmative resolution
+    // proceeds to the enforcement clauses; every other outcome allows.
+    const bound = goal.boundSession;
+    if (bound) {
+        if (sameSessionId(bound, sessionId)) {
+            // This session holds the leash.
+        } else if (ledgerChainReaches(bound, sessionId)) {
+            // A compacted successor of the bound session inherits the leash.
+            bindSession(cwd, sessionId);
+        } else {
+            // Some other session: never leashed by mentioning the plan.
+            return;
+        }
+    } else if (userCommandArgsClaimPlan(transcriptPath, planRel)) {
+        // Unbound: the first session whose genuine user text carries the plan
+        // path as a command argument (the arming invocation) claims the binding.
+        bindSession(cwd, sessionId);
+    } else {
+        return;
+    }
 
     // Clause (a): the plan is done or archived.
     const head = planHead(cwd, planRel);
@@ -401,9 +574,15 @@ function main() {
 
     // Clause (c): a section-boundary relay handoff for this plan is in flight,
     // written by a session other than this one (a successor's own spawning
-    // handoff never releases it).
-    const sessionId = payload.session_id || payload.sessionId;
-    if (recentRelayHandoffForPlan(planRel, sessionId)) return;
+    // handoff never releases it). Follow the leash to the destination session the
+    // handoff named, so the resumed successor holds it after the recency window.
+    // A failed rebind still allows (fail-open on persistence): the genealogy
+    // ledger lets the successor reclaim the leash later, so the chain self-heals.
+    const relayDestination = recentRelayHandoffForPlan(planRel, sessionId);
+    if (relayDestination !== null) {
+        bindSession(cwd, relayDestination);
+        return;
+    }
 
     // None of the allow conditions hold: hold the session to completion. The
     // plan path is repo data sanitized before it enters this trusted channel.

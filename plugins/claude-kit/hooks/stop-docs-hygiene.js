@@ -37,8 +37,17 @@ function findCompletedUnarchived(cwd) {
                 const buf = Buffer.alloc(2048);
                 const bytes = fs.readSync(fd, buf, 0, 2048, 0);
                 fs.closeSync(fd);
-                const head = buf.toString('utf8', 0, bytes);
-                if (/status:\s*complete/i.test(head) && !/status:\s*in\s*progress/i.test(head)) {
+                let head = buf.toString('utf8', 0, bytes);
+                if (head.charCodeAt(0) === 0xFEFF) head = head.slice(1);
+                // Classify from the Status header only: anchored to a line start
+                // (m flag) so body prose cannot match, and the value must sit on
+                // the same line as the header ([^\S\r\n]* is horizontal whitespace
+                // only, never a newline), so a bare "Status:" line above a line
+                // beginning "complete" or "in progress" does not misclassify the
+                // plan. A leading UTF-8 BOM (PowerShell Set-Content writes one) is
+                // stripped above so the anchor sees the header. The header sits on
+                // its own line near the top by convention.
+                if (/^status:[^\S\r\n]*complete/im.test(head) && !/^status:[^\S\r\n]*in[^\S\r\n]*progress/im.test(head)) {
                     files.push(file.replace(/[^\x20-\x7E]/g, '').slice(0, 120));
                 }
             } catch { /* skip unreadable */ }

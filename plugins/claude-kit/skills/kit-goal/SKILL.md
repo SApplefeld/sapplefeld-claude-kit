@@ -29,7 +29,7 @@ node <plugin-root>/hooks/kit-goal.js clear
 
 ## Status
 
-`/kit-goal` with no argument, or `/kit-goal status`, reports what is armed:
+`/kit-goal` with no argument, or `/kit-goal status`, reports what is armed, including which session currently holds the leash (or that it is unbound):
 
 ```
 node <plugin-root>/hooks/kit-goal.js status
@@ -37,10 +37,12 @@ node <plugin-root>/hooks/kit-goal.js status
 
 ## How the leash holds
 
-The `kit-goal-stop.js` Stop hook (wired in the plugin's `hooks.json`) fires on every stop but is a strict no-op unless a goal is armed in the current project and the stopping session's transcript references the armed plan. When both hold, it allows the stop only when:
+The `kit-goal-stop.js` Stop hook (wired in the plugin's `hooks.json`) fires on every stop but is a strict no-op unless a goal is armed in the current project and the stopping session holds the leash. The leash binds to one session chain at a time: it arms unbound, and the session that armed it claims it at its first stop, the `/kit-goal` invocation's command arguments being the claim signal. Nothing else claims: plain prose mentions, the assistant's own text, injected context, tool output, and the CLI's echoed stdout never do, so arm from the session that should hold the leash. Once bound, no other session is leashed however often it mentions the plan, so a session spawned to discuss an armed plan is never yanked into working it, and two sessions can never both hold the same leash. A different session is recognized as the chain's successor only by identity: a relay handoff naming it as destination, or the compaction ledger's source-to-destination chain (which is how a manually resumed compaction successor inherits). Re-arming with `/kit-goal <plan path>` resets the binding; that is the recovery move when a bound session died without a handoff.
+
+When the stopping session holds the leash, the hook allows the stop only when:
 
 - (a) the plan's `Status` is `Complete`, or the plan file has moved to the archive (the run finished), in which case it also auto-clears the goal;
 - (b) the last assistant message leads with `BLOCKED:` (a true blocker was surfaced); or
-- (c) a section-boundary resume-relay handoff for this plan was just written by another session (the compact-session relay path is handing off to a successor). A handoff whose destination is the stopping session itself does not count: the request that resumed a successor is not the successor's own license to stop, so a freshly resumed session stays leashed through the recency window.
+- (c) a section-boundary resume-relay handoff for this plan was just written (the compact-session relay path is handing off to a successor). The allow rebinds the leash to the handoff's destination session, so the successor is held from its first turn. The newest handoff naming the plan decides, and one whose destination is the stopping session itself does not count: the request that resumed a successor is not the successor's own license to stop, so a freshly resumed session stays leashed through the recency window.
 
 Otherwise it blocks with a reason naming the plan, so a run cannot quietly stop with sections left. The conditions re-evaluate on every stop attempt, including inside a stop-hook continuation, so the leash holds until one is genuinely met; Claude Code's own consecutive-block cap (eight blocks without progress, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`) is the loop backstop that releases a genuinely stuck session with a visible warning. Any error inside the hook allows the stop: the leash never traps a session. The canonical condition text is composed and owned by `hooks/kit-goal-lib.js` (`composeCondition`); this skill does not restate the literal, so the two cannot drift.

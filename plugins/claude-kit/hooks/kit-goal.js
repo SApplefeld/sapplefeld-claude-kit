@@ -61,8 +61,12 @@ function cmdClear() {
 function cmdStatus() {
     const state = readGoal(process.cwd());
     if (state) {
+        const binding = state.boundSession
+            ? 'bound to session ' + sanitize(state.boundSession)
+            : 'unbound';
         process.stdout.write(
-            'kit goal armed for ' + sanitize(state.plan) + ' (armed ' + sanitize(state.armedAt) + ')\n'
+            'kit goal armed for ' + sanitize(state.plan)
+            + ' (armed ' + sanitize(state.armedAt) + '; ' + binding + ')\n'
         );
     } else {
         process.stdout.write('no kit goal armed\n');

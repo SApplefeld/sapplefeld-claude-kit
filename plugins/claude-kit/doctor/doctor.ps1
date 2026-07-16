@@ -530,14 +530,28 @@ else {
     }
 }
 
-# --- Resume relay (optional). Reports armed state and the AutoHotkey v2
-# --- dependency, and runs a dry-run round-trip probe through the watcher (-NoProbe
-# --- skips the state-writing probe and does structural detection only). First-time
-# --- arming and the AHK install stay a deliberate act via the arm script: under
-# --- -Fix the doctor re-arms or refreshes only after an explicit consent prompt,
-# --- and never while a real request is pending (arming restarts the watcher, which
-# --- drops its in-flight request memory). An armed relay also self-refreshes at
-# --- session start when stale and idle (the relay-refresh hook).
+# --- Resume relay (optional). Splits the relay's health into three separable
+# --- facts instead of one conflated line, so a healthy watcher with a stale
+# --- fallback window does not read the same as a dead watcher:
+# ---   "Resume relay" is the durable watcher plane (armed, watcher process
+# ---     alive, deployed copy current, dryrun.on absent, window.txt
+# ---     configured, Startup shortcut present, AutoHotkey found) and never
+# ---     depends on a probe result.
+# ---   "Relay attended path" round-trips a synthetic dry-run request targeted
+# ---     at this doctor run's own terminal window (line 4, ahk_id), the same
+# ---     way an attended boundary compaction self-targets; it never touches
+# ---     window.txt, so it proves the watcher and the per-request path work
+# ---     even when no fallback window happens to be open or unambiguous.
+# ---   "Relay fallback target" round-trips the plain 3-line shape that
+# ---     exercises window.txt's configured expression, the path only a
+# ---     headless-origin resume (no session-owned window to target) uses.
+# --- -NoProbe skips both round-trips and reports structural facts only. First-
+# --- time arming and the AHK install stay a deliberate act via the arm
+# --- script: under -Fix the doctor re-arms or refreshes only after an explicit
+# --- consent prompt, and never while a real request is pending (arming
+# --- restarts the watcher, which drops its in-flight request memory). An
+# --- armed relay also self-refreshes at session start when stale and idle
+# --- (the relay-refresh hook).
 $relayDir = Join-Path $env:LOCALAPPDATA "claude-kit\resume-relay"
 $armScript = Join-Path $relaySourceDir "arm-resume-relay.ps1"
 $ahkPaths = @(
@@ -548,10 +562,154 @@ $ahkPath = $null
 foreach ($candidate in $ahkPaths) {
     if (Test-Path -LiteralPath $candidate) { $ahkPath = $candidate; break }
 }
+
+# GetConsoleWindow (used inside capture-window.ps1) returns a real HWND even
+# for a hidden console: a scheduled task, a process launched with
+# -WindowStyle Hidden, or some ConPTY hosts. AHK's WinGetList never matches a
+# hidden window, so an ahk_id naming one would burn the full 30s attended
+# probe and false-WARN. IsWindowVisible tells the two apart before the
+# attended-path request is written.
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class RelayWinVisibility {
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+}
+'@
+
+# Reads relay.log's tail for the watcher's own account of a probe timeout, so
+# a WARN names the real cause instead of reporting bare silence. Only a line
+# timestamped at or after the probe's own start can be attributed to it; a
+# malformed or out-of-window line is skipped, never thrown.
+function Get-RelayFailureReason {
+    param([string]$LogFile, [datetime]$Since)
+    $tail = @()
+    try { $tail = @(Get-Content -LiteralPath $LogFile -Tail 100 -ErrorAction Stop) } catch {}
+    $lastReason = $null
+    foreach ($line in $tail) {
+        if ($line -notmatch '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (.*)$') { continue }
+        # Capture the outer match's groups into named locals before the inner
+        # -match below runs: -match overwrites the shared $matches variable, so
+        # reading $matches[2] again after that point would silently pick up the
+        # inner match's groups instead of the outer line-split.
+        $stampText = $matches[1]
+        $msg = $matches[2]
+        $stamp = New-Object DateTime
+        $parsed = [DateTime]::TryParseExact($stampText, "yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$stamp)
+        if (-not $parsed -or $stamp -lt $Since) { continue }
+        if ($msg -match '^attempt \d+/\d+ failed: (.*)$') { $lastReason = $matches[1] }
+    }
+    if ($null -ne $lastReason) { return $lastReason }
+    return "the watcher never logged an attempt for the probe within 30s (poll may not have fired; check the process and $LogFile)"
+}
+
+# Writes a marker-protected dry-run request atomically (CreateNew never
+# clobbers a real request that lands first), waits up to 30s for the
+# watcher's own dry-run log line naming this GUID, then tears down everything
+# the probe created: its own request (content-checked so a real request that
+# just landed is never deleted), its temp transcript, and its own archive
+# entries in processed\ and failed\ (matched by GUID, never a real request
+# nearby). dryrun.on is never touched; the in-request marker is the whole
+# containment, so no ambient flag lifetime has to outlive an unsynchronized
+# watcher poll (the flag-based protocol lost that race on 2026-07-15 and typed
+# a probe into a live session). Returns Outcome ("pass", "fail", or
+# "collision") and, when not "pass", a Reason for the WARN detail.
+function Invoke-RelayDryrunProbe {
+    param(
+        [string]$RelayDir,
+        [string]$RequestFile,
+        [string]$LogFile,
+        [string]$ProbeGuid,
+        [string]$TempTranscript,
+        [string]$RequestBody
+    )
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    # relay.log stamps whole seconds; Get-Date carries sub-second precision, so
+    # comparing a raw timestamp against the log would filter out an attempt
+    # logged in this probe's own starting second (its whole-second stamp reads
+    # earlier than a sub-second $probeStart). Floor to the second instead.
+    $probeStartRaw = Get-Date
+    $probeStart = New-Object DateTime -ArgumentList $probeStartRaw.Year, $probeStartRaw.Month, $probeStartRaw.Day, $probeStartRaw.Hour, $probeStartRaw.Minute, $probeStartRaw.Second
+    $outcome = "fail"
+    $reason = $null
+    try {
+        [System.IO.File]::WriteAllText($TempTranscript, "", $utf8NoBom)
+
+        # Atomic create-if-absent: if a real request landed between the
+        # caller's earlier check and now, CreateNew throws and the probe
+        # skips rather than overwriting it.
+        $fs = $null
+        $collision = $false
+        try {
+            $fs = [System.IO.File]::Open($RequestFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+            $bytes = $utf8NoBom.GetBytes($RequestBody)
+            $fs.Write($bytes, 0, $bytes.Length)
+        }
+        catch [System.IO.IOException] {
+            $collision = $true
+        }
+        finally {
+            if ($null -ne $fs) { $fs.Dispose() }
+        }
+
+        if ($collision) {
+            $outcome = "collision"
+            $reason = "a real request landed during the probe; skipped so it is not clobbered."
+        }
+        else {
+            # Watcher polls every 10s; allow up to 30s for its dry-run log
+            # line naming this GUID.
+            $marker = "DRYRUN: would resume " + [regex]::Escape($ProbeGuid)
+            $deadline = (Get-Date).AddSeconds(30)
+            $seen = $false
+            while ((Get-Date) -lt $deadline -and -not $seen) {
+                Start-Sleep -Seconds 2
+                $logText = ""
+                try { $logText = Get-Content $LogFile -Raw -ErrorAction SilentlyContinue } catch {}
+                if ($null -ne $logText -and $logText -match $marker) { $seen = $true }
+            }
+            if ($seen) {
+                $outcome = "pass"
+            }
+            else {
+                $outcome = "fail"
+                $reason = Get-RelayFailureReason -LogFile $LogFile -Since $probeStart
+            }
+        }
+    }
+    catch {
+        $outcome = "fail"
+        $reason = "probe errored: $($_.Exception.Message)"
+    }
+    finally {
+        Remove-Item $TempTranscript -Force -ErrorAction SilentlyContinue
+        if (Test-Path $RequestFile) {
+            $curRequest = ""
+            try { $curRequest = [System.IO.File]::ReadAllText($RequestFile) } catch {}
+            if ($curRequest -eq $RequestBody) { Remove-Item $RequestFile -Force -ErrorAction SilentlyContinue }
+        }
+        # Remove only this probe's own archive entries (content carries the
+        # probe GUID); any other archived request belongs to the user.
+        foreach ($sub in @("processed", "failed")) {
+            $subDir = Join-Path $RelayDir $sub
+            if (Test-Path $subDir) {
+                Get-ChildItem -Path $subDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    $archived = ""
+                    try { $archived = [System.IO.File]::ReadAllText($_.FullName) } catch {}
+                    if ($archived -match [regex]::Escape($ProbeGuid)) { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+                }
+            }
+        }
+    }
+    return @{ Outcome = $outcome; Reason = $reason }
+}
+
 if (-not (Test-Path $relayDir)) {
     $ahkNote = "AutoHotkey v2 not installed (the arm script installs it via winget)."
     if ($null -ne $ahkPath) { $ahkNote = "AutoHotkey v2 present at $ahkPath." }
     Report "INFO" "Resume relay" @("Not armed (optional; interactive compaction works without it). $ahkNote", "Arm: $armScript")
+    Report "INFO" "Relay attended path" @("skipped: relay not armed (see Resume relay above)")
+    Report "INFO" "Relay fallback target" @("skipped: relay not armed (see Resume relay above)")
 }
 else {
     $watcherCopy = Join-Path $relayDir "resume-relay.ahk"
@@ -561,8 +719,8 @@ else {
     $dryrunFlag = Join-Path $relayDir "dryrun.on"
     $logFile = Join-Path $relayDir "relay.log"
 
-    # Structural gaps that do not themselves abort the round-trip. Any present
-    # keeps the overall result at WARN even when the probe otherwise succeeds.
+    # Structural gaps that do not themselves block a probe. Any present keeps
+    # the "Resume relay" line at WARN even when every other fact is healthy.
     $structuralIssues = @()
     if ($null -eq $ahkPath) { $structuralIssues += "AutoHotkey v2 not found at either known install path; re-run $armScript (it installs AHK via winget)" }
     if (-not (Test-Path $shortcut)) { $structuralIssues += "Startup shortcut missing (re-run $armScript)" }
@@ -606,223 +764,285 @@ else {
             }
         }
     }
+    # $watcherStale can still change below: the window-arm-fix and the
+    # watcher-start-fix both invoke the plain (non -RefreshOnly) arm script,
+    # which always copies the current payload watcher over the deployed copy
+    # as a side effect. Appending its structuralIssues entry is deferred past
+    # both of those repairs so a just-applied refresh is not reported stale.
+
+    $watcherCopyExists = Test-Path $watcherCopy
+    $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
+    $dryrunPresent = Test-Path $dryrunFlag
+    $requestPending = Test-Path $requestFile
+    $pendingSessionId = ""
+    if ($requestPending) {
+        try { $pendingSessionId = (((Get-Content $requestFile -Raw -ErrorAction SilentlyContinue) -split "`n")[0]).Trim() } catch {}
+    }
+    # The watcher falls back to this compiled-in default whenever window.txt is
+    # absent or blank (its own FALLBACK_WINDOW initializer), so the fallback
+    # probe below always has a real expression to test, configured or not.
+    $fallbackExprDisplay = "ahk_exe WindowsTerminal.exe (the watcher's built-in default; window.txt not configured)"
+    if ($windowConfigured) {
+        $configuredExpr = ""
+        try { $configuredExpr = (Get-Content $windowFile -Raw -ErrorAction SilentlyContinue).Trim() } catch {}
+        if ($configuredExpr -ne "") { $fallbackExprDisplay = $configuredExpr }
+    }
+
+    # Re-hashes $watcherStale and re-reads $fallbackExprDisplay after an
+    # accepted re-arm: arm-resume-relay.ps1 always copies the current payload
+    # watcher over the deployed copy (not just under -RefreshOnly), and can
+    # also (re)write window.txt, so either fact computed before a repair is
+    # stale the moment the repair succeeds.
+    function Update-RelayFactsAfterRearm {
+        param([string]$WatcherCopy, [string]$SourceWatcher, [string]$WindowFile)
+        $result = @{ WatcherStale = $false; FallbackExprDisplay = "ahk_exe WindowsTerminal.exe (the watcher's built-in default; window.txt not configured)" }
+        if ((Test-Path $WatcherCopy) -and (Test-Path $SourceWatcher)) {
+            try {
+                $result.WatcherStale = ((Get-FileHash -LiteralPath $WatcherCopy -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $SourceWatcher -Algorithm SHA256).Hash)
+            } catch {}
+        }
+        $windowConfiguredNow = (Test-Path $WindowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $WindowFile -Raw -ErrorAction SilentlyContinue))
+        if ($windowConfiguredNow) {
+            $configuredExprNow = ""
+            try { $configuredExprNow = (Get-Content $WindowFile -Raw -ErrorAction SilentlyContinue).Trim() } catch {}
+            if ($configuredExprNow -ne "") { $result.FallbackExprDisplay = $configuredExprNow }
+        }
+        return $result
+    }
+
+    $watcherRunning = $false
+    $markerCompatible = $false
+    # The watcher's own process start time, so a probe result can be checked
+    # against whether window.txt changed after the running watcher last read
+    # it (window.txt is read only at watcher startup).
+    $watcherStartTime = $null
+    if ($watcherCopyExists) {
+        # Re-arming restarts the watcher, so never do it while a real request
+        # is pending (a mid-typing kill loses the watcher's handled-request
+        # memory). Consent-gated like every other install/repair action, and
+        # skipped entirely under -NoProbe (structural detection only, matching
+        # today's -NoProbe behavior).
+        if (-not $NoProbe -and -not $windowConfigured -and $Fix -and -not $requestPending) {
+            if (Get-Consent "window.txt is not configured. Re-arm the resume relay now (writes the default window.txt and restarts the watcher)?") {
+                try { & powershell -NoProfile -ExecutionPolicy Bypass -File $armScript } catch {}
+                $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
+                $rearmFacts = Update-RelayFactsAfterRearm -WatcherCopy $watcherCopy -SourceWatcher $sourceWatcher -WindowFile $windowFile
+                $watcherStale = $rearmFacts.WatcherStale
+                $fallbackExprDisplay = $rearmFacts.FallbackExprDisplay
+            }
+        }
+
+        $watcherProcess = Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
+            Select-Object -First 1
+        if ($null -ne $watcherProcess) {
+            $watcherRunning = $true
+            $watcherStartTime = $watcherProcess.CreationDate
+        }
+
+        if (-not $NoProbe -and -not $watcherRunning -and $Fix -and -not $requestPending) {
+            if (Get-Consent "The resume relay watcher is not running. Start it now (re-arm)?") {
+                try { & powershell -NoProfile -ExecutionPolicy Bypass -File $armScript } catch {}
+                Start-Sleep -Seconds 2
+                $rearmFacts = Update-RelayFactsAfterRearm -WatcherCopy $watcherCopy -SourceWatcher $sourceWatcher -WindowFile $windowFile
+                $watcherStale = $rearmFacts.WatcherStale
+                $fallbackExprDisplay = $rearmFacts.FallbackExprDisplay
+                $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
+                $watcherRunning = $false
+                $watcherProcess = Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
+                    Select-Object -First 1
+                if ($null -ne $watcherProcess) {
+                    $watcherRunning = $true
+                    $watcherStartTime = $watcherProcess.CreationDate
+                }
+            }
+        }
+
+        # Compatibility gate: the deployed watcher must understand the
+        # [doctor-dryrun] marker, or a probe request would be typed for real.
+        # Read after any repair above so a just-refreshed copy is current.
+        $deployedText = ""
+        try { $deployedText = [System.IO.File]::ReadAllText($watcherCopy) } catch {}
+        $markerCompatible = $deployedText.Contains("[doctor-dryrun]")
+    }
     if ($watcherStale) {
         $structuralIssues += "deployed watcher differs from this plugin's resume-relay.ahk (a kit update since the last arm leaves the old watcher running); run doctor -Fix, or $armScript, to refresh it (an armed relay also self-refreshes at session start when idle)"
     }
 
-    $status = $null
-    $detail = @()
-
-    if (-not (Test-Path $watcherCopy)) {
-        # Watcher script absent: no round-trip is possible; report and stop.
-        $status = "WARN"
-        $detail = @("watcher copy missing (re-run $armScript)")
-    }
-    elseif ($NoProbe) {
-        # Structural detection only. The round-trip probe writes relay state
-        # (a synthetic marker-protected request), which -NoProbe opts out of.
-        $issues = @()
-        $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
-        if (-not $windowConfigured) { $issues += "window.txt not configured; the watcher is idle until it names the CLI window (then restart the watcher)" }
-        if (Test-Path $dryrunFlag) { $issues += "dryrun.on present ($dryrunFlag); real resume requests are archived as dry-runs and never typed, so the relay is a silent no-op until it is removed" }
-        $watcherRunning = $false
-        Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
-            ForEach-Object { $watcherRunning = $true }
-        if (-not $watcherRunning) { $issues += "watcher process not running (re-run $armScript or log off/on)" }
-        if ($issues.Count -eq 0) {
-            $status = "PASS"
-            $detail = @("Armed: watcher running, Startup shortcut present, window.txt configured (round-trip skipped by -NoProbe).")
-        }
-        else {
-            $status = "WARN"
-            $detail = $issues
-        }
+    # --- "Resume relay": the durable watcher plane. Never depends on a probe.
+    if (-not $watcherCopyExists) {
+        $line1Status = "WARN"
+        $line1Detail = @("watcher copy missing (re-run $armScript)")
     }
     else {
-        $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
-        if (-not $windowConfigured -and $Fix) {
-            # Re-arming restarts the watcher, so never do it while a real request
-            # is pending (a mid-typing kill loses the watcher's handled-request
-            # memory). Consent-gated like every other install/repair action.
-            if (Test-Path $requestFile) {
-                # Leave $windowConfigured false: the pending-request WARN below
-                # reports the real gap without disturbing the watcher.
-            }
-            elseif (Get-Consent "window.txt is not configured. Re-arm the resume relay now (writes the default window.txt and restarts the watcher)?") {
-                try { & powershell -NoProfile -ExecutionPolicy Bypass -File $armScript } catch {}
-                $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
-            }
-        }
+        $issues = @()
+        if (-not $windowConfigured) { $issues += "window.txt not configured; the watcher is idle until it names the CLI window (then restart the watcher)" }
+        if ($dryrunPresent) { $issues += "dryrun.on present ($dryrunFlag); real resume requests are archived as dry-runs and never typed, so the relay is a silent no-op until it is removed." }
+        if (-not $watcherRunning) { $issues += "watcher process not running (re-run $armScript or log off/on)" }
+        if (-not $markerCompatible) { $issues += "deployed watcher predates the [doctor-dryrun] marker; the attended-path and fallback-target checks below cannot safely probe it. Re-run $armScript to update (an armed relay also self-refreshes at session start when idle)." }
 
-        if (-not $windowConfigured) {
-            $status = "WARN"
-            $detail = @("window.txt not configured; the watcher is idle until it names the CLI window (then restart the watcher)")
-        }
-        elseif (Test-Path $dryrunFlag) {
-            # A pre-existing dry-run flag disarms the relay: every real resume
-            # request is archived as a dry-run and never typed. Report it and do
-            # not probe (probing would add and remove our own flag around it).
-            $status = "WARN"
-            $detail = @("dryrun.on present ($dryrunFlag); real resume requests are archived as dry-runs and never typed, so the relay is a silent no-op until it is removed.")
-        }
-        elseif (Test-Path $requestFile) {
-            # A real request is pending; never clobber or race it with a probe.
-            $pendingId = ""
-            try { $pendingId = (((Get-Content $requestFile -Raw -ErrorAction SilentlyContinue) -split "`n")[0]).Trim() } catch {}
-            $status = "WARN"
-            $detail = @("a request is already pending in the relay (session '$pendingId'); skipped the round-trip probe so a real resume is not clobbered.")
+        if ($issues.Count -eq 0) {
+            $line1Status = "PASS"
+            $passNote = "Armed: watcher running, deployed copy current, dryrun.on absent, window.txt configured."
+            if ($NoProbe) { $passNote += " Round-trip probes skipped by -NoProbe." }
+            $line1Detail = @($passNote)
         }
         else {
-            # Round-trip probe: drive a synthetic dry-run request through the
-            # running watcher and confirm it logs the resume it would have typed.
-            $probeGuid = [guid]::NewGuid().ToString()
-            $tempTranscript = Join-Path $env:TEMP ($probeGuid + ".jsonl")
-            # The [doctor-dryrun] prompt prefix is the containment: the watcher
-            # validates and logs a marked request but never types it. The marker
-            # travels inside the request, so no ambient flag lifetime has to
-            # outlive an unsynchronized watcher poll (the flag-based protocol
-            # lost that race on 2026-07-15 and typed a probe into a live
-            # session; concurrent doctor runs also shared one flag).
-            $requestBody = $probeGuid + "`n" + $tempTranscript + "`n" + "[doctor-dryrun] doctor resume-relay probe"
-            $probeWroteRequest = $false
-            $probeSucceeded = $false
-            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            try {
-                $watcherRunning = $false
-                Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
-                    ForEach-Object { $watcherRunning = $true }
-                if (-not $watcherRunning -and $Fix -and (Get-Consent "The resume relay watcher is not running. Start it now (re-arm)?")) {
-                    try { & powershell -NoProfile -ExecutionPolicy Bypass -File $armScript } catch {}
-                    Start-Sleep -Seconds 2
-                    Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
-                        Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
-                        ForEach-Object { $watcherRunning = $true }
-                }
+            $line1Status = "WARN"
+            $line1Detail = $issues
+        }
+        if ($requestPending) {
+            $line1Detail = $line1Detail + @("a request is currently pending (session '$pendingSessionId'); normal mid-resume state, not itself a fault.")
+        }
+    }
+    if ($structuralIssues.Count -gt 0) {
+        if ($line1Status -eq "PASS") { $line1Status = "WARN" }
+        $line1Detail = $line1Detail + $structuralIssues
+    }
+    if ($refreshNote) { $line1Detail = @($refreshNote) + $line1Detail }
+    Report $line1Status "Resume relay" $line1Detail
 
-                if (-not $watcherRunning) {
-                    $status = "WARN"
-                    $detail = @("watcher process not running (re-run $armScript or log off/on); round-trip not probed.")
+    # --- "Relay attended path" and "Relay fallback target": the two round-trip
+    # --- probes. Both are marker-protected dry-runs (never typed); one targets
+    # --- this doctor run's own window (line 4, never touching window.txt), the
+    # --- other targets window.txt's configured (or default) expression. Never
+    # --- more than one request in flight: the fallback probe only starts once
+    # --- the attended probe's own teardown has completed.
+    $blockReason = $null
+    if (-not $watcherCopyExists) { $blockReason = "watcher copy missing" }
+    elseif ($dryrunPresent) { $blockReason = "dryrun.on present" }
+    elseif ($requestPending) { $blockReason = "a request is already pending" }
+    elseif (-not $watcherRunning) { $blockReason = "watcher process not running" }
+    elseif (-not $markerCompatible) { $blockReason = "deployed watcher predates the [doctor-dryrun] marker" }
+
+    if ($NoProbe) {
+        Report "INFO" "Relay attended path" @("skipped (-NoProbe)")
+        Report "INFO" "Relay fallback target" @("fallback expression: $fallbackExprDisplay; resolution not probed (-NoProbe)")
+    }
+    elseif ($blockReason) {
+        Report "INFO" "Relay attended path" @("skipped: $blockReason (see Resume relay above)")
+        Report "INFO" "Relay fallback target" @("skipped: $blockReason (see Resume relay above)")
+    }
+    else {
+        $attendedOutcome = $null
+        $captureScript = Join-Path $relaySourceDir "capture-window.ps1"
+        $captureRaw = $null
+        try { $captureRaw = & powershell -NoProfile -ExecutionPolicy Bypass -File $captureScript 2>$null } catch {}
+        $ahkIdLine = ""
+        if ($null -ne $captureRaw) {
+            $first = @($captureRaw)[0]
+            if ($null -ne $first) { $ahkIdLine = "$first".Trim() }
+        }
+        # capture-window.ps1's sole output shape is "ahk_id <hwnd>"; anything
+        # else (a stray warning line, truncated output) is treated as no
+        # capture rather than risked as a malformed target.
+        if ($ahkIdLine -notmatch '^ahk_id \d+$') { $ahkIdLine = "" }
+
+        # GetConsoleWindow can return a real HWND for a hidden console (a
+        # scheduled task, -WindowStyle Hidden, some ConPTY hosts); AHK's
+        # WinGetList never matches a hidden window, so check visibility
+        # before trusting the capture as a usable target.
+        $hostWindowVisible = $false
+        if ($ahkIdLine -ne "") {
+            $hwndValue = [Int64]0
+            if ([Int64]::TryParse(($ahkIdLine -replace '^ahk_id ', ''), [ref]$hwndValue)) {
+                try { $hostWindowVisible = [RelayWinVisibility]::IsWindowVisible([IntPtr]$hwndValue) } catch {}
+            }
+        }
+
+        if ($ahkIdLine -eq "" -or -not $hostWindowVisible) {
+            Report "INFO" "Relay attended path" @("no visible host console window (headless or hidden-console run); attended-path probe not possible here. Attended sessions self-target per request; this does not indicate a fault.")
+            $attendedOutcome = "headless"
+        }
+        else {
+            $probeGuid2 = [guid]::NewGuid().ToString()
+            $tempTranscript2 = Join-Path $env:TEMP ($probeGuid2 + ".jsonl")
+            $requestBody2 = $probeGuid2 + "`n" + $tempTranscript2 + "`n" + "[doctor-dryrun] doctor attended-path probe" + "`n" + $ahkIdLine
+            $probeResult2 = Invoke-RelayDryrunProbe -RelayDir $relayDir -RequestFile $requestFile -LogFile $logFile -ProbeGuid $probeGuid2 -TempTranscript $tempTranscript2 -RequestBody $requestBody2
+            if ($probeResult2.Outcome -eq "pass") {
+                Report "PASS" "Relay attended path" @("attended-path round-trip verified (dryrun targeted this session's own window). Attended boundary requests self-target the same way and never use window.txt.")
+                $attendedOutcome = "pass"
+            }
+            elseif ($probeResult2.Outcome -eq "collision") {
+                # A real request landing mid-probe is a healthy relay in active
+                # use, not a fault; report it the same way the pre-probe
+                # pending gate does, never as a failed round-trip.
+                Report "INFO" "Relay attended path" @("a request is already pending; skipped so a real resume is not clobbered.")
+                $attendedOutcome = "collision"
+            }
+            else {
+                Report "WARN" "Relay attended path" @($probeResult2.Reason)
+                $attendedOutcome = "fail"
+            }
+        }
+
+        if ($attendedOutcome -eq "fail") {
+            Report "INFO" "Relay fallback target" @("skipped: the attended-path probe already failed, so a fallback result could not be attributed to the target expression; fix the watcher plane first")
+        }
+        elseif ($attendedOutcome -eq "collision") {
+            Report "INFO" "Relay fallback target" @("a request is already pending; skipped so a real resume is not clobbered.")
+        }
+        else {
+            $probeGuid3 = [guid]::NewGuid().ToString()
+            $tempTranscript3 = Join-Path $env:TEMP ($probeGuid3 + ".jsonl")
+            $requestBody3 = $probeGuid3 + "`n" + $tempTranscript3 + "`n" + "[doctor-dryrun] doctor fallback-target probe"
+            $probeResult3 = Invoke-RelayDryrunProbe -RelayDir $relayDir -RequestFile $requestFile -LogFile $logFile -ProbeGuid $probeGuid3 -TempTranscript $tempTranscript3 -RequestBody $requestBody3
+            # The watcher reads window.txt only at its own startup, so a probe
+            # result certifies that startup snapshot, not whatever the file
+            # holds right now. A file write after the process started means
+            # the two have diverged and neither PASS nor the logged reason can
+            # be attributed to the file's current content.
+            $fallbackSnapshotStale = $false
+            if ($null -ne $watcherStartTime -and (Test-Path $windowFile)) {
+                try {
+                    if ((Get-Item -LiteralPath $windowFile).LastWriteTime -gt $watcherStartTime) { $fallbackSnapshotStale = $true }
+                } catch {}
+            }
+            if ($probeResult3.Outcome -eq "pass") {
+                if ($fallbackSnapshotStale) {
+                    Report "WARN" "Relay fallback target" @(
+                        "window.txt was modified after the watcher started; the probe certified the watcher's startup snapshot, not the current file. Re-run $armScript to restart the watcher and apply it.",
+                        "Fallback expression per window.txt (applied at watcher startup): $fallbackExprDisplay"
+                    )
                 }
                 else {
-                    # Compatibility gate: the deployed watcher must understand the
-                    # [doctor-dryrun] marker, or the probe request would be typed
-                    # for real. Probing an older watcher is refused, never risked.
-                    $deployedAhk = Join-Path $relayDir "resume-relay.ahk"
-                    $deployedText = ""
-                    try { $deployedText = [System.IO.File]::ReadAllText($deployedAhk) } catch {}
-                    if (-not $deployedText.Contains("[doctor-dryrun]")) {
-                        $status = "WARN"
-                        $detail = @("deployed watcher predates the [doctor-dryrun] marker; probing it could type into the terminal, so the round-trip was not probed. Re-arm to update: $armScript")
-                    }
-                    else {
-                        # The watcher validates the transcript by existence and by
-                        # a filename matching '<guid>.jsonl'.
-                        [System.IO.File]::WriteAllText($tempTranscript, "", $utf8NoBom)
-
-                        # Atomic create-if-absent: if a real request landed between
-                        # the earlier check and now, CreateNew throws and the probe
-                        # skips rather than overwriting it.
-                        $fs = $null
-                        $collision = $false
-                        try {
-                            $fs = [System.IO.File]::Open($requestFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-                            $bytes = $utf8NoBom.GetBytes($requestBody)
-                            $fs.Write($bytes, 0, $bytes.Length)
-                        }
-                        catch [System.IO.IOException] {
-                            $collision = $true
-                        }
-                        finally {
-                            if ($null -ne $fs) { $fs.Dispose() }
-                        }
-
-                        if ($collision) {
-                            $status = "WARN"
-                            $detail = @("a real request landed during the probe; skipped the round-trip so it is not clobbered.")
-                        }
-                        else {
-                            $probeWroteRequest = $true
-                            # Watcher polls every 10s; allow up to 30s for its
-                            # dry-run log line naming this GUID.
-                            $marker = "DRYRUN: would resume " + [regex]::Escape($probeGuid)
-                            $deadline = (Get-Date).AddSeconds(30)
-                            while ((Get-Date) -lt $deadline -and -not $probeSucceeded) {
-                                Start-Sleep -Seconds 2
-                                $logText = ""
-                                try { $logText = Get-Content $logFile -Raw -ErrorAction SilentlyContinue } catch {}
-                                if ($null -ne $logText -and $logText -match $marker) { $probeSucceeded = $true }
-                            }
-
-                            if ($probeSucceeded) {
-                                $status = "PASS"
-                                $detail = @("resume relay round-trip verified (dryrun)")
-                            }
-                            else {
-                                $status = "WARN"
-                                $detail = @(
-                                    "round-trip not confirmed within 30s; the watcher may predate the current window.txt, or no matching Windows Terminal window is open (or more than one matches, which the watcher refuses).",
-                                    "The watcher reads window.txt only at startup: restart it (re-run $armScript) after changing the file.",
-                                    "The probe request is marker-protected ([doctor-dryrun]); an unconfirmed round-trip means it was not processed, never that it was typed.",
-                                    "Check the watcher log ($logFile) and window.txt ($windowFile)."
-                                )
-                            }
-                        }
-                    }
+                    Report "PASS" "Relay fallback target" @("fallback window resolves; headless-origin resumes (background sessions, scheduled runs) can land. Fallback expression per window.txt (applied at watcher startup): $fallbackExprDisplay")
                 }
             }
-            catch {
-                $status = "WARN"
-                $detail = @("round-trip probe errored: $($_.Exception.Message)")
+            elseif ($probeResult3.Outcome -eq "collision") {
+                Report "INFO" "Relay fallback target" @("a request is already pending; skipped so a real resume is not clobbered.")
             }
-            finally {
-                # Teardown removes only what the probe created: the temp
-                # transcript and its own request (content-checked so a real
-                # request that just landed is never deleted). The probe writes
-                # no ambient state: its dry-run containment is the in-request
-                # marker, so there is no flag lifetime to sequence and nothing
-                # here races the watcher. dryrun.on is never touched (it is the
-                # user's disarm-all switch; a pre-existing one WARN-skips the
-                # probe before this point).
-                Remove-Item $tempTranscript -Force -ErrorAction SilentlyContinue
-                if (Test-Path $requestFile) {
-                    $curRequest = ""
-                    try { $curRequest = [System.IO.File]::ReadAllText($requestFile) } catch {}
-                    if ($curRequest -eq $requestBody) { Remove-Item $requestFile -Force -ErrorAction SilentlyContinue }
+            else {
+                $fallbackWarnDetail = @(
+                    $probeResult3.Reason,
+                    "This affects HEADLESS-ORIGIN resumes only: attended sessions capture their own window per request (line 4) and never use the fallback.",
+                    "edit window.txt to the intended expression (or delete it to restore the default), then re-run ${armScript}: window.txt is read only at watcher startup, so re-arming (which restarts the watcher) is what applies the edit. Opening or retitling a window to match the existing expression needs no restart."
+                )
+                if ($fallbackSnapshotStale) {
+                    $fallbackWarnDetail += "window.txt was modified after the watcher started; the logged expression above may not match the current file. Re-run $armScript to restart the watcher and apply the edit."
                 }
-                # Remove only the probe's own archive entries (content carries the
-                # probe GUID); any other archived request belongs to the user.
-                foreach ($sub in @("processed", "failed")) {
-                    $subDir = Join-Path $relayDir $sub
-                    if (Test-Path $subDir) {
-                        Get-ChildItem -Path $subDir -File -ErrorAction SilentlyContinue | ForEach-Object {
-                            $archived = ""
-                            try { $archived = [System.IO.File]::ReadAllText($_.FullName) } catch {}
-                            if ($archived -match [regex]::Escape($probeGuid)) { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
-                        }
-                    }
-                }
+                Report "WARN" "Relay fallback target" $fallbackWarnDetail
             }
         }
     }
-
-    # Structural gaps downgrade a passing probe and are appended to the detail.
-    if ($structuralIssues.Count -gt 0) {
-        if ($status -eq "PASS") { $status = "WARN" }
-        $detail = $detail + $structuralIssues
-    }
-    if ($refreshNote) { $detail = @($refreshNote) + $detail }
-    Report $status "Resume relay" $detail
 
     # Failed relay requests: unattended runs that never auto-resumed. The
     # requesting session cannot observe its own relay outcome, so surfacing the
     # graveyard here (and in the SessionStart hook) is how a silent stall
-    # becomes visible. Read-only, so it runs even under -NoProbe; the round-trip
-    # probe's teardown has already reaped its own entries by GUID.
+    # becomes visible. Read-only, so it runs even under -NoProbe; both probes'
+    # teardown has already reaped their own entries by GUID, but a teardown
+    # race (the watcher's own 3rd-attempt archive landing after a probe's own
+    # reap already enumerated the directory) or a hard-killed doctor process
+    # can still leave a [doctor-dryrun] entry behind, so any entry still
+    # carrying the marker is excluded rather than counted as a real stall.
     $failedDir = Join-Path $relayDir "failed"
     if (Test-Path $failedDir) {
-        $failedEntries = @(Get-ChildItem -Path $failedDir -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+        $failedEntries = @(Get-ChildItem -Path $failedDir -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Where-Object {
+            $entryContent = ""
+            try { $entryContent = [System.IO.File]::ReadAllText($_.FullName) } catch {}
+            -not $entryContent.Contains("[doctor-dryrun]")
+        })
         if ($failedEntries.Count -gt 0) {
             $newest = $failedEntries[0]
             $newestId = ""

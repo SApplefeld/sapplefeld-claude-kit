@@ -72,7 +72,12 @@ function countPendingKaizen(cwd) {
 // run is otherwise invisible; this surfaces it the next time any kit session
 // starts. Machine-global (%LOCALAPPDATA%), Windows-only, self-limiting to a
 // recent window so it never nags over an old un-reaped graveyard. Any failure
-// returns null (silent).
+// returns null (silent). A [doctor-dryrun] entry is a probe corpse, not a
+// stalled session: the doctor's own teardown reaps its request by GUID on a
+// clean run, but a teardown race (the watcher's own 3rd-attempt archive
+// landing after the doctor's reap already enumerated the directory) or a
+// hard-killed doctor process can leave one behind, and it would otherwise
+// name a session that never existed on every future run until reaped by hand.
 function countRecentRelayFailures() {
     if (process.platform !== 'win32') return null;
     const base = process.env.LOCALAPPDATA;
@@ -88,15 +93,18 @@ function countRecentRelayFailures() {
         let newestMtime = 0;
         for (const e of entries) {
             try {
-                const st = fs.statSync(path.join(failedDir, e.name));
-                if (st.mtimeMs >= cutoff) {
-                    count++;
-                    if (st.mtimeMs > newestMtime) {
-                        newestMtime = st.mtimeMs;
-                        // Filename is watcher-generated, but sanitize before it
-                        // enters the trusted context channel, as with plan names.
-                        newest = e.name.replace(/[^\x20-\x7E]/g, '').slice(0, 120);
-                    }
+                const fullPath = path.join(failedDir, e.name);
+                const st = fs.statSync(fullPath);
+                if (st.mtimeMs < cutoff) continue;
+                let content = '';
+                try { content = fs.readFileSync(fullPath, 'utf8'); } catch { /* unreadable: still count it, cannot check the marker */ }
+                if (content.includes('[doctor-dryrun]')) continue;
+                count++;
+                if (st.mtimeMs > newestMtime) {
+                    newestMtime = st.mtimeMs;
+                    // Filename is watcher-generated, but sanitize before it
+                    // enters the trusted context channel, as with plan names.
+                    newest = e.name.replace(/[^\x20-\x7E]/g, '').slice(0, 120);
                 }
             } catch {
                 // Unreadable entry: skip it.

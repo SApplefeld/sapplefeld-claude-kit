@@ -193,6 +193,22 @@ test('clearGoal removes the file and is a no-op when absent', () => {
     }
 });
 
+test('clearGoal reports a failed delete as ok:false, never as "nothing was armed"', () => {
+    // A directory occupying the goal-state path makes unlinkSync fail, standing
+    // in for any delete failure (e.g. permissions). The caller must be able to
+    // distinguish "still armed and enforcing" from "nothing to clear".
+    const repo = makeRepo();
+    try {
+        fs.mkdirSync(goalPath(repo), { recursive: true });
+        const result = clearGoal(repo);
+        assert.strictEqual(result.ok, false);
+        assert.strictEqual(result.cleared, false);
+        assert.ok(result.reason && result.reason.includes('could not clear'));
+    } finally {
+        rmRepo(repo);
+    }
+});
+
 test('planHead classifies complete, in progress, unknown, and missing', () => {
     const repo = makeRepo();
     try {

@@ -20,16 +20,25 @@
 //     exits 0 with no output, so the hook never crash-traps a session.
 //
 // Allow order:
-//   0.  stop_hook_active guard: never re-block inside a stop continuation.
-//   0b. no goal armed: allow (the hot path for every session everywhere).
-//   0c. scoping: the session transcript must reference the armed plan, else an
+//   0.  no goal armed: allow (the hot path for every session everywhere).
+//   0b. scoping: the session transcript must reference the armed plan, else an
 //       unrelated session in this project is allowed (never leashed).
 //   a.  plan Status is Complete, or the plan file is gone (archived): auto-clear
 //       the goal and allow.
 //   b.  the last assistant message leads with 'BLOCKED:': allow.
-//   c.  a resume-relay handoff for this plan was written in the last few minutes:
-//       allow (a section-boundary compaction swap is in flight).
+//   c.  a resume-relay handoff for this plan was written in the last few minutes
+//       by a session other than this one: allow (a section-boundary compaction
+//       swap is in flight). A handoff whose destination is THIS session does not
+//       count: that is the request that resumed us, not us handing off, and the
+//       resumed successor must stay leashed through the recency window.
 //   else: block with a reason naming the plan and the three ways out.
+//
+// The hook re-evaluates these conditions on EVERY stop attempt, including inside
+// a stop-hook continuation (stop_hook_active), so the leash holds until an allow
+// condition is genuinely met rather than releasing after a single block. Loop
+// safety is the harness's, not ours: Claude Code overrides a Stop hook after it
+// blocks eight consecutive times without progress (CLAUDE_CODE_STOP_HOOK_BLOCK_CAP),
+// so a genuinely stuck session is released by the harness with a visible warning.
 
 'use strict';
 
@@ -183,29 +192,43 @@ function lastAssistantLeadsWithBlocked(transcriptPath) {
     return false;
 }
 
-// Read a relay file (small cap) and test whether it names the plan basename.
-// THROWS on a read error so a fresh-but-unreadable request is treated as
-// possibly this session's own handoff (allow) rather than ignored (block, which
-// would race the relay).
-function fileNamesPlanOrThrow(filePath, base) {
+// Read the head of a relay file (small cap). THROWS on a read error so a
+// fresh-but-unreadable request is treated as possibly this session's own
+// handoff (allow) rather than ignored (block, which would race the relay).
+function readRelayHeadOrThrow(filePath) {
     const fd = fs.openSync(filePath, 'r');
     try {
         const buf = Buffer.alloc(8192);
         const bytes = fs.readSync(fd, buf, 0, 8192, 0);
-        return buf.toString('utf8', 0, bytes).includes(base);
+        return buf.toString('utf8', 0, bytes);
     } finally {
         try { fs.closeSync(fd); } catch { /* already closed */ }
     }
 }
 
-// Was a resume-relay handoff for this plan written in the last few minutes?
-// Windows-only (the relay watcher is a desktop AHK script). Returns true when a
-// fresh request/archive names this plan, false when no relay tree or no matching
+// Does a relay request/archive body count as an allow signal for this session?
+// It must name the plan basename, and its destination (line 1, the session UUID
+// the watcher resumes into) must not be THIS session: the handoff that spawned
+// the successor is not the successor's own license to stop, or the recency
+// window would leave every freshly resumed session unleashed for its first
+// minutes. When either UUID is unavailable the exclusion is skipped, restoring
+// the plain recency-plus-plan match (fail open).
+function relayBodyAllowsSession(body, base, sessionId) {
+    if (!body.includes(base)) return false;
+    if (!sessionId) return true;
+    const destination = body.split('\n', 1)[0].trim().toLowerCase();
+    return !destination || destination !== String(sessionId).trim().toLowerCase();
+}
+
+// Was a resume-relay handoff for this plan written in the last few minutes by a
+// session other than this one? Windows-only (the relay watcher is a desktop AHK
+// script). Returns true when a fresh request/archive names this plan and is not
+// this session's own spawning handoff, false when no relay tree or no matching
 // handoff exists (absence of a handoff is not a reason to release the leash).
 // THROWS only when a FRESH request.txt exists but cannot be read, since that
 // could be this session's own handoff and blocking it would race the relay; the
 // top-level catch then allows.
-function recentRelayHandoffForPlan(planRel) {
+function recentRelayHandoffForPlan(planRel, sessionId) {
     if (process.platform !== 'win32') return false;
     const local = process.env.LOCALAPPDATA;
     if (!local) return false;
@@ -224,7 +247,7 @@ function recentRelayHandoffForPlan(planRel) {
     let reqStat = null;
     try { reqStat = fs.statSync(request); } catch { reqStat = null; }
     if (reqStat && reqStat.isFile() && reqStat.mtimeMs >= cutoff) {
-        if (fileNamesPlanOrThrow(request, base)) return true;
+        if (relayBodyAllowsSession(readRelayHeadOrThrow(request), base, sessionId)) return true;
     }
 
     // (b) The newest processed\ archives. Filenames are timestamp-prefixed
@@ -246,7 +269,8 @@ function recentRelayHandoffForPlan(planRel) {
         try {
             const full = path.join(processedDir, name);
             const st = fs.statSync(full);
-            if (st.isFile() && st.mtimeMs >= cutoff && fileNamesPlanOrThrow(full, base)) {
+            if (st.isFile() && st.mtimeMs >= cutoff
+                && relayBodyAllowsSession(readRelayHeadOrThrow(full), base, sessionId)) {
                 return true;
             }
         } catch {
@@ -271,9 +295,9 @@ function main() {
     let payload = {};
     try { payload = JSON.parse(readStdin() || '{}'); } catch { /* defaults */ }
 
-    // Loop guard: never re-block inside a stop-hook continuation.
-    if (payload.stop_hook_active || payload.stopHookActive) return;
-
+    // No stop_hook_active early-exit: the allow conditions re-evaluate on every
+    // stop attempt so the leash holds across a continuation. The harness's own
+    // consecutive-block cap is the loop backstop (see the header comment).
     const cwd = payload.cwd || process.cwd();
 
     // Hot path: no goal armed means allow, after a single cheap read.
@@ -308,8 +332,11 @@ function main() {
     // turns into an allow.
     if (lastAssistantLeadsWithBlocked(transcriptPath)) return;
 
-    // Clause (c): a section-boundary relay handoff for this plan is in flight.
-    if (recentRelayHandoffForPlan(planRel)) return;
+    // Clause (c): a section-boundary relay handoff for this plan is in flight,
+    // written by a session other than this one (a successor's own spawning
+    // handoff never releases it).
+    const sessionId = payload.session_id || payload.sessionId;
+    if (recentRelayHandoffForPlan(planRel, sessionId)) return;
 
     // None of the allow conditions hold: hold the session to completion. The
     // plan path is repo data sanitized before it enters this trusted channel.

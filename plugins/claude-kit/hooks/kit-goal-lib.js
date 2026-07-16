@@ -140,9 +140,11 @@ function armGoal(cwd, planArg) {
     return { ok: true, plan: rel };
 }
 
-// Delete the goal-state file if present. Returns { ok:true, cleared } where
-// cleared is true if a file was removed, false if none was armed. Never
-// throws: a delete failure (e.g. permissions) degrades to cleared:false.
+// Delete the goal-state file if present. Returns { ok:true, cleared:true } when
+// a file was removed, { ok:true, cleared:false } when none was armed, and
+// { ok:false, cleared:false, reason } when the file exists but the delete
+// failed (e.g. permissions): the leash is still armed and the caller must not
+// report it released. Never throws.
 function clearGoal(cwd) {
     const gp = goalPath(cwd);
     try {
@@ -151,8 +153,12 @@ function clearGoal(cwd) {
         }
         fs.unlinkSync(gp);
         return { ok: true, cleared: true };
-    } catch {
-        return { ok: true, cleared: false };
+    } catch (err) {
+        return {
+            ok: false,
+            cleared: false,
+            reason: 'could not clear goal state: ' + (err && err.message ? err.message : String(err))
+        };
     }
 }
 

@@ -47,6 +47,13 @@ function cmdArm(planArg) {
 
 function cmdClear() {
     const result = clearGoal(process.cwd());
+    if (!result.ok) {
+        // The state file exists but could not be deleted: the leash is still
+        // armed and enforcing, so this must not read as a successful clear.
+        process.stderr.write('kit-goal: ' + sanitize(result.reason) + ' (the goal is still armed)\n');
+        process.exitCode = 1;
+        return;
+    }
     process.stdout.write((result.cleared ? 'kit goal cleared' : 'no kit goal was armed') + '\n');
     process.exitCode = 0;
 }

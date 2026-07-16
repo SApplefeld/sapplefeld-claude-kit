@@ -189,15 +189,41 @@ test('goal armed, an EARLIER turn had BLOCKED but the last did not: block (only 
     }
 });
 
-test('goal armed, fresh relay request.txt naming the plan: empty stdout (allow)', { skip: process.platform !== 'win32' ? 'win32-only relay probe' : false }, () => {
+test('goal armed, fresh relay request.txt naming the plan, written by this (predecessor) session: empty stdout (allow)', { skip: process.platform !== 'win32' ? 'win32-only relay probe' : false }, () => {
+    // The stopping session is the predecessor handing off: its own id differs
+    // from the request's destination UUID (line 1), so clause (c) approves the
+    // boundary stop.
     const { repo, planRel, transcript, local } = armedRepo(['Compacting at the boundary.']);
     try {
         const relayDir = path.join(local, 'claude-kit', 'resume-relay');
         writeFile(path.join(relayDir, 'request.txt'),
             'uuid-1234\nC:/x/uuid-1234.jsonl\nResume ' + planRel + ' from the next section.\n');
-        const res = runHook({ cwd: repo, transcript_path: transcript }, local);
+        const res = runHook({ cwd: repo, transcript_path: transcript, session_id: 'uuid-predecessor' }, local);
         assert.strictEqual(res.stdout, '');
         assert.strictEqual(res.status, 0);
+    } finally {
+        rmDir(repo);
+        rmDir(local);
+    }
+});
+
+test('the successor is not unleashed by its own spawning handoff: block', { skip: process.platform !== 'win32' ? 'win32-only relay probe' : false }, () => {
+    // Both relay artifacts name the plan and are fresh, but their destination
+    // UUID (line 1) IS the stopping session: this is the handoff that resumed
+    // us, not us handing off. Without the destination exclusion the recency
+    // window would leave every freshly resumed successor free to quit for its
+    // first minutes.
+    const { repo, planRel, transcript, local } = armedRepo(['Resumed; stopping early.']);
+    try {
+        const relayDir = path.join(local, 'claude-kit', 'resume-relay');
+        writeFile(path.join(relayDir, 'request.txt'),
+            'uuid-me\nC:/x/uuid-me.jsonl\nResume ' + planRel + ' from the next section.\n');
+        writeFile(path.join(relayDir, 'processed', '20260716-130000-done.txt'),
+            'UUID-ME\nC:/x/uuid-me.jsonl\nResume ' + planRel + ' from the next section.\n');
+        const res = runHook({ cwd: repo, transcript_path: transcript, session_id: 'uuid-me' }, local);
+        assert.strictEqual(res.status, 0);
+        const out = JSON.parse(res.stdout);
+        assert.strictEqual(out.decision, 'block', 'a successor must stay leashed through the clause-(c) window');
     } finally {
         rmDir(repo);
         rmDir(local);
@@ -323,12 +349,16 @@ test('a sidechain (sub-agent) BLOCKED turn does not count; the last main-thread 
     }
 });
 
-test('stop_hook_active true: empty stdout (allow, no re-block loop)', () => {
+test('stop_hook_active true: still blocks (the leash re-evaluates every stop attempt)', () => {
+    // The harness's own consecutive-block cap (CLAUDE_CODE_STOP_HOOK_BLOCK_CAP)
+    // is the loop backstop; the hook itself must keep holding inside a stop
+    // continuation, or the leash is one-shot per turn.
     const { repo, transcript, local } = armedRepo(['Making progress.']);
     try {
         const res = runHook({ cwd: repo, transcript_path: transcript, stop_hook_active: true }, local);
-        assert.strictEqual(res.stdout, '');
         assert.strictEqual(res.status, 0);
+        const out = JSON.parse(res.stdout);
+        assert.strictEqual(out.decision, 'block', 'a stop-hook continuation must not release the leash');
     } finally {
         rmDir(repo);
         rmDir(local);

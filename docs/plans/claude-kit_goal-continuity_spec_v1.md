@@ -32,6 +32,20 @@ Scott chose fork A: a deterministic kit-owned implementation of the plan methodo
 
 With A, the goal template's single owner moves to the `/kit-goal` command and executing-work's template block becomes a pointer to it, per the one-owner rule.
 
+## Locked contract (as-built, decided 2026-07-16)
+
+Fork A's mechanism is deterministic (no LLM evaluator). Sections 2, 3, and 5 all build to this shared contract:
+
+- **Goal state file:** `<repo>/.kit/goal-state.json` (gitignored, project-scoped so the successor session inherits it via shared cwd). Schema: `{ "plan": "<repo-relative forward-slash plan path>", "condition": "<canonical condition text>", "armedAt": "<ISO-8601>" }`. Written atomically (tmp + rename).
+- **Shared library:** `plugins/claude-kit/hooks/kit-goal-lib.js` (Node core only, CommonJS, never throws), the single owner of the canonical condition string (`composeCondition`), plus `readGoal` / `armGoal` / `clearGoal` / `planHead`. The lib, not the skill prose, is the single source of the condition text.
+- **CLI entry:** `plugins/claude-kit/hooks/kit-goal.js` (`arm <plan>` | `clear` | `status`), invoked by the skill.
+- **`/kit-goal` skill:** `plugins/claude-kit/skills/kit-goal/SKILL.md`, arming and clearing UX; executing-work's template block becomes a one-line pointer to it (the one-owner move).
+- **Stop hook:** `plugins/claude-kit/hooks/kit-goal-stop.js`, wired in `hooks.json`. Fires on every Stop but is a strict no-op unless a goal is armed. Allow order: (0) `stop_hook_active` guard; (0b) no state file → allow; (0c) scoping predicate: the session's `transcript_path` must reference the armed plan path, else allow (an unrelated session in the same project is never leashed); (a) plan Status is Complete or the plan file is gone (archived) → auto-clear and allow; (b) last assistant message leads with `BLOCKED:` → allow; (c) a resume-relay handoff for this plan is recent (live `request.txt`, or newest `processed\*.txt`, mtime within the window AND its content references the armed plan) → allow; else block with a reason naming the plan. Any error → allow (never trap the session).
+- **Clause-(c) window:** 5 minutes, tolerating the watcher's 10-second poll archiving `request.txt` to `processed\`. Tying the match to the plan path (not just recency) tightens it against a concurrent unrelated relay on the same machine. This leaves the compact-session relay write path untouched (no added boundary-marker step).
+- **Session-start surfacing:** `session-start.js` emits "kit goal armed for &lt;plan&gt;" when a goal is armed, so no session is surprised by the hook.
+
+Section-boundary reallocation from the brainstorm sketch: the `/kit-goal clear` UX lands in Section 2 (it owns the whole skill + CLI surface); Section 3 owns the hook's auto-clear-on-Complete. Clean disjoint file ownership: Section 2 = lib + CLI + skill + executing-work pointer; Section 3 = Stop hook + hooks.json + session-start.js.
+
 ## Sections of Work
 
 ### 1. Feasibility probe (supervised, goal-capable machine)
@@ -67,4 +81,12 @@ Acceptance: doctor reports the new surface green on a healthy install and names 
 
 ## Chapters
 
-(none yet)
+### Chapter 1 - 2026-07-16
+Completed: 1. Feasibility probe (supervised, goal-capable machine)
+Implemented By: main session (inline; fable-tier probe)
+Metrics: 0 review rounds (investigation, no code); 0 NEEDS_CONTEXT; 0 escalations; advisor off (Opus-led session)
+Decisions / Surprises: Native `/goal` state is a transcript attachment record, observed live in this session's own `.jsonl`: `{"type":"goal_status","met":false,"sentinel":true,"condition":"..."}`. No native goal state exists anywhere in `~/.claude` settings, `sessions/`, `session-env/`, or `tasks/` (grepped). The leash is bound to the session/transcript, not the project. A relayed compacted successor is a new session id with a new transcript built by the compact engine, which never carries the `goal_status` sentinel, so it starts goalless. Confirmed: the storage location (read the record directly). Inferred from that mechanism: non-inheritance across a swap. This matches the spec's expected "no" and settles the emphasis for Section 3: the kit hook is the sole structural leash across a swap, not belt-and-braces, so it must carry the whole continuity load. Direct live confirmation (arm native `/goal`, relay-compact, watch the successor come up goalless) folds into Section 4's live-fire. Also locked the shared as-built contract (new "Locked contract" section) before fanning out Sections 2/3, and confirmed: `.kit/` is gitignored (state-file home), the build packages only `plugins/claude-kit/` (a repo-level `test/` won't ship), plugin slash-commands auto-discover from `skills/<name>/SKILL.md` and invoke as `/kit-goal`, and Node v24 supports zero-dependency `node:test`.
+Review Findings: none (no code produced this section)
+Compaction: not run: Section 1 is investigation only, context light, and the native `/goal` on this build session governs the turn; no boundary compaction warranted.
+Next: 2. /kit-goal arming command
+Commit Model: Commit-and-Push

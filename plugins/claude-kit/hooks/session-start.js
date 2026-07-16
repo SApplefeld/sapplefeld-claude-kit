@@ -66,6 +66,49 @@ function countPendingKaizen(cwd) {
     return count;
 }
 
+// Count resume-relay requests that failed in the last 24h on this machine.
+// A relaying session cannot observe its own outcome, so a stalled unattended
+// run is otherwise invisible; this surfaces it the next time any kit session
+// starts. Machine-global (%LOCALAPPDATA%), Windows-only, self-limiting to a
+// recent window so it never nags over an old un-reaped graveyard. Any failure
+// returns null (silent).
+function countRecentRelayFailures() {
+    if (process.platform !== 'win32') return null;
+    const base = process.env.LOCALAPPDATA;
+    if (!base) return null;
+    const failedDir = path.join(base, 'claude-kit', 'resume-relay', 'failed');
+    try {
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const entries = fs.readdirSync(failedDir, { withFileTypes: true })
+            .filter((d) => d.isFile())
+            .slice(0, 200);
+        let count = 0;
+        let newest = null;
+        let newestMtime = 0;
+        for (const e of entries) {
+            try {
+                const st = fs.statSync(path.join(failedDir, e.name));
+                if (st.mtimeMs >= cutoff) {
+                    count++;
+                    if (st.mtimeMs > newestMtime) {
+                        newestMtime = st.mtimeMs;
+                        // Filename is watcher-generated, but sanitize before it
+                        // enters the trusted context channel, as with plan names.
+                        newest = e.name.replace(/[^\x20-\x7E]/g, '').slice(0, 120);
+                    }
+                }
+            } catch {
+                // Unreadable entry: skip it.
+            }
+        }
+        if (count === 0) return null;
+        return { count, newest };
+    } catch {
+        // No failed dir (relay never armed or never failed): nothing to surface.
+        return null;
+    }
+}
+
 function main() {
     // Parse Hook Payload.
     let payload = {};
@@ -128,8 +171,16 @@ function main() {
         // Never let the kaizen check break recovery or the session.
     }
 
+    // Relay-failure surfacing is additive and must never affect plan recovery.
+    let relayFailures = null;
+    try {
+        relayFailures = countRecentRelayFailures();
+    } catch {
+        // Never let the relay check break recovery or the session.
+    }
+
     // Emit Additional Context.
-    if (activePlans.length === 0 && kaizenCount === 0 && completedUnarchived === 0) return;
+    if (activePlans.length === 0 && kaizenCount === 0 && completedUnarchived === 0 && !relayFailures) return;
 
     const blocks = [];
 
@@ -153,6 +204,10 @@ function main() {
 
     if (kaizenCount > 0) {
         blocks.push(`This is the claude-kit repo and the kaizen inbox has ${kaizenCount} pending item(s). At a natural stopping point, consider running a kaizen pass (see the kaizen skill). Reminder, not a blocker.`);
+    }
+
+    if (relayFailures) {
+        blocks.push(`${relayFailures.count} resume-relay request(s) failed in the last 24h on this machine (newest: ${relayFailures.newest}). An unattended run may have compacted but never auto-resumed. Check %LOCALAPPDATA%\\claude-kit\\resume-relay\\failed\\ (each file names the stalled session on its first line) and resume it with 'claude --resume <session-id>' in its repo, or run the kit-doctor skill. Reminder, not a blocker.`);
     }
 
     process.stdout.write(JSON.stringify({

@@ -563,6 +563,17 @@ else {
     $structuralIssues = @()
     if ($null -eq $ahkPath) { $structuralIssues += "AutoHotkey v2 not found at either known install path; re-run $armScript (it installs AHK via winget)" }
     if (-not (Test-Path $shortcut)) { $structuralIssues += "Startup shortcut missing (re-run $armScript)" }
+    # Stale watcher: a kit update refreshes this plugin's watcher but not the
+    # deployed copy the running process was started from, so the machine keeps
+    # running old code with no signal. A hash mismatch is that gap.
+    $sourceWatcher = Join-Path $relaySourceDir "resume-relay.ahk"
+    if ((Test-Path $watcherCopy) -and (Test-Path $sourceWatcher)) {
+        try {
+            if ((Get-FileHash -LiteralPath $watcherCopy -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceWatcher -Algorithm SHA256).Hash) {
+                $structuralIssues += "deployed watcher differs from this plugin's resume-relay.ahk (a kit update since the last arm leaves the old watcher running); re-run $armScript to refresh it"
+            }
+        } catch {}
+    }
 
     $status = $null
     $detail = @()
@@ -767,6 +778,26 @@ else {
         $detail = $detail + $structuralIssues
     }
     Report $status "Resume relay" $detail
+
+    # Failed relay requests: unattended runs that never auto-resumed. The
+    # requesting session cannot observe its own relay outcome, so surfacing the
+    # graveyard here (and in the SessionStart hook) is how a silent stall
+    # becomes visible. Read-only, so it runs even under -NoProbe; the round-trip
+    # probe's teardown has already reaped its own entries by GUID.
+    $failedDir = Join-Path $relayDir "failed"
+    if (Test-Path $failedDir) {
+        $failedEntries = @(Get-ChildItem -Path $failedDir -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+        if ($failedEntries.Count -gt 0) {
+            $newest = $failedEntries[0]
+            $newestId = ""
+            try { $newestId = (((Get-Content $newest.FullName -Raw -ErrorAction SilentlyContinue) -split "`n")[0]).Trim() } catch {}
+            Report "WARN" "Resume relay failures" @(
+                "$($failedEntries.Count) failed request(s) in $failedDir; each is an unattended run that never auto-resumed.",
+                "Newest: session '$newestId' at $($newest.LastWriteTime).",
+                "Resume a stalled run manually: claude --resume <session-id>  in its repo. Reap $failedDir once handled."
+            )
+        }
+    }
 }
 
 # --- Summary.

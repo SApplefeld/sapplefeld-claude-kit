@@ -13,8 +13,8 @@
 //     is armed, this session is working the plan, the plan is not done, the last
 //     message did not lead with 'BLOCKED:', and no relay handoff is in flight.
 //   - Whenever an allow condition cannot be determined (a transcript that cannot
-//     be read, a final message too large to have been read whole, a fresh relay
-//     request that cannot be read), the stop is ALLOWED, not blocked: a released
+//     be read, a tail caught mid-write, a fresh relay request that cannot be
+//     read), the stop is ALLOWED, not blocked: a released
 //     leash is a recoverable stop, while a spurious block traps the session (and
 //     at a relay boundary would race the compaction handoff). A bug anywhere
 //     exits 0 with no output, so the hook never crash-traps a session.
@@ -25,7 +25,11 @@
 //       unrelated session in this project is allowed (never leashed).
 //   a.  plan Status is Complete, or the plan file is gone (archived): auto-clear
 //       the goal and allow.
-//   b.  the last assistant message leads with 'BLOCKED:': allow.
+//   b.  the last assistant message leads with 'BLOCKED:': allow. The harness can
+//       still be appending the turn's final entries when the hook runs, so a
+//       read that does not resolve the last turn (no lead found, or a partial
+//       mid-append final line) is retried briefly; only a persistent no blocks,
+//       and a persistent partial tail stays indeterminate: allow.
 //   c.  a resume-relay handoff for this plan was written in the last few minutes
 //       by a session other than this one: allow (a section-boundary compaction
 //       swap is in flight). A handoff whose destination is THIS session does not
@@ -144,9 +148,10 @@ function transcriptReferencesPlan(transcriptPath, planRel) {
 
 // Does the last main-thread assistant turn's text lead with 'BLOCKED:'? Returns
 // true (leads) or false (affirmatively does not). THROWS when it cannot be
-// determined (the transcript cannot be read, or a large final entry was
-// truncated by the tail cap): the top-level catch then allows the stop rather
-// than trapping a possibly-blocked session. Sub-agent (sidechain) turns are
+// determined (the transcript cannot be read, or the final line is a partial
+// entry, whether cut by the tail cap or caught mid-append by a harness still
+// writing the turn): the top-level catch then allows the stop rather than
+// trapping a possibly-blocked session. Sub-agent (sidechain) turns are
 // skipped so only the main thread's state is read.
 function lastAssistantLeadsWithBlocked(transcriptPath) {
     if (!transcriptPath) throw new Error('no transcript path');
@@ -173,11 +178,19 @@ function lastAssistantLeadsWithBlocked(transcriptPath) {
         try {
             entry = JSON.parse(line);
         } catch {
-            // The last non-empty line failing to parse while the tail was
-            // truncated (start > 0) means a large final entry may have been cut,
-            // so the last turn is indeterminate: allow rather than block.
-            if (!sawNonEmpty && start > 0) throw new Error('truncated final entry');
-            sawNonEmpty = true;
+            // The last non-empty line failing to parse means the tail is not a
+            // complete entry: either the 1MB cap cut a large final entry, or the
+            // read landed while the harness was still appending the turn's final
+            // entries (the assistant text and the stop-time metadata records land
+            // around the same moment this hook runs). Either way the last turn is
+            // indeterminate rather than answerable from the previous turn. The
+            // transientTail mark lets the retry wrapper re-read (the append is
+            // likely in flight) instead of allowing on the first sighting.
+            if (!sawNonEmpty) {
+                const err = new Error('partial final entry (cap-cut or mid-append)');
+                err.transientTail = true;
+                throw err;
+            }
             continue;
         }
         sawNonEmpty = true;
@@ -190,6 +203,59 @@ function lastAssistantLeadsWithBlocked(transcriptPath) {
         return textBlock.text.trimStart().startsWith('BLOCKED:');
     }
     return false;
+}
+
+// Clause-(b) re-read schedule: delays (ms) between attempts when a read does
+// not resolve to a leading 'BLOCKED:'. The harness's append of the turn's
+// final assistant entry can land a beat after the Stop hook starts (observed
+// live), so neither an affirmative "does not lead" nor a partial-tail
+// indeterminate is concluded from a single read. KIT_GOAL_STOP_RETRY_MS
+// overrides for tests ('0' disables retries); values are clamped (5s each,
+// 5 delays) so a stray env value cannot pin a synchronous hook to its timeout.
+function blockedRetryDelays() {
+    const raw = process.env.KIT_GOAL_STOP_RETRY_MS;
+    if (raw === undefined) return [150, 350];
+    return String(raw).split(',')
+        .map((s) => parseInt(s, 10))
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .map((n) => Math.min(n, 5000))
+        .slice(0, 5);
+}
+
+// Synchronous sleep for the re-read schedule (a Stop hook is a short-lived
+// synchronous process; there is no event loop to yield to).
+function sleepMs(ms) {
+    try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    } catch {
+        // No sleep available: fall through to an immediate re-read.
+    }
+}
+
+// Clause (b) with the re-read schedule applied to both unresolved outcomes: a
+// read finding no lead may predate the final append (answering from the prior
+// turn), and a partial final line means the append is likely in flight, so both
+// re-read before concluding. A persistent partial tail re-throws after the last
+// attempt (the top-level catch allows: still fail-open); non-transient throws
+// (an unreadable transcript) propagate immediately. A true from any read is
+// accepted as-is; in principle it too can come from a stale snapshot whose
+// previous turn led with 'BLOCKED:', a residual race with no cheap read-side
+// fix, accepted because it fails open.
+function lastAssistantLeadsWithBlockedWithRetry(transcriptPath) {
+    const delays = blockedRetryDelays();
+    for (let attempt = 0; ; attempt++) {
+        let leads;
+        try {
+            leads = lastAssistantLeadsWithBlocked(transcriptPath);
+        } catch (err) {
+            if (!err || err.transientTail !== true || attempt >= delays.length) throw err;
+            sleepMs(delays[attempt]);
+            continue;
+        }
+        if (leads) return true;
+        if (attempt >= delays.length) return false;
+        sleepMs(delays[attempt]);
+    }
 }
 
 // Read the head of a relay file (small cap). THROWS on a read error so a
@@ -329,8 +395,9 @@ function main() {
 
     // Clause (b): the last assistant message surfaced a true blocker. A read
     // that cannot determine the last turn throws, which the top-level catch
-    // turns into an allow.
-    if (lastAssistantLeadsWithBlocked(transcriptPath)) return;
+    // turns into an allow; a read that finds no lead is retried briefly in case
+    // the harness's final append had not yet landed.
+    if (lastAssistantLeadsWithBlockedWithRetry(transcriptPath)) return;
 
     // Clause (c): a section-boundary relay handoff for this plan is in flight,
     // written by a session other than this one (a successor's own spawning

@@ -425,7 +425,7 @@ function Get-DoctrineBody {
     }
     if ($end -eq -1) { return $raw }
     $body = ($lines[($end + 1)..($lines.Count - 1)] -join "`n")
-    return $body -replace "^`n", ""
+    return $body -replace "^`r?`n", ""
 }
 
 $claudeMd = Join-Path $claudeDir "CLAUDE.md"

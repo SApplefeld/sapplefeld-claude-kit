@@ -56,6 +56,26 @@ function findCompletedUnarchived(cwd) {
     return files;
 }
 
+// Does a docs/ file carry the plan-spec header contract: a Status: header and a
+// Commit Model: header near the top? A curated plan doc has both; a leaked review
+// or scratch report has neither. Head-read only, BOM-tolerant, never throws. This
+// is the definitive "curated plan, not scratch" signal, used to exempt a spec
+// whose project or topic name embeds a word the SCRATCH_NAME set matches.
+function hasPlanHeaderContract(full) {
+    try {
+        const fd = fs.openSync(full, 'r');
+        const buf = Buffer.alloc(2048);
+        const bytes = fs.readSync(fd, buf, 0, 2048, 0);
+        fs.closeSync(fd);
+        let head = buf.toString('utf8', 0, bytes);
+        if (head.charCodeAt(0) === 0xFEFF) head = head.slice(1);
+        return /^status:[^\S\r\n]*\S/im.test(head)
+            && /^commit[^\S\r\n]+model:[^\S\r\n]*\S/im.test(head);
+    } catch {
+        return false;
+    }
+}
+
 // Scratch that does not belong in the curated docs/ tree: review/report dirs and
 // report-named files. Bounded recursive walk; patterns are conservative so a
 // legitimate curated doc (docs/security-model.md is not "_security") is not flagged.
@@ -63,6 +83,12 @@ function findDocsScratch(cwd) {
     const root = path.join(cwd, 'docs');
     const SCRATCH_DIR = /(^|[\\/])(reviews|_impl_reports)([\\/]|$)/i;
     const SCRATCH_NAME = /(_adversarial|_blind|_security|_qa|_rev[_-])/i;
+    // A curated plan spec is never scratch, even when its project or topic name
+    // embeds a SCRATCH_NAME word (e.g. neo_security-packet_spec_v1.md). Recognize
+    // it by the spec naming contract (a fast, zero-I/O path for the common case)
+    // or, failing that, the plan header contract, and veto only the name-based
+    // match: a file physically inside a reviews/ dir is still caught by SCRATCH_DIR.
+    const SPEC_NAME = /_spec_v\d+\.md$/i;
     const hits = [];
     let budget = 2000;
     function walk(dir, depth) {
@@ -79,7 +105,8 @@ function findDocsScratch(cwd) {
                     continue; // flag the dir; do not enumerate its contents
                 }
                 walk(full, depth + 1);
-            } else if (e.isFile() && (SCRATCH_DIR.test(rel) || SCRATCH_NAME.test(e.name))) {
+            } else if (e.isFile() && (SCRATCH_DIR.test(rel)
+                || (SCRATCH_NAME.test(e.name) && !SPEC_NAME.test(e.name) && !hasPlanHeaderContract(full)))) {
                 hits.push(('docs' + rel).replace(/[^\x20-\x7E]/g, '').slice(0, 160));
             }
         }

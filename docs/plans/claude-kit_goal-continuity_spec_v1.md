@@ -242,3 +242,13 @@ Review Findings: blind 1 MAJOR (self-identity) FIXED via console-primary; MINORs
 Compaction: not run: interactive session with Scott present.
 Next: finishing pass (docs curation; the whole-changeset QA and security are effectively covered by this section's review since 6a is prose and Section 7 got the full roster), then the residual ASR live check folds into the supervised Section 4. 6b's hook change stays deferred per Chapter 12.
 Commit Model: Commit-and-Push
+
+### Chapter 14 - 2026-07-17
+Completed: Kaizen pass - doctor relay checks aligned to Section 7 (a Section-7 follow-on)
+Implemented By: main session (kaizen pass) + 4 general-purpose agents (RED/GREEN baseline-test of a separate routing rule)
+Metrics: 2 inbox items addressed; the routing rule RED 2/2 reproduced, GREEN 2/2 fixed; advisor off (Opus-led session)
+Decisions / Surprises: A kaizen pass surfaced that Section 7 left the doctor speaking the old contract - the "what still speaks the old contract" check missed at Section 7 close. The doctor's "Resume relay" plane still treated `window.txt` as required (WARN when absent, PASS asserted it configured, `-Fix` prompted to write the default), but Section 7 demoted `window.txt` to a last-ditch fallback since the relay resolves the target window per request (by name, else console). Aligned in `doctor.ps1`: an absent `window.txt` is now an informational note, never a WARN or a `-Fix` re-arm prompt, and PASS no longer asserts it (verified live: `[PASS] Resume relay` with the fallback-framed note). The paired 2026-07-15 inbox note (doctor should arm the relay under `-Fix` consent) was retired with receipts: already delivered in Chapter 10's rework (`doctor.ps1` Get-Consent re-arm for a missing watcher / window). Also fixed in the same pass but outside this plan's scope (a general kit improvement): `executing-work` now routes a `docs/`-writing section to the main thread regardless of tier, since the docs-write-guard denies a non-curator implementer the write; RED/GREEN baseline-tested per writing-skills (2/2 fresh agents dispatched to an implementer without the rule, 2/2 routed to the main thread with it).
+Review Findings: none (mechanical doctor edit verified live PASS; the routing rule was baseline-tested rather than agent-reviewed)
+Compaction: not run: interactive session with Scott present.
+Next: unchanged - the residual ASR live check folds into the supervised Section 4.
+Commit Model: Commit-and-Push

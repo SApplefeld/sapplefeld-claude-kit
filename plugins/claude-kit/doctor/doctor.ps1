@@ -822,15 +822,9 @@ else {
         # memory). Consent-gated like every other install/repair action, and
         # skipped entirely under -NoProbe (structural detection only, matching
         # today's -NoProbe behavior).
-        if (-not $NoProbe -and -not $windowConfigured -and $Fix -and -not $requestPending) {
-            if (Get-Consent "window.txt is not configured. Re-arm the resume relay now (writes the default window.txt and restarts the watcher)?") {
-                try { & powershell -NoProfile -ExecutionPolicy Bypass -File $armScript } catch {}
-                $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
-                $rearmFacts = Update-RelayFactsAfterRearm -WatcherCopy $watcherCopy -SourceWatcher $sourceWatcher -WindowFile $windowFile
-                $watcherStale = $rearmFacts.WatcherStale
-                $fallbackExprDisplay = $rearmFacts.FallbackExprDisplay
-            }
-        }
+        # An absent window.txt is not repaired here: the relay resolves the target
+        # window per request (by session name, else the console), so window.txt is
+        # only a last-ditch fallback for an unnamed session and needs no configuring.
 
         $watcherProcess = Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
@@ -877,20 +871,28 @@ else {
     }
     else {
         $issues = @()
-        if (-not $windowConfigured) { $issues += "window.txt not configured; the watcher is idle until it names the CLI window (then restart the watcher)" }
         if ($dryrunPresent) { $issues += "dryrun.on present ($dryrunFlag); real resume requests are archived as dry-runs and never typed, so the relay is a silent no-op until it is removed." }
         if (-not $watcherRunning) { $issues += "watcher process not running (re-run $armScript or log off/on)" }
         if (-not $markerCompatible) { $issues += "deployed watcher predates the [doctor-dryrun] marker; the attended-path and fallback-target checks below cannot safely probe it. Re-run $armScript to update (an armed relay also self-refreshes at session start when idle)." }
 
+        # window.txt state is informational, never a fault: the relay resolves the
+        # target window per request (by session name, else the console), and
+        # window.txt is only the last-ditch fallback for an unnamed session.
+        $windowNote = if ($windowConfigured) {
+            "window.txt configured (the last-ditch fallback; requests self-target the window per-request)."
+        } else {
+            "window.txt not configured, which is fine: requests self-target the window per-request by name (console fallback); window.txt is only a last-ditch fallback for an unnamed session."
+        }
+
         if ($issues.Count -eq 0) {
             $line1Status = "PASS"
-            $passNote = "Armed: watcher running, deployed copy current, dryrun.on absent, window.txt configured."
+            $passNote = "Armed: watcher running, deployed copy current, dryrun.on absent."
             if ($NoProbe) { $passNote += " Round-trip probes skipped by -NoProbe." }
-            $line1Detail = @($passNote)
+            $line1Detail = @($passNote, $windowNote)
         }
         else {
             $line1Status = "WARN"
-            $line1Detail = $issues
+            $line1Detail = $issues + @($windowNote)
         }
         if ($requestPending) {
             $line1Detail = $line1Detail + @("a request is currently pending (session '$pendingSessionId'); normal mid-resume state, not itself a fault.")

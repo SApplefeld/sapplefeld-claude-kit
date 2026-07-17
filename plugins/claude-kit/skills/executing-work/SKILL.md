@@ -62,6 +62,7 @@ Read the plan doc in full, **including all Chapters**. The Chapters are the stat
 For each Section of Work, in order:
 
 1. **Confirm the approach, then implement.** Before writing a section whose mechanism the spec assumed without reading the code, do a quick in-session read of the files it touches and confirm the planned approach holds. A spec written during brainstorming can be fictional about code nobody had open yet. This is a lightweight read, not a fan-out; if the real shape differs materially, adjust and note it in the Chapter (raise it to me only if it changes design intent). Then implement per the section's model tier:
+   - **A section that writes under `docs/` goes to the main thread regardless of the tier it carries.** The docs-write-guard denies any non-curator subagent a write into `docs/`, so a dispatched implementer is blocked mid-section; doc authoring is also design-entangled (voice, structure, cross-references). An implementer may still draft the prose and return it in its final message for the main thread to place, but the `docs/` write itself is always the main thread's. (This is a routing override, not a tier change: record the section's tier as `inline` in the spec so the override is visible up front.)
    - **Tier `haiku` / `sonnet` / `opus` / `fable`:** dispatch the matching `implementer-haiku` / `implementer-sonnet` / `implementer-opus` / `implementer-fable` agent with a complete brief built from the Dispatch Brief template:
 
      ```

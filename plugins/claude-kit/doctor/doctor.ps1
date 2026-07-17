@@ -764,11 +764,11 @@ else {
             }
         }
     }
-    # $watcherStale can still change below: the window-arm-fix and the
-    # watcher-start-fix both invoke the plain (non -RefreshOnly) arm script,
-    # which always copies the current payload watcher over the deployed copy
-    # as a side effect. Appending its structuralIssues entry is deferred past
-    # both of those repairs so a just-applied refresh is not reported stale.
+    # $watcherStale can still change below: the watcher-start-fix invokes the
+    # plain (non -RefreshOnly) arm script, which always copies the current
+    # payload watcher over the deployed copy as a side effect. Appending its
+    # structuralIssues entry is deferred past that repair so a just-applied
+    # refresh is not reported stale.
 
     $watcherCopyExists = Test-Path $watcherCopy
     $windowConfigured = (Test-Path $windowFile) -and -not [string]::IsNullOrWhiteSpace((Get-Content $windowFile -Raw -ErrorAction SilentlyContinue))
@@ -823,8 +823,9 @@ else {
         # skipped entirely under -NoProbe (structural detection only, matching
         # today's -NoProbe behavior).
         # An absent window.txt is not repaired here: the relay resolves the target
-        # window per request (by session name, else the console), so window.txt is
-        # only a last-ditch fallback for an unnamed session and needs no configuring.
+        # window per request (by the session's own console when visible, else the
+        # session name), so window.txt is only a last-ditch fallback for an unnamed
+        # session and needs no configuring.
 
         $watcherProcess = Get-CimInstance Win32_Process -Filter "Name='AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like "*resume-relay.ahk*" } |
@@ -876,12 +877,13 @@ else {
         if (-not $markerCompatible) { $issues += "deployed watcher predates the [doctor-dryrun] marker; the attended-path and fallback-target checks below cannot safely probe it. Re-run $armScript to update (an armed relay also self-refreshes at session start when idle)." }
 
         # window.txt state is informational, never a fault: the relay resolves the
-        # target window per request (by session name, else the console), and
-        # window.txt is only the last-ditch fallback for an unnamed session.
+        # target window per request (by the session's own console when visible, else
+        # the session name), and window.txt is only the last-ditch fallback for an
+        # unnamed session.
         $windowNote = if ($windowConfigured) {
             "window.txt configured (the last-ditch fallback; requests self-target the window per-request)."
         } else {
-            "window.txt not configured, which is fine: requests self-target the window per-request by name (console fallback); window.txt is only a last-ditch fallback for an unnamed session."
+            "window.txt not configured, which is fine: requests self-target the window per-request by the session's own console when visible, else the session name; window.txt is only a last-ditch fallback for an unnamed session."
         }
 
         if ($issues.Count -eq 0) {

@@ -1,6 +1,6 @@
 # Goal Continuity: /kit-goal Arming and the Leash Across Session Swaps
 
-Status: In Progress
+Status: Complete
 Commit Model: Commit-and-Push
 Fable Spend: spec authored session-led; section tiers below
 Created: 2026-07-16
@@ -106,6 +106,7 @@ Acceptance: on ASR, a boundary compaction writes a request whose line 4 is a tit
 ## Related
 
 - `docs/archive/claude-kit_resume-relay_spec_v1.md`: the watcher this composes with.
+- `docs/archive/claude-kit_relay-auto-refresh_spec_v1.md`: the self-healing watcher and doctor -Fix relay repair; Section 7's capture-window.ps1 rewrite and Chapter 14's doctor relay-check realignment share its surface.
 - `docs/archive/claude-kit_compact-session_spec_v1.md` and `docs/archive/claude-kit_summarizer-robustness_spec_v1.md`: the compaction engine and its hardening.
 - Phase 1 (goal template carve-out and relay precondition) shipped in this spec's changeset, in the executing-work and compact-session skills.
 
@@ -251,4 +252,19 @@ Decisions / Surprises: A kaizen pass surfaced that Section 7 left the doctor spe
 Review Findings: none (mechanical doctor edit verified live PASS; the routing rule was baseline-tested rather than agent-reviewed)
 Compaction: not run: interactive session with Scott present.
 Next: unchanged - the residual ASR live check folds into the supervised Section 4.
+Commit Model: Commit-and-Push
+
+### Chapter 15 - 2026-07-17
+Completed: Finishing pass and close-out. Plan flipped to Complete and archived.
+Implemented By: main session (Opus-led; qa-verifier + security-reviewer + adversarial-reviewer + docs-curator, all dispatched synchronously per the 6a foreground-dispatch rule this plan shipped)
+Metrics: goal-continuity changeset gate 88 pass EXIT 0 (unchanged); qa PASS; security CLEAR; adversarial APPROVED_WITH_CONCERNS (3 MINOR: 2 fixed, 1 rejected); docs drift deviation-only; advisor off (Opus-led session)
+Decisions / Surprises:
+  - Section 4 (live-fire) acceptance is met by production evidence rather than the spec's synthetic provoked-stop test: Scott confirmed multiple /kit-goal-armed runs stayed leashed across compaction/relay boundaries in real use. A goalless successor would halt mid-plan at the first boundary, so armed runs that continue to completion demonstrate the leash-continuity the synthetic test isolates. Deliberate, evidence-backed deviation from the written acceptance mechanism; the synthetic provoked-stop test (which isolates hook enforcement from mere goal-file persistence) was not run, and production run-completion stands in its place.
+  - Section 7's ASR acceptance (a title-resolved line-4 ahk_id on a remote host) is likewise confirmed in production, not test-env reproducible.
+  - 6b's hook change stays deferred on confirmed evidence: a claude-code-guide probe established the Stop-hook stdin payload exposes no pending-background-task field, and the only fallback (transcript-tail parsing) keys on a format documented as version-unstable. A "pending work -> allow" hook rule would add an allow-condition with no harness backstop on a fragile signal. Keep 6a; file /feedback for a documented pending-tasks signal if parallel-fan-out-under-leash recurs.
+  - Finishing reviews were scoped to the live-fire delta (1cbf606^..HEAD) at session model, not a fable whole-changeset re-review, since Section 7 already had a full per-section adversarial + blind + security round and 6a is prose. Recorded cost decision.
+Review Findings: qa PASS (all code-verifiable acceptance criteria confirmed by live execution; Sections 4 and 7-ASR confirmed by owner in production). Security CLEAR (capture-window.ps1's untrusted title never reaches the emitted ahk_id; the doctor edit removes a child-process path, adds none). Adversarial: two doctor.ps1 prose defects FIXED (a window-resolution precedence stated backwards at three sites, corrected to console-primary-when-visible-else-name; a comment referencing deleted window-arm-fix code, and its floating preamble), one REJECTED with evidence (the "background is the Agent-tool default" claim in executing-work is correct for this harness). Docs-curator: two stale index lines corrected (Class: deviation, currency).
+Concurrent found-work (separate commit 63b6cdb, pushed; not part of this plan's changeset): stop-docs-hygiene.js flagged legitimate plan specs whose name embeds a SCRATCH_NAME word (neo_security-packet_spec_v1.md) as leaked scratch, blocking every turn end on the neo project. Fixed with a spec naming and header-contract exemption on the name-based match, SCRATCH_DIR unchanged; a 7-test suite added.
+Compaction: not run: interactive close-out with Scott present.
+Next: none. Plan Complete and archived to docs/archive/.
 Commit Model: Commit-and-Push

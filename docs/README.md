@@ -20,9 +20,9 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-- `plans/claude-kit_goal-continuity_spec_v1.md` (In Progress): `/kit-goal` arming and goal-leash continuity across relay session swaps. Sections 1-3 and 5 shipped; Section 4 (live-fire) is a supervised step.
+None currently active.
 
-Completed plans are in `archive/` (most recent: `claude-kit_relay-auto-refresh_spec_v1.md`, the 2026-07-16 self-healing relay watcher - an armed relay now refreshes its deployed watcher at session start after a kit update and doctor -Fix repairs it on demand, both guarded by the request.txt busy invariant, plus the docs-write-guard widening that lets background-session mains author plan docs; before it, `claude-kit_summarizer-robustness_spec_v1.md`, the 2026-07-15 compaction fix - the summarizer's degenerate first-line anchors made orchestrator-session compactions fail on a count mismatch, resolved with indexed template pairs, an echoed-anchor cross-check, a sparse preserve-verbatim fallback, and a 600s summarizer timeout, live-verified on the 933k-token transcript that failed in the wild, plus the relay window.txt default, the watcher's single-window typing guard, and kit-doctor's dryrun resume round-trip probe).
+Completed plans are in `archive/` (most recent: `claude-kit_goal-continuity_spec_v1.md`, the `/kit-goal` arming command and a deterministic Stop-hook leash that holds a plan run to completion across compaction and relay session swaps, with session-identity binding, the async-dispatch wait-is-not-a-stop rule, and name-based relay window targeting for remote and ConPTY hosts; before it, `claude-kit_relay-auto-refresh_spec_v1.md`, the 2026-07-16 self-healing relay watcher that refreshes its deployed copy at session start and via doctor -Fix, both guarded by the request.txt busy invariant).
 
 ## Archive
 

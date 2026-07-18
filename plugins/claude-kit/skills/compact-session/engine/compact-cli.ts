@@ -164,8 +164,12 @@ async function main(): Promise<void> {
 
 function parseArguments(argv: string[]): CliArguments {
   let transcriptPath: string | undefined;
-  // Default keeps the newest turn: compaction is invoked from a turn that is
-  // still in flight, and summarizing it would soften the freshest context.
+  // Default keeps one unit of the freshest context, which compaction is
+  // invoked from mid-turn. That unit is the newest whole turn where the
+  // transcript has turns to spare, and the newest segment of the in-flight
+  // turn where it does not (see createPlan): a run with a single human
+  // prompt has no spare turn, so keeping one whole turn there would leave
+  // nothing to summarize and no compaction at all.
   let keepTurns = 1;
   let summarizerModel: string | undefined;
   let check = false;

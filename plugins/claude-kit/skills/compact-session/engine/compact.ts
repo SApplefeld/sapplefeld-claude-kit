@@ -17,6 +17,14 @@ import {
 export type Plan = {
   prefixTurns: Turn[];
   summarizedTurns: Turn[];
+  // Entries are whole human-bounded turns on the ordinary path, and
+  // continuation segments (empty userRows, an anchorOverride) on
+  // createPlan's segment-granular keep path. Both shapes reach two
+  // consumers: compactTranscript hands preservedTurns[0] to the summarizer
+  // as the template's trailing anchor, which resolves through
+  // getUserPromptText and so serves the override when there are no user
+  // rows, and buildCompactedRows copies every entry verbatim regardless of
+  // shape.
   preservedTurns: Turn[];
   baseRow: TranscriptRow;
 };
@@ -108,8 +116,22 @@ export async function compactTranscript(
 // load-bearing: both keepTurns and compactionStartIndex slice `turns` by
 // count, so segmenting first would redefine --keep N as "keep N segments"
 // and move the boundary between what is summarized and what is preserved.
-// Prefix and preserved turns are never segmented; segmentation exists to
-// bound one summary's span, and neither group is summarized.
+// Prefix turns are never segmented, and on this path neither are preserved
+// turns; segmentation exists to bound one summary's span, and neither group
+// is summarized.
+//
+// One transcript shape cannot express --keep N in whole turns at all: an
+// autonomous run opens with a single human prompt and stays one turn for its
+// entire length, so keeping N turns leaves nothing behind to summarize and
+// the session can never compact. When the compactable turns number N or
+// fewer, the keep count therefore falls back to segments, preserving the
+// last N segments of the segmented compactable turns. That condition holds
+// only where counting turns already yields an empty summarized group
+// (compactable.length <= keepTurns forces compactionEndIndex back to
+// compactionStartIndex), so no transcript that compacts by whole turns
+// compacts differently. A compactable stretch under the budget segments into
+// fewer entries than N, which preserves all of them and leaves nothing to
+// summarize, so a small session is not compacted pointlessly.
 export function createPlan(rows: TranscriptRow[], keepTurns: number): Plan {
   const baseRow = rows.find(
     row => row.type === "user" || row.type === "assistant",
@@ -123,13 +145,30 @@ export function createPlan(rows: TranscriptRow[], keepTurns: number): Plan {
   const turns = buildAssistantTurns(rows);
   const compactionStartIndex =
     turns.findLastIndex(turn => turn.rows.some(isMagicCompactSummaryRow)) + 1;
+  const prefixTurns = turns.slice(0, compactionStartIndex);
+  const compactable = turns.slice(compactionStartIndex);
+
+  // The condition needs no guard on the sign of keepTurns. At keepTurns <= 0
+  // it holds only for an empty compactable list, and on an empty list both
+  // paths return the same empty summarized and preserved groups.
+  if (compactable.length <= keepTurns) {
+    const segments = splitOversizedTurns(compactable);
+    const segmentEndIndex = Math.max(0, segments.length - keepTurns);
+    return {
+      prefixTurns,
+      summarizedTurns: segments.slice(0, segmentEndIndex),
+      preservedTurns: segments.slice(segmentEndIndex),
+      baseRow,
+    };
+  }
+
   const compactionEndIndex =
     keepTurns <= 0
       ? turns.length
       : Math.max(compactionStartIndex, turns.length - keepTurns);
 
   return {
-    prefixTurns: turns.slice(0, compactionStartIndex),
+    prefixTurns,
     summarizedTurns: splitOversizedTurns(
       turns.slice(compactionStartIndex, compactionEndIndex),
     ),

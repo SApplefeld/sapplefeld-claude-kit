@@ -1,10 +1,12 @@
 // Pins the segmented plan contract end to end: createPlan bounds only the
-// summarized group (--keep N still counts real human-bounded turns, not
-// segments), prefix and preserved turns stay whole, and buildCompactedRows
-// emits one summary row per segment with every tool row present exactly once
-// on a single unbroken parent chain. The chain is asserted through a real
-// write-and-reread, because a fork strands rows only at resume time: the
-// reader follows one parent chain and silently drops the losing branch.
+// summarized group (--keep N counts real human-bounded turns, falling back to
+// segments only when the compactable turns number N or fewer and counting
+// turns would leave nothing to summarize), prefix turns stay whole, and
+// buildCompactedRows emits one summary row per segment with every tool row
+// present exactly once on a single unbroken parent chain. The chain is
+// asserted through a real write-and-reread, because a fork strands rows only
+// at resume time: the reader follows one parent chain and silently drops the
+// losing branch.
 // Run: bun test tools/engine-tests/
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -223,20 +225,56 @@ function fieldShapeRows(
   ]);
 }
 
-// The oversized turn LAST, behind a short one. This is the shape that
+// The oversized turn LAST, behind short ones. This is the shape that
 // discriminates the slice ordering: --keep must preserve the oversized turn
 // whole, whereas counting segments would leave only its final segment in
-// preservedTurns and hand the rest of it to the summarizer.
-function trailingOversizedRows(): TranscriptRow[] {
+// preservedTurns and hand the rest of it to the summarizer. shortTurns sets
+// how many short turns lead it, which is what holds the compactable turn
+// count above --keep N: at or below N the keep count is expressed in
+// segments instead, and the whole-turn slice this fixture discriminates does
+// not apply.
+function trailingOversizedRows(shortTurns = 1): TranscriptRow[] {
   return chainRows([
     humanRow("h0", "the already-summarized question"),
     priorCompactionRow(),
     humanRow("h1", "the short question"),
     ...makeStep("s1", { text: "short answer", toolName: "Edit" }),
+    ...(shortTurns > 1
+      ? [
+          humanRow("h1b", "the second short question"),
+          ...makeStep("s2", { text: "short answer", toolName: "Edit" }),
+        ]
+      : []),
     humanRow("h2", "the oversized trailing question"),
     ...makeStep("b1", { text: payload(0.6), toolName: "Bash" }),
     ...makeStep("b2", { text: payload(0.6), toolName: "Read" }),
     ...makeStep("b3", { text: payload(0.6), toolName: "Grep" }),
+  ]);
+}
+
+// No prior compaction boundary and a single human prompt, the shape an
+// autonomous run leaves behind: every row belongs to one human-bounded turn.
+function singleOversizedTurnRows(): TranscriptRow[] {
+  return chainRows([
+    humanRow("h1", "the only question"),
+    ...makeStep("b1", { text: payload(0.6), toolName: "Bash" }),
+    ...makeStep("b2", { text: payload(0.6), toolName: "Read" }),
+    ...makeStep("b3", { text: payload(0.6), toolName: "Grep" }),
+  ]);
+}
+
+// A prior compaction boundary followed by exactly turnCount oversized
+// human-bounded turns, so a test can place the compactable turn count on
+// either side of keepTurns.
+function oversizedTurnsAfterPrefix(turnCount: number): TranscriptRow[] {
+  return chainRows([
+    humanRow("h0", "the already-summarized question"),
+    priorCompactionRow(),
+    ...Array.from({ length: turnCount }, (_, index) => [
+      humanRow(`h${index + 1}`, `oversized question ${index + 1}`),
+      ...makeStep(`t${index}a`, { text: payload(0.6), toolName: "Bash" }),
+      ...makeStep(`t${index}b`, { text: payload(0.6), toolName: "Read" }),
+    ]).flat(),
   ]);
 }
 
@@ -376,14 +414,17 @@ describe("createPlan segmentation", () => {
   });
 
   test("--keep 2 counts real turns, so the oversized turn's segments never enter the count", () => {
-    const rows = trailingOversizedRows();
+    // Three compactable turns against --keep 2, so the keep count is
+    // expressed in whole turns and the oversized turn's segments are never
+    // candidates for it.
+    const rows = trailingOversizedRows(2);
     const plan = createPlan(rows, 2);
 
-    // Both real turns behind the prefix are preserved, whole and unsegmented,
+    // The last two real turns are preserved, whole and unsegmented,
     // identified by their own human prompts rather than by count alone.
     expect(plan.preservedTurns.length).toBe(2);
     expect(getUserPromptText(plan.preservedTurns[0]!)).toContain(
-      "the short question",
+      "the second short question",
     );
     expect(getUserPromptText(plan.preservedTurns[1]!)).toContain(
       "the oversized trailing question",
@@ -393,11 +434,236 @@ describe("createPlan segmentation", () => {
       expect(turn.userRows.length).toBe(1);
     }
 
-    // The prefix turn is likewise never segmented, and with both real turns
-    // kept there is nothing left to summarize.
+    // The prefix turn is likewise never segmented, and the one turn left over
+    // is short enough to need no segmenting.
     expect(plan.prefixTurns.length).toBe(1);
     expect(plan.prefixTurns[0]!.anchorOverride).toBeUndefined();
+    expect(plan.summarizedTurns.length).toBe(1);
+    expect(getUserPromptText(plan.summarizedTurns[0]!)).toContain(
+      "the short question",
+    );
+    expect(plan.summarizedTurns[0]!.anchorOverride).toBeUndefined();
+  });
+});
+
+describe("createPlan segment-granular keep", () => {
+  test("a lone oversized turn with --keep 1 summarizes segments and preserves the last one", () => {
+    // Counting whole turns here leaves nothing to summarize at all, which is
+    // how an autonomous run stays permanently uncompactable: the CLI skips on
+    // an empty summarized group.
+    const rows = singleOversizedTurnRows();
+    const plan = createPlan(rows, 1);
+
+    expect(plan.prefixTurns).toEqual([]);
+    expect(plan.summarizedTurns.length).toBeGreaterThan(1);
+    expect(plan.preservedTurns.length).toBe(1);
+
+    // Every entry is a segment of the one turn, in order, without loss.
+    expect(
+      [...plan.summarizedTurns, ...plan.preservedTurns].flatMap(
+        turn => turn.rows,
+      ),
+    ).toEqual(rows);
+    for (const segment of plan.summarizedTurns) {
+      expect(estimatedTokens(segment.rows)).toBeLessThanOrEqual(
+        SEGMENT_TOKEN_BUDGET,
+      );
+    }
+
+    // The turn's own user row opens the first summarized entry; the preserved
+    // entry is the trailing continuation segment, which anchors on its
+    // override because it has no user rows of its own.
+    expect(plan.summarizedTurns[0]!.userRows.length).toBe(1);
+    expect(plan.summarizedTurns[0]!.anchorOverride).toBeUndefined();
+    const preserved = plan.preservedTurns[0]!;
+    expect(preserved.userRows).toEqual([]);
+    expect(preserved.anchorOverride).toBeDefined();
+    expect(getUserPromptText(preserved)).toMatch(/^\(continuation \d+\) /);
+    expect(preserved.rows).toEqual(
+      rows.slice(rows.length - preserved.rows.length),
+    );
+  });
+
+  test("a lone turn under the budget still plans nothing to summarize", () => {
+    // One segment, preserved, so compactTranscript skips instead of paying a
+    // summarizer call to compact a small session.
+    const rows = chainRows([
+      humanRow("h1", "the only question"),
+      ...makeStep("b1", { text: "short answer", toolName: "Bash" }),
+    ]);
+    const plan = createPlan(rows, 1);
+
     expect(plan.summarizedTurns).toEqual([]);
+    expect(plan.preservedTurns.length).toBe(1);
+    expect(plan.preservedTurns[0]!.anchorOverride).toBeUndefined();
+    expect(plan.preservedTurns[0]!.userRows.length).toBe(1);
+    expect(plan.preservedTurns[0]!.rows).toEqual(rows);
+  });
+
+  test("fewer segments than --keep N preserves all of them and summarizes nothing", () => {
+    // Two short compactable turns against --keep 3: the segmented compactable
+    // stretch is shorter than the keep count, so the whole stretch is
+    // preserved rather than having its head handed to the summarizer.
+    const rows = chainRows([
+      humanRow("h1", "the first question"),
+      ...makeStep("s1", { text: "short answer", toolName: "Bash" }),
+      humanRow("h2", "the second question"),
+      ...makeStep("s2", { text: "short answer", toolName: "Read" }),
+    ]);
+    const plan = createPlan(rows, 3);
+
+    expect(plan.summarizedTurns).toEqual([]);
+    expect(plan.preservedTurns.length).toBe(2);
+    expect(plan.preservedTurns.flatMap(turn => turn.rows)).toEqual(rows);
+  });
+
+  test("compactable turns numbering exactly --keep N fall back to segments", () => {
+    // The boundary the fallback condition turns on. At exactly keepTurns the
+    // whole-turn slice is already empty, so segments are the only way to
+    // express the keep, and requiring strictly fewer would leave this shape
+    // uncompactable.
+    const rows = oversizedTurnsAfterPrefix(2);
+    const plan = createPlan(rows, 2);
+
+    expect(plan.prefixTurns.length).toBe(1);
+    expect(plan.summarizedTurns.length).toBeGreaterThan(0);
+    expect(plan.preservedTurns.length).toBe(2);
+
+    // Both compactable turns are segmented and partitioned across the two
+    // groups, prefix untouched.
+    const compactableRows = rows.slice(rows.findIndex(row => row.uuid === "h1"));
+    expect(
+      [...plan.summarizedTurns, ...plan.preservedTurns].flatMap(
+        turn => turn.rows,
+      ),
+    ).toEqual(compactableRows);
+    expect(plan.prefixTurns[0]!.anchorOverride).toBeUndefined();
+    for (const segment of plan.summarizedTurns) {
+      expect(estimatedTokens(segment.rows)).toBeLessThanOrEqual(
+        SEGMENT_TOKEN_BUDGET,
+      );
+    }
+  });
+
+  test("one more compactable turn than --keep N keeps whole-turn semantics", () => {
+    // One past the boundary, so the fallback must not fire: the kept tail is
+    // whole turns, over budget and unsegmented, and only the earlier turn is
+    // summarized. This is the direction that catches a fallback widened to
+    // cases the turn count can already express.
+    const rows = oversizedTurnsAfterPrefix(3);
+    const plan = createPlan(rows, 2);
+
+    expect(plan.prefixTurns.length).toBe(1);
+    expect(plan.preservedTurns.length).toBe(2);
+    expect(getUserPromptText(plan.preservedTurns[0]!)).toContain(
+      "oversized question 2",
+    );
+    expect(getUserPromptText(plan.preservedTurns[1]!)).toContain(
+      "oversized question 3",
+    );
+    for (const turn of plan.preservedTurns) {
+      expect(turn.anchorOverride).toBeUndefined();
+      expect(turn.userRows.length).toBe(1);
+      expect(estimatedTokens(turn.rows)).toBeGreaterThan(SEGMENT_TOKEN_BUDGET);
+    }
+    expect(plan.preservedTurns.flatMap(turn => turn.rows)).toEqual(
+      rows.slice(rows.findIndex(row => row.uuid === "h2")),
+    );
+
+    // Only the first compactable turn is summarized, and it is segmented.
+    expect(plan.summarizedTurns.length).toBeGreaterThan(1);
+    expect(plan.summarizedTurns.flatMap(turn => turn.rows)).toEqual(
+      rows.slice(
+        rows.findIndex(row => row.uuid === "h1"),
+        rows.findIndex(row => row.uuid === "h2"),
+      ),
+    );
+  });
+
+  test("an oversized trailing turn at the keep boundary falls back to segments", () => {
+    // Two compactable turns against --keep 2, with the oversized one last.
+    // Counting whole turns preserves both and summarizes nothing, so the keep
+    // is expressed in segments: the tail of the oversized turn is preserved
+    // and its head joins the short turn in the summarized group.
+    const rows = trailingOversizedRows();
+    const plan = createPlan(rows, 2);
+
+    expect(plan.prefixTurns.length).toBe(1);
+    expect(plan.preservedTurns.length).toBe(2);
+    expect(plan.summarizedTurns.length).toBe(2);
+
+    // Both preserved entries are continuation segments of the oversized turn,
+    // so its opening rows are summarized rather than kept.
+    for (const segment of plan.preservedTurns) {
+      expect(segment.userRows).toEqual([]);
+      expect(getUserPromptText(segment)).toMatch(/^\(continuation \d+\) /);
+    }
+
+    // The short turn survives whole as the first summarized entry, and the
+    // oversized turn's own user row opens the second.
+    expect(getUserPromptText(plan.summarizedTurns[0]!)).toContain(
+      "the short question",
+    );
+    expect(plan.summarizedTurns[0]!.anchorOverride).toBeUndefined();
+    expect(getUserPromptText(plan.summarizedTurns[1]!)).toContain(
+      "the oversized trailing question",
+    );
+
+    const compactableRows = rows.slice(rows.findIndex(row => row.uuid === "h1"));
+    expect(
+      [...plan.summarizedTurns, ...plan.preservedTurns].flatMap(
+        turn => turn.rows,
+      ),
+    ).toEqual(compactableRows);
+  });
+
+  test("the preserved tail is the greedy remainder, measured against the budget", () => {
+    // Five steps that pack two-per-segment only when both fit, so the last
+    // segment is whatever is left over. Nothing floors that remainder: the
+    // keep is a count of segments, so --keep 1 preserves as little verbatim
+    // context as the packing happens to leave. The numbers below are a
+    // measurement of that packing, not a guarantee the code makes, and they
+    // exist so a change that shrinks the tail toward nothing is visible.
+    const rows = chainRows([
+      humanRow("h1", "the only question"),
+      ...makeStep("b1", { text: payload(0.5), toolName: "Bash" }),
+      ...makeStep("b2", { text: payload(0.5), toolName: "Read" }),
+      ...makeStep("b3", { text: payload(0.5), toolName: "Grep" }),
+      ...makeStep("b4", { text: payload(0.5), toolName: "Edit" }),
+      ...makeStep("b5", { text: "a short closing step", toolName: "Bash" }),
+    ]);
+    const plan = createPlan(rows, 1);
+
+    expect(plan.summarizedTurns.length).toBe(3);
+    expect(plan.preservedTurns.length).toBe(1);
+
+    // The tail carries the last full step plus the short one that still fit
+    // beside it, a little over half the budget.
+    const preserved = plan.preservedTurns[0]!;
+    expect(preserved.rows.map(row => row.uuid)).toEqual([
+      "b4-text",
+      "b4-tooluse",
+      "b4-toolresult",
+      "b5-text",
+      "b5-tooluse",
+      "b5-toolresult",
+    ]);
+    const preservedTokens = estimatedTokens(preserved.rows);
+    expect(preservedTokens).toBeGreaterThan(SEGMENT_TOKEN_BUDGET * 0.45);
+    expect(preservedTokens).toBeLessThan(SEGMENT_TOKEN_BUDGET * 0.55);
+  });
+
+  test("--keep 0 summarizes the lone oversized turn entirely", () => {
+    // Nothing is held back, so the whole turn is segmented into the
+    // summarized group. The segment-granular keep condition cannot reach this
+    // shape at all: at keepTurns 0 it holds only for an empty compactable
+    // list, and this one has a turn in it.
+    const rows = singleOversizedTurnRows();
+    const plan = createPlan(rows, 0);
+
+    expect(plan.preservedTurns).toEqual([]);
+    expect(plan.summarizedTurns.length).toBeGreaterThan(1);
+    expect(plan.summarizedTurns.flatMap(turn => turn.rows)).toEqual(rows);
   });
 });
 
@@ -825,6 +1091,144 @@ describe("buildCompactedRows over a segmented plan", () => {
     );
     const rows = await buildCompactedRows(plan, summaries, sessionId);
     expectToolPairsResumable(rows);
+  });
+
+  test("a preserved continuation segment is copied verbatim and keeps its anchor", async () => {
+    // The plan shape a lone oversized turn produces: the preserved entry is a
+    // continuation segment, so it is both the tail buildCompactedRows copies
+    // verbatim and the nextTurn anchor generateSummaries hands the template.
+    const sessionId = newSessionId();
+    const sourceRows = singleOversizedTurnRows();
+    const plan = createPlan(sourceRows, 1);
+    const preserved = plan.preservedTurns[0]!;
+    expect(preserved.userRows).toEqual([]);
+    expect(preserved.anchorOverride).toBeDefined();
+
+    // The anchor resolves through the override rather than the missing user
+    // rows, and carries real text for the parser to cross-check against.
+    const anchor = getUserPromptText(preserved);
+    expect(anchor).toMatch(/^\(continuation \d+\) \S/);
+    expect(anchor.length).toBeGreaterThan("(continuation 1) ".length + 1);
+
+    const summaries = new Map(
+      plan.summarizedTurns.map((_, index) => [index, `summary ${index}`]),
+    );
+    const rows = await buildCompactedRows(plan, summaries, sessionId);
+
+    // The tail is the preserved segment's rows, message for message: a
+    // preserved entry is never summarized or pruned, only re-identified.
+    const tail = rows.slice(rows.length - preserved.rows.length);
+    expect(tail.map(row => row.message)).toEqual(
+      preserved.rows.map(row => row.message),
+    );
+    expect(tail.map(row => row.type)).toEqual(
+      preserved.rows.map(row => row.type),
+    );
+    expect(tail.filter(isSummaryRow).length).toBe(0);
+
+    expectToolPairsResumable(rows);
+
+    // Resume-time proof: the preserved segment must still be there, verbatim,
+    // after the destination is written and read back.
+    const path = join(tmpdir(), `${sessionId}.jsonl`);
+    transcriptPaths.push(path);
+    await writeTranscriptEntries(path, rows);
+    const active = await readActiveTranscriptRows(path);
+    expect(active.map(row => row.uuid)).toEqual(
+      rows.map(row => row.uuid).slice(1),
+    );
+    expect(
+      active.slice(active.length - preserved.rows.length).map(row => row.message),
+    ).toEqual(preserved.rows.map(row => row.message));
+  });
+
+  // Compacts a source transcript with --keep 1, writes the destination, and
+  // returns the rows a resumed session would read back. This is the input the
+  // next compaction plans against.
+  async function compactAndReread(
+    sessionId: string,
+    sourceRows: TranscriptRow[],
+  ): Promise<TranscriptRow[]> {
+    const plan = createPlan(sourceRows, 1);
+    const summaries = new Map(
+      plan.summarizedTurns.map((_, index) => [index, `summary ${index}`]),
+    );
+    const rows = await buildCompactedRows(plan, summaries, sessionId);
+    const path = join(tmpdir(), `${sessionId}.jsonl`);
+    transcriptPaths.push(path);
+    await writeTranscriptEntries(path, rows);
+    return await readActiveTranscriptRows(path);
+  }
+
+  // Further work with no human user row in it, which is what an unattended run
+  // produces between boundaries. Each row is a separate assistant message, so
+  // each opens its own step chunk.
+  function autonomousRows(
+    parentUuid: string,
+    count: number,
+  ): TranscriptRow[] {
+    return Array.from({ length: count }, (_, index) => {
+      const row = makeRow(`post${index}`, "assistant", {
+        id: `msg-post${index}`,
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.9) }],
+      });
+      row.parentUuid = index === 0 ? parentUuid : `post${index - 1}`;
+      return row;
+    });
+  }
+
+  test("a second compaction with no resume prompt has nothing to summarize", async () => {
+    // A documented limitation, not an aspiration. compactionStartIndex is
+    // turn-granular: every row a compaction emits, summary rows included,
+    // lands inside the turn opened by the source's human user row, so on the
+    // next pass that whole turn is prefix. A session that keeps running past
+    // a boundary without a resume prompt therefore cannot compact again,
+    // however much work it adds.
+    const reread = await compactAndReread(
+      newSessionId(),
+      singleOversizedTurnRows(),
+    );
+    const rows = [...reread, ...autonomousRows(reread.at(-1)!.uuid, 4)];
+    const plan = createPlan(rows, 1);
+
+    expect(plan.prefixTurns.length).toBe(1);
+    expect(plan.summarizedTurns).toEqual([]);
+    expect(plan.preservedTurns).toEqual([]);
+  });
+
+  test("a resume prompt makes a compacted session compactable again", async () => {
+    // The property both target workflows rely on: the relay types a continue
+    // prompt and chain mode pipes one through -p, and either delivers the
+    // human user row that opens a fresh turn past the prefix. That turn is
+    // the only compactable one, so the segment-granular keep applies and its
+    // head is summarized.
+    const reread = await compactAndReread(
+      newSessionId(),
+      singleOversizedTurnRows(),
+    );
+    const resumePrompt = humanRow("resume", "continue with the next section");
+    resumePrompt.parentUuid = reread.at(-1)!.uuid;
+    const rows = [
+      ...reread,
+      resumePrompt,
+      ...autonomousRows("resume", 4),
+    ];
+    const plan = createPlan(rows, 1);
+
+    expect(plan.prefixTurns.length).toBe(1);
+    expect(plan.summarizedTurns.length).toBeGreaterThan(0);
+    expect(plan.preservedTurns.length).toBe(1);
+
+    // The new turn is what gets segmented; the compacted prefix is untouched.
+    expect(getUserPromptText(plan.summarizedTurns[0]!)).toContain(
+      "continue with the next section",
+    );
+    expect(
+      [...plan.summarizedTurns, ...plan.preservedTurns].flatMap(
+        turn => turn.rows,
+      ),
+    ).toEqual([resumePrompt, ...rows.slice(rows.length - 4)]);
   });
 
   test("prefix and preserved turns are copied whole around the segmented middle", async () => {

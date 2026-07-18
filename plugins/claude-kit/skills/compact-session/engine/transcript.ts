@@ -150,9 +150,13 @@ export function buildAssistantTurns(rows: TranscriptRow[]): Turn[] {
 // Estimated token budget for one summarization segment, a chars/4 heuristic
 // over each row's model-visible content (see estimateRowTokens). Segment
 // size does not bound summarizer input (the summarizer resumes the full
-// transcript copy); it sets summary
-// granularity: roughly one ~200-word summary per ~20k tokens of stretch.
-// This is the tunable knob if summaries come back too coarse or too fine.
+// transcript copy). It calibrates against two axes, and tuning it moves
+// both. It sets summary granularity: roughly one ~200-word summary per ~20k
+// tokens of stretch. It also sizes the verbatim recent-context window on the
+// segment-granular keep path in createPlan, where --keep N preserves the
+// last N segments rather than the last N turns: at the default --keep 1,
+// every autonomous session carries at most one segment's worth of unmodified
+// recent context past a compaction.
 export const SEGMENT_TOKEN_BUDGET = 20_000;
 
 // Splits oversized turns into bounded segment pseudo-turns, so a plan entry

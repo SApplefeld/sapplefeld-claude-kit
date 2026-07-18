@@ -6,7 +6,10 @@
 // present exactly once on a single unbroken parent chain. The chain is
 // asserted through a real write-and-reread, because a fork strands rows only
 // at resume time: the reader follows one parent chain and silently drops the
-// losing branch.
+// losing branch. The last suite carries the same contract through the
+// summarizer round trip, plan to template to parsed response to emitted rows,
+// with the response built from the template's own anchors so a template that
+// drifts from the plan's entries cannot stay green.
 // Run: bun test tools/engine-tests/
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -14,10 +17,13 @@ import { unlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  anchorsAgree,
   assertSingleParentChain,
   buildCompactedRows,
+  buildCompactionPrompt,
   createPlan,
   getUserPromptText,
+  parseSummaries,
 } from "../../plugins/claude-kit/skills/compact-session/engine/compact";
 import {
   estimateRowTokens,
@@ -1308,6 +1314,291 @@ describe("assertSingleParentChain", () => {
     const rows = [bareRow("a", null), bareRow("b", "a"), bareRow("a", "b")];
     expect(() => assertSingleParentChain(rows)).toThrow(
       /uuid a appears more than once/,
+    );
+  });
+});
+
+// The summarizer round trip on the shape that motivates segmentation: one
+// human-bounded turn covering an entire autonomous run. The plan's entries are
+// all segments of that turn, so every anchor but the first is synthetic, and
+// the template, the parser's anchor cross-check and the emitted rows must all
+// agree on which slice each index names.
+describe("segmented plan through the template and back", () => {
+  const sessionIds: string[] = [];
+
+  afterEach(async () => {
+    for (const sessionId of sessionIds.splice(0)) {
+      await unlink(
+        join(homedir(), ".claude", "magic-compact", `${sessionId}.json`),
+      ).catch(() => undefined);
+    }
+  });
+
+  function newSessionId(): string {
+    const sessionId = randomUUID();
+    sessionIds.push(sessionId);
+    return sessionId;
+  }
+
+  // A single human prompt followed by six budget-filling steps, so the turn
+  // segments into several summarized entries plus a preserved tail. Each
+  // step's text opens with its own marker ahead of the bulk payload, so the
+  // continuation snippets derived from it are distinguishable within the
+  // anchor comparison window.
+  function megaTurnRows(stepCount = 6): TranscriptRow[] {
+    return chainRows([
+      humanRow("h1", "the only question of the whole run"),
+      ...Array.from({ length: stepCount }, (_, index) =>
+        makeStep(`b${index}`, {
+          text: `step ${index} ${payload(0.6)}`,
+          toolName: "Bash",
+        }),
+      ).flat(),
+    ]);
+  }
+
+  // The XML template alone, cut out of the surrounding instructions. The
+  // guidelines quote <user> and <summary> tags in prose, so anchor extraction
+  // has to be confined to the region the template builder emitted.
+  function templateRegion(prompt: string): string {
+    return /^<summary>\n[\s\S]*?\n<\/summary>$/m.exec(prompt)![0]!;
+  }
+
+  // The anchors the template actually rendered, keyed by index. Tests build the
+  // mocked response from these rather than from the plan, so the response is a
+  // real echo of the template the summarizer would receive.
+  function renderedAnchors(prompt: string): Map<number, string> {
+    const anchors = new Map<number, string>();
+    for (const match of templateRegion(prompt).matchAll(
+      /<user index="(\d+)">\n([\s\S]*?)\n<\/user>/g,
+    )) {
+      anchors.set(Number(match[1]), match[2]!);
+    }
+    return anchors;
+  }
+
+  // The template's trailing anchor, the one carrying no assistant pair.
+  function renderedTrailingAnchor(prompt: string): string {
+    return /<user>\n([\s\S]*?)\n<\/user>/.exec(templateRegion(prompt))![1]!;
+  }
+
+  // A compliant summarizer response: every indexed pair echoed back with its
+  // template anchor, then the trailing anchor, exactly as the guidelines ask.
+  // skipIndex leaves one pair out, which is the shape that degrades a segment
+  // to verbatim. numberTrailingPair continues the numbering onto the trailing
+  // anchor and summarizes it, the unrequested extra index models produce.
+  function mockResponse(
+    prompt: string,
+    skipIndex?: number,
+    numberTrailingPair = false,
+  ): string {
+    const anchors = [...renderedAnchors(prompt)].sort((a, b) => a[0] - b[0]);
+    const parts = ["<summary>"];
+    for (const [index, anchor] of anchors) {
+      if (index === skipIndex) {
+        continue;
+      }
+      parts.push(`<user index="${index}">\n${anchor}\n</user>`);
+      parts.push(
+        `<assistant index="${index}">\nsummary of segment ${index}\n</assistant>`,
+      );
+    }
+    const trailing = renderedTrailingAnchor(prompt);
+    if (numberTrailingPair) {
+      const extra = anchors.length;
+      parts.push(`<user index="${extra}">\n${trailing}\n</user>`);
+      parts.push(
+        `<assistant index="${extra}">\nsummary of segment ${extra}\n</assistant>`,
+      );
+    } else {
+      parts.push(`<user>\n${trailing}\n</user>`);
+    }
+    parts.push("</summary>");
+    return parts.join("\n");
+  }
+
+  // Emission order as a flat marker list: each summary row contributes its
+  // text, each other row its tool_use ids. Comparing this against the plan
+  // pins which slice each summary landed on, which neither a summary-text list
+  // nor a tool-id list can do alone.
+  function emissionMarkers(rows: TranscriptRow[]): string[] {
+    return rows.flatMap(row =>
+      isSummaryRow(row) ? summaryTexts([row]) : toolBlockIds([row], "tool_use"),
+    );
+  }
+
+  function planPrompt(rows: TranscriptRow[]) {
+    const plan = createPlan(rows, 1);
+    const prompt = buildCompactionPrompt(
+      plan.summarizedTurns,
+      plan.preservedTurns[0] ?? null,
+    );
+    return { plan, prompt };
+  }
+
+  test("the degenerate autonomous shape renders one indexed pair per segment", () => {
+    const { plan, prompt } = planPrompt(megaTurnRows());
+    expect(plan.prefixTurns).toEqual([]);
+    expect(plan.summarizedTurns.length).toBeGreaterThan(2);
+    expect(plan.preservedTurns.length).toBe(1);
+
+    // One pair per summarized segment, numbered 0..N-1 with no gaps.
+    const anchors = renderedAnchors(prompt);
+    expect([...anchors.keys()].sort((a, b) => a - b)).toEqual(
+      plan.summarizedTurns.map((_, index) => index),
+    );
+    expect(
+      [...prompt.matchAll(/<assistant index="(\d+)">/g)].map(m => Number(m[1])),
+    ).toEqual(plan.summarizedTurns.map((_, index) => index));
+
+    // Each pair's anchor is that segment's own, so an index names a slice
+    // rather than a position the parser has to trust.
+    for (const [index, segment] of plan.summarizedTurns.entries()) {
+      expect(anchors.get(index)).toBe(getUserPromptText(segment));
+    }
+    expect(anchors.get(0)).toContain("the only question of the whole run");
+    for (const index of [...anchors.keys()].filter(index => index > 0)) {
+      expect(anchors.get(index)).toMatch(/^\(continuation \d+\) /);
+    }
+
+    // The trailing anchor is the preserved entry's, and on this shape that
+    // entry is a continuation segment, so the prompt has to explain the marker
+    // rather than describe every snippet as a user prompt.
+    expect(renderedTrailingAnchor(prompt)).toBe(
+      getUserPromptText(plan.preservedTurns[0]!),
+    );
+    expect(renderedTrailingAnchor(prompt)).toMatch(/^\(continuation \d+\) /);
+
+    // Every segment marker carries a snippet of its own slice, so the anchors
+    // stay distinguishable on their content and not merely on their counter:
+    // stripped of the counter, no two of them verify against each other.
+    const snippets = [...anchors.values(), renderedTrailingAnchor(prompt)]
+      .filter(anchor => /^\(continuation \d+\) /.test(anchor))
+      .map(anchor => anchor.replace(/^\(continuation \d+\) /, ""));
+    expect(snippets.length).toBeGreaterThan(1);
+    for (const [position, snippet] of snippets.entries()) {
+      for (const other of snippets.slice(position + 1)) {
+        expect(anchorsAgree(snippet, other)).toBe(false);
+      }
+    }
+  });
+
+  test("a compliant response maps each summary onto the segment its anchor names", async () => {
+    const sessionId = newSessionId();
+    const rows = megaTurnRows();
+    const { plan, prompt } = planPrompt(rows);
+
+    const summaries = parseSummaries(
+      mockResponse(prompt),
+      plan.summarizedTurns.length,
+      plan.summarizedTurns.map(getUserPromptText),
+    );
+    expect([...summaries.entries()].sort((a, b) => a[0] - b[0])).toEqual(
+      plan.summarizedTurns.map((_, index) => [
+        index,
+        `summary of segment ${index}`,
+      ]),
+    );
+
+    // Each summary row precedes exactly its own segment's tool rows, and the
+    // preserved segment's tool rows trail unsummarized.
+    const emitted = await buildCompactedRows(plan, summaries, sessionId);
+    expect(emissionMarkers(emitted)).toEqual([
+      ...plan.summarizedTurns.flatMap((segment, index) => [
+        `summary of segment ${index}`,
+        ...toolBlockIds(segment.rows, "tool_use"),
+      ]),
+      ...toolBlockIds(plan.preservedTurns[0]!.rows, "tool_use"),
+    ]);
+  });
+
+  test("a response that skips one segment degrades that segment verbatim", async () => {
+    const sessionId = newSessionId();
+    const rows = megaTurnRows();
+    const { plan, prompt } = planPrompt(rows);
+    const skipped = 2;
+    expect(plan.summarizedTurns.length).toBeGreaterThan(skipped);
+
+    // A sparse set is accepted only because every pair present echoes its own
+    // anchor; the missing index is the one the parser reports as unsummarized.
+    const summaries = parseSummaries(
+      mockResponse(prompt, skipped),
+      plan.summarizedTurns.length,
+      plan.summarizedTurns.map(getUserPromptText),
+    );
+    expect(summaries.has(skipped)).toBe(false);
+    expect(summaries.size).toBe(plan.summarizedTurns.length - 1);
+
+    // The skipped segment contributes no summary row, and its own rows sit in
+    // its place, in order, message for message.
+    const emitted = await buildCompactedRows(plan, summaries, sessionId);
+    expect(emissionMarkers(emitted)).toEqual([
+      ...plan.summarizedTurns.flatMap((segment, index) => [
+        ...(index === skipped ? [] : [`summary of segment ${index}`]),
+        ...toolBlockIds(segment.rows, "tool_use"),
+      ]),
+      ...toolBlockIds(plan.preservedTurns[0]!.rows, "tool_use"),
+    ]);
+
+    const skippedRows = plan.summarizedTurns[skipped]!.rows;
+    const firstMessageId = skippedRows[0]!.message?.["id"];
+    expect(firstMessageId).toBeDefined();
+    const start = emitted.findIndex(
+      row => row.message?.["id"] === firstMessageId,
+    );
+    expect(start).not.toBe(-1);
+    expect(
+      emitted.slice(start, start + skippedRows.length).map(row => row.message),
+    ).toEqual(skippedRows.map(row => row.message));
+  });
+
+  test("a response whose anchors are shifted one index is rejected", () => {
+    const { plan, prompt } = planPrompt(megaTurnRows());
+    const anchors = [...renderedAnchors(prompt)].sort((a, b) => a[0] - b[0]);
+    expect(anchors.length).toBeGreaterThan(2);
+
+    // The renumber-and-drop shape: segment 0 is left out and every later pair
+    // slides down one index, so index K carries segment K+1's anchor and
+    // summary. The index attributes alone stay in range and in order, which is
+    // what makes the anchor cross-check the only thing that can catch it.
+    const parts = ["<summary>"];
+    for (const [index, anchor] of anchors.slice(1)) {
+      const shifted = index - 1;
+      parts.push(`<user index="${shifted}">\n${anchor}\n</user>`);
+      parts.push(
+        `<assistant index="${shifted}">\nsummary of segment ${index}\n</assistant>`,
+      );
+    }
+    parts.push(`<user>\n${renderedTrailingAnchor(prompt)}\n</user>`);
+    parts.push("</summary>");
+
+    expect(() =>
+      parseSummaries(
+        parts.join("\n"),
+        plan.summarizedTurns.length,
+        plan.summarizedTurns.map(getUserPromptText),
+      ),
+    ).toThrow(/appears renumbered/);
+  });
+
+  test("a summary for the trailing anchor's index is ignored", () => {
+    const { plan, prompt } = planPrompt(megaTurnRows());
+
+    // Numbering the trailing anchor as one more pair is common real-model
+    // behavior, and the trailing anchor here is a segment marker the model is
+    // told to echo like any other snippet. The extra index is dropped and the
+    // requested segments still map one for one.
+    const summaries = parseSummaries(
+      mockResponse(prompt, undefined, true),
+      plan.summarizedTurns.length,
+      plan.summarizedTurns.map(getUserPromptText),
+    );
+    expect(summaries.has(plan.summarizedTurns.length)).toBe(false);
+    expect([...summaries.entries()].sort((a, b) => a[0] - b[0])).toEqual(
+      plan.summarizedTurns.map((_, index) => [
+        index,
+        `summary of segment ${index}`,
+      ]),
     );
   });
 });

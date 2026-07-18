@@ -577,7 +577,10 @@ function copySessionFields(
   return copied;
 }
 
-function buildCompactionPrompt(turns: Turn[], nextTurn: Turn | null): string {
+export function buildCompactionPrompt(
+  turns: Turn[],
+  nextTurn: Turn | null,
+): string {
   return `<system>
 # Attention: Conversation Compaction Required
 
@@ -596,6 +599,7 @@ ${buildXmlTemplate(turns, nextTurn)}
 - **Output the truncated text within the <user> </user> tags exactly** according to the XML template above
   - User prompts are intentionally truncated to a short snippet for brevity.
   - Therefore, only output THE SNIPPET SHOWN. DO NOT OUTPUT the entire user prompt.
+- **Each indexed pair covers only the slice its own <user> snippet anchors.** A long assistant stretch may be split into consecutive segments, so the <assistant> summary sharing a snippet's index covers only that slice, not the whole stretch. A snippet beginning \`(continuation N)\` marks such a split point and is a segment marker rather than a user prompt; output it exactly as given, like any other snippet, including where it appears as the final <user> anchor.
 - **Echo every index attribute exactly as given**: each <user index="N"> and <assistant index="N"> pair in the template must appear in your output with the same index. Never renumber, merge, or skip an index; if two adjacent user snippets look similar, they are still separate turns and each keeps its own indexed pair.
 - Output your summary for assistant turns within the <assistant> </assistant> tags
   - You are **only responsible** for summarizing the specific assistant turns specified within the XML structure

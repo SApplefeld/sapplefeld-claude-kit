@@ -1,7 +1,7 @@
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname } from "node:path";
-import { compactTranscript } from "./compact";
+import { compactTranscript, sessionIdFromPath } from "./compact";
 import { appendLedgerEntry, readLastMainChainUsage } from "./ledger";
 import {
   appendCustomTitle,
@@ -276,11 +276,6 @@ function requireValue(flag: string, value: string | undefined): string {
     fail(`Missing value for ${flag}`);
   }
   return value;
-}
-
-function sessionIdFromPath(transcriptPath: string): string {
-  const fileName = transcriptPath.replace(/\\/g, "/").split("/").at(-1) ?? "";
-  return fileName.endsWith(".jsonl") ? fileName.slice(0, -".jsonl".length) : fileName;
 }
 
 function fail(message: string): never {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { unlink } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
 import { loadOmissionCache, saveOmissionCache } from "./omission";
 import { pruneTranscriptRow } from "./prune";
 import {
@@ -249,10 +250,90 @@ async function generateSummaries(
       );
     }
 
-    return parseSummaries(stdout, turns.length, turns.map(getUserPromptText));
+    return await parseSummariesWithDebugCapture(
+      stdout,
+      turns.length,
+      turns.map(getUserPromptText),
+      sessionIdFromPath(transcriptPath),
+    );
   } finally {
     await unlink(analysis.transcriptPath).catch(() => undefined);
   }
+}
+
+// Wraps parseSummaries so a parse failure leaves evidence instead of
+// destroying it: the raw response that broke the contract is persisted
+// before the error propagates, and the file's path is folded into the
+// error message so the CLI's "Compaction failed; source untouched: ..."
+// line names it. A successful parse never reaches the catch, so it writes
+// nothing. parseSummaries itself is untouched; this only observes its
+// outcome.
+export async function parseSummariesWithDebugCapture(
+  responseText: string,
+  expectedCount: number,
+  anchors: string[],
+  sourceSessionId: string,
+  debugBaseDirectory?: string,
+): Promise<Map<number, string>> {
+  try {
+    return parseSummaries(responseText, expectedCount, anchors);
+  } catch (parseError) {
+    const debugPath = await writeParseFailureDebugFile(
+      sourceSessionId,
+      responseText,
+      debugBaseDirectory,
+    );
+    if (debugPath !== null) {
+      if (parseError instanceof Error) {
+        parseError.message = `${parseError.message} Raw summarizer response saved to ${debugPath}`;
+      } else {
+        // A non-Error throw carries no message to append to, so the path
+        // would otherwise be lost the moment this function rethrows.
+        process.stderr.write(`Raw summarizer response saved to ${debugPath}\n`);
+      }
+    }
+    throw parseError;
+  }
+}
+
+// Best-effort persistence of a parse failure's raw response. The debug write
+// must never mask the original parseSummaries error, so any failure here
+// (a missing debug directory that cannot be created, a full disk, a path
+// length limit) is swallowed and reported as no file, rather than replacing
+// the caller's more important error. No rotation: parse failures are rare
+// and the files are small. debugBaseDirectory replaces homedir() as the
+// write's root when given; parseSummariesWithDebugCapture's callers never
+// pass it, so production always writes under the real home.
+async function writeParseFailureDebugFile(
+  sourceSessionId: string,
+  rawResponse: string,
+  debugBaseDirectory?: string,
+): Promise<string | null> {
+  try {
+    const directory = `${debugBaseDirectory ?? homedir()}/.claude/magic-compact/debug`;
+    // Colons are illegal in a Windows path segment; since this write is
+    // best-effort, an unsanitized timestamp would silently save nothing on
+    // every Windows parse failure.
+    const timestamp = new Date().toISOString().replace(/:/g, "-");
+    const path = `${directory}/${sourceSessionId}-${timestamp}.txt`;
+    await mkdir(directory, { recursive: true });
+    await Bun.write(path, rawResponse);
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+// The source transcript's file name, without its .jsonl extension, is the
+// session id assigned when that session was created. Shared by the
+// summarizer's debug-file naming (below) and compact-cli.ts's --transcript
+// argument identification, so a saved debug file traces back to the same id
+// the CLI reports for the transcript that failed to compact.
+export function sessionIdFromPath(transcriptPath: string): string {
+  const fileName = transcriptPath.replace(/\\/g, "/").split("/").at(-1)!;
+  return fileName.endsWith(".jsonl")
+    ? fileName.slice(0, -".jsonl".length)
+    : fileName;
 }
 
 // Strips ANSI escape and other control sequences (newlines kept) and caps the

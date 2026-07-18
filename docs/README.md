@@ -10,6 +10,11 @@ The library has three zones, and each zone has one job.
 - **`plans/`** holds active plans only: specs that are open or in progress. A plan lives here while it is being worked. The moment it reaches `Status: Complete` or is abandoned, it moves to `archive/`. See `plans/README.md`.
 - **`archive/`** holds finished and abandoned plans (their Chapters intact) and dated backlog snapshots. It is immutable history. Nothing here is live. See `archive/README.md`.
 
+## Documents about the solution
+
+- **`architecture.md`** is the system overview: what ships in the plugin payload, which parts are prose and which are code, the hook wiring, and the external surfaces the kit touches.
+- **`compaction-engine.md`** is the mechanism behind the compact-session skill: the plan model, turn segmentation, the summarizer contract, the emitted transcript's single-chain guarantee, failure paths, and the tuning constants.
+
 ## Living documents
 
 - **`backlog.md`** is the single living handoff and next-steps doc. It carries only active items. Completed items are pruned out to a dated snapshot in `archive/` so the doc never grows without bound.
@@ -20,9 +25,9 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-- `plans/claude-kit_turn-segmentation_spec_v1.md` - compact-engine segment splitter that bounds summarization plan entries, so autonomous (`/kit-goal` chain) transcripts with few mega-turns compact instead of failing the indexed-pair contract at every boundary. Extends the archived summarizer-robustness effort; adds parse-failure response persistence for field diagnosability.
+None currently active.
 
-Completed plans are in `archive/` (most recent: `claude-kit_goal-continuity_spec_v1.md`, the `/kit-goal` arming command and a deterministic Stop-hook leash that holds a plan run to completion across compaction and relay session swaps, with session-identity binding, the async-dispatch wait-is-not-a-stop rule, and name-based relay window targeting for remote and ConPTY hosts; before it, `claude-kit_relay-auto-refresh_spec_v1.md`, the 2026-07-16 self-healing relay watcher that refreshes its deployed copy at session start and via doctor -Fix, both guarded by the request.txt busy invariant).
+Completed plans are in `archive/` (most recent: `claude-kit_turn-segmentation_spec_v1.md`, bounded summarization plan entries so autonomous `/kit-goal` transcripts compact at every boundary instead of failing the indexed-pair contract, plus segment-granular `--keep`, the linearized emission that ends a silent parallel-tool-branch row loss, and parse-failure response persistence; before it, `claude-kit_goal-continuity_spec_v1.md`, the `/kit-goal` arming command and a deterministic Stop-hook leash that holds a plan run to completion across compaction and relay session swaps, with session-identity binding, the async-dispatch wait-is-not-a-stop rule, and name-based relay window targeting for remote and ConPTY hosts).
 
 ## Archive
 

@@ -404,7 +404,7 @@ function continuationSnippet(rows: TranscriptRow[]): string {
       CONTINUATION_SNIPPET_CAP,
     );
   }
-  return rows[0]!.uuid;
+  return rows[0]!.uuid.slice(0, CONTINUATION_SNIPPET_CAP);
 }
 
 function getContentBlocks(row: TranscriptRow): JsonRecord[] | null {

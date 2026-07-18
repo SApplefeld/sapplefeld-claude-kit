@@ -20,7 +20,7 @@ The `curating-docs` skill owns the mechanics: it archives a plan when it complet
 
 ## Active plans
 
-None currently active.
+- `plans/claude-kit_turn-segmentation_spec_v1.md` - compact-engine segment splitter that bounds summarization plan entries, so autonomous (`/kit-goal` chain) transcripts with few mega-turns compact instead of failing the indexed-pair contract at every boundary. Extends the archived summarizer-robustness effort; adds parse-failure response persistence for field diagnosability.
 
 Completed plans are in `archive/` (most recent: `claude-kit_goal-continuity_spec_v1.md`, the `/kit-goal` arming command and a deterministic Stop-hook leash that holds a plan run to completion across compaction and relay session swaps, with session-identity binding, the async-dispatch wait-is-not-a-stop rule, and name-based relay window targeting for remote and ConPTY hosts; before it, `claude-kit_relay-auto-refresh_spec_v1.md`, the 2026-07-16 self-healing relay watcher that refreshes its deployed copy at session start and via doctor -Fix, both guarded by the request.txt busy invariant).
 

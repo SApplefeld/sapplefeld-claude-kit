@@ -115,6 +115,21 @@ Folded into every later dispatch brief for this effort.
 - `prune.ts`, `omission.ts`, `retrieve.ts`: vendored-verbatim.
 - `buildAssistantTurns` turn-boundary semantics: human-bounded turns remain the unit of `--keep` and of prefix/preserved handling.
 
+## Blocking Question (raised 2026-07-18 at the S2 close, awaiting Scott)
+
+**The `--keep N` semantics recorded in Key decisions defeat this plan's own Goal on a single-turn transcript, which is exactly the `/kit-goal` shape the Goal names.** `--keep N` counts human-bounded turns. A `/kit-goal` run opens with one human prompt, so the whole session is one turn, `compactionEndIndex` lands at 0, `summarizedTurns` is empty, and the CLI exits "no older assistant turns to compact". Segmentation solved "one plan entry is unbounded"; it does not solve "there is no plan entry at all".
+
+Measured on this session's own transcript (452 active rows, 1 human-bounded turn, ~181k estimated tokens):
+
+- `--keep 1`: prefix 0, summarized 0, preserved 1. Nothing compactable.
+- `--keep 0`: prefix 0, summarized 11, preserved 0. Eleven bounded segments of ~15-20k tokens each, with distinct continuation anchors. Exactly the multi-pair regime this plan set out to produce.
+
+So S1 and S2 are correct and the machinery works; a recorded decision gates it out of the target workflow. Options, recommendation first:
+
+1. **Keep semantics fall back to segments when turns are degenerate** (recommended): when `turns.length <= keepTurns`, segment first and preserve the last N segments instead of the last N turns. On this transcript `--keep 1` would then summarize segments 0-9 and preserve segment 10 verbatim, which is what `--keep` is actually for (protecting the freshest working context). It contradicts the "Keep semantics unchanged" Key decision as written, and it is the redefinition S2 was careful to avoid in the non-degenerate case, so it must be scoped strictly to `turns.length <= keepTurns`.
+2. **Call `--keep 0` at section boundaries** for single-turn transcripts. No code change, but it summarizes the in-flight segment too, so the successor's freshest context comes only from the plan doc and Chapter.
+3. **Leave it.** Segmentation then benefits multi-turn interactive transcripts only, and the `/kit-goal` workflow in the Goal keeps running uncompacted to the ceiling.
+
 ## Open Questions
 
 - `SEGMENT_TOKEN_BUDGET` final value: 20k is the starting point; S4 calibrates. Owner: executing session, with Scott on a material change. Note that both known constraints push the same direction, **upward**, which inverts the original expectation that S4 would tune the budget down: the argv ceiling sets a hard floor near 15k, and the response-size constraint below sets practical pressure against fine granularity.

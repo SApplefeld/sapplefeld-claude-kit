@@ -9,7 +9,7 @@ An effort is not done when the last section compiles. It is done when behavior i
 
 When per-section reviews already cleared parts of the changeset, tell the finishing reviewers what those passes covered and what has changed since, so they spend their budget on cross-section cohesion and on deltas rather than re-deep-reviewing unchanged, already-cleared code. Eliminate true duplication, not coverage. For a small effort that had no meaningful per-section reviews (a few files, one short pass), a single combined adversarial and security pass is enough; do not manufacture separate passes for a handful of files.
 
-In a session running below fable, dispatch the security review (step 2) and the final adversarial review (step 3) with the explicit `fable` model override by default: the fresh-eyes strong-model verdict over the whole changeset is the oversight that makes plan-covered implementation safe. A recorded `Fable Spend: none (cost hold)` in the spec header keeps them at the session model.
+In a session running below fable, dispatch the security review (step 2) and the final adversarial review (step 3) with the explicit `fable` model override by default: the fresh-eyes strong-model verdict over the whole changeset is the oversight that makes plan-covered implementation safe. Only the literal `Fable Spend: none (cost hold)` holds these two reviews at the session model. Any other value, including one that restricts the implementation surface (some sections only, or escalation ceilings only), leaves the finishing-review fable default fully in force.
 
 ## Steps
 

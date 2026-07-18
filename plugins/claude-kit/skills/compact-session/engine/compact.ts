@@ -599,12 +599,26 @@ ${getUserPromptText(nextTurn)}
 // transcript content echoed inside the response XML: a literal </user> or
 // <assistant index="K"> inside an anchor would otherwise be ingested by the
 // parse regexes as structure. Template and echo pass through the same
-// transform, so the anchor cross-check in parseSummaries is unaffected.
+// transform, so the anchor cross-check in parseSummaries is unaffected. A
+// continuation segment (an oversized turn's split slice, which has no user
+// rows of its own) carries an anchorOverride instead; it goes through the
+// identical transform here, so both callers (the template builder and the
+// parser's anchor list) see the same value by construction.
 export function getUserPromptText(turn: Turn): string {
+  if (turn.anchorOverride !== undefined) {
+    return normalizeAnchorText(turn.anchorOverride);
+  }
   const text = turn.userRows
     .map(row => getUserText(row))
     .filter(Boolean)
     .join("\n");
+  return normalizeAnchorText(text);
+}
+
+// The single normalization and truncation for anchor text. Both the
+// user-row path and the anchorOverride path go through it, so template
+// anchors and the parser's cross-check anchors cannot drift apart.
+function normalizeAnchorText(text: string): string {
   const normalized = text.trim().replace(/\s+/g, " ").replace(/[<>]/g, "");
   return normalized.length <= 300
     ? `${normalized}\n...`
@@ -767,7 +781,10 @@ export function parseSummaries(
 // first 40 chars would verify against each other; the whole-text anchor
 // builder makes that rare (task ids and command names land inside the
 // window).
-function anchorsAgree(templateAnchor: string, echoedAnchor: string): boolean {
+export function anchorsAgree(
+  templateAnchor: string,
+  echoedAnchor: string,
+): boolean {
   const normalize = (s: string) =>
     s.replace(/\s+/g, " ").replace(/\.\.\.$/, "").trim().slice(0, 40);
   const a = normalize(templateAnchor);

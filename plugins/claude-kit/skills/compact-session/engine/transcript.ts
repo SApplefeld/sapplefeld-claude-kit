@@ -24,6 +24,10 @@ export type TranscriptCopy = {
 export type Turn = {
   userRows: TranscriptRow[];
   rows: TranscriptRow[];
+  // Set on continuation segments produced by splitOversizedTurns, which have
+  // no user rows of their own: getUserPromptText returns this text (through
+  // its usual normalization) instead of deriving the anchor from userRows.
+  anchorOverride?: string;
 };
 
 export async function readActiveTranscriptRows(
@@ -141,6 +145,233 @@ export function buildAssistantTurns(rows: TranscriptRow[]): Turn[] {
   return turns.filter(turn =>
     turn.rows.some(row => row.type === "assistant" || isToolResultRow(row)),
   );
+}
+
+// Estimated token budget for one summarization segment, a chars/4 heuristic
+// over each row's model-visible content (see estimateRowTokens). Segment
+// size does not bound summarizer input (the summarizer resumes the full
+// transcript copy); it sets summary
+// granularity: roughly one ~200-word summary per ~20k tokens of stretch.
+// This is the tunable knob if summaries come back too coarse or too fine.
+export const SEGMENT_TOKEN_BUDGET = 20_000;
+
+// Splits oversized turns into bounded segment pseudo-turns, so a plan entry
+// never asks for a single summary of an arbitrarily long stretch (an
+// autonomous run has almost no human user rows, so one turn can span
+// hundreds of rows). A turn at or under the budget is returned as the same
+// object, untouched. Cuts land only between step chunks (see
+// buildStepChunks), so a tool_use is never separated from its tool_result
+// and every segment contains at least one assistant row; a chunk over the
+// budget forms its own segment rather than being split internally.
+// Concatenating the segments' rows in order reproduces the original turn's
+// rows exactly. The first segment keeps the turn's userRows; continuation
+// segments carry userRows: [] (the emission path copies userRows per entry,
+// so a repeat would emit the same row twice) and a deterministic
+// anchorOverride: "(continuation N)" plus a nonempty snippet derived from
+// the segment (see continuationSnippet), which getUserPromptText serves in
+// place of the missing user text. N runs across the entire input list, not
+// per turn: the parser's anchor cross-check compares anchors from the whole
+// post-split list, and assistant openers repeat often enough that per-turn
+// numbering would let two turns' continuations verify against each other.
+// Every continuation anchor produced by one call is therefore distinct
+// inside the parser's 40-char anchor comparison window; near-identical
+// anchors are how summaries silently merge.
+export function splitOversizedTurns(turns: Turn[]): Turn[] {
+  let nextContinuation = 1;
+  return turns.flatMap(turn => splitTurn(turn, () => nextContinuation++));
+}
+
+function splitTurn(turn: Turn, nextContinuation: () => number): Turn[] {
+  const rowTokens = new Map<TranscriptRow, number>();
+  let turnTokens = 0;
+  for (const row of turn.rows) {
+    const tokens = estimateRowTokens(row);
+    rowTokens.set(row, tokens);
+    turnTokens += tokens;
+  }
+  if (turnTokens <= SEGMENT_TOKEN_BUDGET) {
+    return [turn];
+  }
+
+  const segments: TranscriptRow[][] = [];
+  let current: TranscriptRow[] = [];
+  let currentTokens = 0;
+  for (const chunk of buildStepChunks(turn.rows)) {
+    let chunkTokens = 0;
+    for (const row of chunk) {
+      chunkTokens += rowTokens.get(row) ?? 0;
+    }
+    if (
+      current.length > 0
+      && currentTokens + chunkTokens > SEGMENT_TOKEN_BUDGET
+    ) {
+      segments.push(current);
+      current = [];
+      currentTokens = 0;
+    }
+    for (const row of chunk) {
+      current.push(row);
+    }
+    currentTokens += chunkTokens;
+  }
+  if (current.length > 0) {
+    segments.push(current);
+  }
+  if (segments.length <= 1) {
+    return [turn];
+  }
+
+  // Segment 0 keeps the turn's own anchor fields: its userRows and any
+  // anchorOverride the turn already carried.
+  return segments.map((rows, index) =>
+    index === 0
+      ? { ...turn, rows }
+      : {
+          userRows: [],
+          rows,
+          anchorOverride: `(continuation ${nextContinuation()}) ${continuationSnippet(rows)}`,
+        },
+  );
+}
+
+// Groups a turn's rows into atomic step chunks. A chunk opens at an
+// assistant row that starts a new assistant message: its message id differs
+// from the previous assistant row's (a missing id on one side counts as
+// differing, since two rows that cannot be shown to share a message must
+// not be merged into one step), or, when both ids are missing, tool results
+// have arrived since the previous assistant row. Tool-pair cohesion is
+// enforced, not assumed: every tool_use id an assistant row contributes is
+// recorded as unresolved until a tool_result block answers it, and no cut
+// is taken while any id is still unresolved, so a cut can never separate a
+// tool_use from its tool_result regardless of row ordering. Everything
+// else (tool results, attachments, system rows, the leading user rows)
+// rides with the step it follows. The turn's first assistant row never
+// opens a chunk, so in a multi-chunk turn the first chunk always contains
+// an assistant row and every later chunk begins with one.
+function buildStepChunks(rows: TranscriptRow[]): TranscriptRow[][] {
+  const chunks: TranscriptRow[][] = [];
+  let current: TranscriptRow[] = [];
+  let lastAssistantMessageId: string | null = null;
+  let sawAssistant = false;
+  let sawToolResultSinceAssistant = false;
+  const unresolvedToolUseIds = new Set<string>();
+
+  for (const row of rows) {
+    if (row.type === "assistant") {
+      const messageId = getMessageId(row);
+      const opensNewMessage =
+        sawAssistant
+        && (messageId !== null || lastAssistantMessageId !== null
+          ? messageId !== lastAssistantMessageId
+          : sawToolResultSinceAssistant);
+      if (
+        opensNewMessage
+        && current.length > 0
+        && unresolvedToolUseIds.size === 0
+      ) {
+        chunks.push(current);
+        current = [];
+      }
+      sawAssistant = true;
+      sawToolResultSinceAssistant = false;
+      lastAssistantMessageId = messageId;
+      for (const block of getContentBlocks(row) ?? []) {
+        if (block["type"] === "tool_use" && typeof block["id"] === "string") {
+          unresolvedToolUseIds.add(block["id"]);
+        }
+      }
+    } else if (isToolResultRow(row)) {
+      sawToolResultSinceAssistant = true;
+      for (const block of getContentBlocks(row) ?? []) {
+        if (
+          block["type"] === "tool_result"
+          && typeof block["tool_use_id"] === "string"
+        ) {
+          unresolvedToolUseIds.delete(block["tool_use_id"]);
+        }
+      }
+    }
+    current.push(row);
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+// Upper bound on a continuation snippet before anchor normalization.
+// normalizeAnchorText truncates to 300 chars, but it allocates full-length
+// intermediate copies first, and an assistant text block can run to
+// megabytes of untrusted transcript content headed for the summarizer
+// prompt, so the derivation stays bounded here.
+const CONTINUATION_SNIPPET_CAP = 400;
+
+// The anchor snippet for a continuation segment, always nonempty: the first
+// nonempty assistant text (string-form message content or the first
+// nonempty text block), else the distinct tool names the segment invokes in
+// first-seen order, else the segment's first row uuid. An empty snippet is
+// never returned: a bare "(continuation N)" anchor would be a prefix of
+// every "(continuation N) ..." anchor and pass the parser's anchor
+// cross-check unconditionally. getUserPromptText's normalization handles
+// truncation and angle brackets downstream.
+function continuationSnippet(rows: TranscriptRow[]): string {
+  for (const row of rows) {
+    if (row.type !== "assistant" || !isRecord(row.message)) {
+      continue;
+    }
+    const content = row.message["content"];
+    if (typeof content === "string" && content.trim() !== "") {
+      return content.slice(0, CONTINUATION_SNIPPET_CAP);
+    }
+    for (const block of getContentBlocks(row) ?? []) {
+      if (
+        block["type"] === "text"
+        && typeof block["text"] === "string"
+        && block["text"].trim() !== ""
+      ) {
+        return block["text"].slice(0, CONTINUATION_SNIPPET_CAP);
+      }
+    }
+  }
+
+  const toolNames = new Set<string>();
+  for (const row of rows) {
+    for (const block of getContentBlocks(row) ?? []) {
+      if (block["type"] === "tool_use" && typeof block["name"] === "string") {
+        toolNames.add(block["name"]);
+      }
+    }
+  }
+  if (toolNames.size > 0) {
+    return `(tool activity: ${[...toolNames].join(", ")})`.slice(
+      0,
+      CONTINUATION_SNIPPET_CAP,
+    );
+  }
+  return rows[0]!.uuid;
+}
+
+function getContentBlocks(row: TranscriptRow): JsonRecord[] | null {
+  if (!isRecord(row.message)) {
+    return null;
+  }
+  const content = row.message["content"];
+  return Array.isArray(content) ? content.filter(isRecord) : null;
+}
+
+// Chars/4 heuristic over the row's model-visible content: a message's
+// content blocks, or an attachment row's payload. Attachment rows carry no
+// message field and run to tens of kilobytes, so measuring only messages
+// would score them zero and let a stretch of them overrun the budget
+// unmeasured. Envelope fields (uuid, parentUuid, sessionId, timestamp) are
+// not model-visible; counting them would inflate many-small-row turns far
+// more than few-large-row turns and skew the budget the splitter packs
+// against.
+function estimateRowTokens(row: TranscriptRow): number {
+  const content = isRecord(row.message)
+    ? row.message["content"]
+    : row["attachment"];
+  return content === undefined ? 0 : JSON.stringify(content).length / 4;
 }
 
 function buildActiveChain(rows: TranscriptRow[]): TranscriptRow[] {

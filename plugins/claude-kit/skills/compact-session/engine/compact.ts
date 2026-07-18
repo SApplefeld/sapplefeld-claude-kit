@@ -8,6 +8,7 @@ import {
   isRecord,
   readActiveTranscriptRows,
   readPreservedMetadataEntries,
+  splitOversizedTurns,
   type Turn,
   type TranscriptRow,
   writeTranscriptEntries,
@@ -82,11 +83,11 @@ export async function compactTranscript(
     .filter(index => !summaries.has(index));
   if (missing.length > 0) {
     process.stderr.write(
-      `Warning: the summarizer skipped ${missing.length} of ${plan.summarizedTurns.length} turns ` +
-        `(1-based: ${missing.map(index => index + 1).join(", ")}); those turns are preserved verbatim ` +
-        `instead of summarized. Nothing is lost, but a verbatim turn that lands before this compaction's ` +
+      `Warning: the summarizer skipped ${missing.length} of ${plan.summarizedTurns.length} entries ` +
+        `(1-based: ${missing.map(index => index + 1).join(", ")}); those entries are preserved verbatim ` +
+        `instead of summarized. Nothing is lost, but a verbatim entry that lands before this compaction's ` +
         `summary rows is never re-summarized by a later compaction, so the lost compression is permanent ` +
-        `for those turns.\n`,
+        `for those entries.\n`,
     );
   }
   const compactedRows = await buildCompactedRows(plan, summaries, sessionId);
@@ -102,7 +103,14 @@ export async function compactTranscript(
   return true;
 }
 
-function createPlan(rows: TranscriptRow[], keepTurns: number): Plan {
+// Splits the transcript into the three plan groups by whole turns, then
+// subdivides only the summarized group into bounded segments. The order is
+// load-bearing: both keepTurns and compactionStartIndex slice `turns` by
+// count, so segmenting first would redefine --keep N as "keep N segments"
+// and move the boundary between what is summarized and what is preserved.
+// Prefix and preserved turns are never segmented; segmentation exists to
+// bound one summary's span, and neither group is summarized.
+export function createPlan(rows: TranscriptRow[], keepTurns: number): Plan {
   const baseRow = rows.find(
     row => row.type === "user" || row.type === "assistant",
   );
@@ -122,7 +130,9 @@ function createPlan(rows: TranscriptRow[], keepTurns: number): Plan {
 
   return {
     prefixTurns: turns.slice(0, compactionStartIndex),
-    summarizedTurns: turns.slice(compactionStartIndex, compactionEndIndex),
+    summarizedTurns: splitOversizedTurns(
+      turns.slice(compactionStartIndex, compactionEndIndex),
+    ),
     preservedTurns: turns.slice(compactionEndIndex),
     baseRow,
   };
@@ -222,7 +232,6 @@ export async function buildCompactedRows(
   sessionId: string,
 ): Promise<TranscriptRow[]> {
   const rows: TranscriptRow[] = [];
-  const copiedUuids = new Map<string, string>();
   const completedToolUseIds = collectCompletedToolUseIds(plan.summarizedTurns);
   const toolNamesById = collectToolNamesById(plan.summarizedTurns);
   const omissionCache = await loadOmissionCache(sessionId);
@@ -251,17 +260,20 @@ export async function buildCompactedRows(
       boundary: true,
     },
   });
+  // The emitted transcript is a linearization: every row chains to the row
+  // emitted before it, whatever branch topology the source carried (parallel
+  // tool calls fork it) and whatever emission inserts or drops (a summarized
+  // entry replaces prose rows with one summary row). A fork in the emitted
+  // file (two rows sharing a parent) would be unrecoverable there: copyRow
+  // stamps every emitted row with one identical timestamp, and the reader's
+  // leaf selection breaks ties by strict timestamp comparison, so it cannot
+  // decide between forked branches and silently drops the losing branch and
+  // everything downstream of it. Hence the running parentUuid below is the
+  // only parent any copied row takes.
   let parentUuid: string | null = boundaryUuid;
 
   for (const turn of plan.prefixTurns) {
-    parentUuid = copyTurnRows(
-      turn,
-      rows,
-      copiedUuids,
-      sessionId,
-      timestamp,
-      parentUuid,
-    );
+    parentUuid = copyTurnRows(turn, rows, sessionId, timestamp, parentUuid);
   }
 
   for (const [index, turn] of plan.summarizedTurns.entries()) {
@@ -272,20 +284,12 @@ export async function buildCompactedRows(
     // copyTurnRows would otherwise duplicate.
     const summary = summaries.get(index);
     if (summary === undefined) {
-      parentUuid = copyTurnRows(
-        turn,
-        rows,
-        copiedUuids,
-        sessionId,
-        timestamp,
-        parentUuid,
-      );
+      parentUuid = copyTurnRows(turn, rows, sessionId, timestamp, parentUuid);
       continue;
     }
 
     for (const row of turn.userRows) {
       const copied = copyRow(row, sessionId, timestamp, parentUuid);
-      copiedUuids.set(row.uuid, copied.uuid);
       rows.push(copied);
       parentUuid = copied.uuid;
     }
@@ -302,7 +306,6 @@ export async function buildCompactedRows(
       parentUuid,
       summary,
     );
-    copiedUuids.set(firstAssistant.uuid, copied.uuid);
     rows.push(copied);
     parentUuid = copied.uuid;
 
@@ -311,14 +314,10 @@ export async function buildCompactedRows(
         continue;
       }
 
-      const copiedToolRow = copyRow(
-        row,
-        sessionId,
-        timestamp,
-        row.parentUuid
-          ? (copiedUuids.get(row.parentUuid) ?? parentUuid)
-          : parentUuid,
-      );
+      // The entry's first assistant row is emitted twice: once above as the
+      // summary row, and again here when it carries tool blocks, which is how
+      // a step-opening tool_use survives summarization.
+      const copiedToolRow = copyRow(row, sessionId, timestamp, parentUuid);
       keepOnlyToolBlocks(copiedToolRow);
       pruneTranscriptRow(copiedToolRow, {
         cache: omissionCache,
@@ -326,23 +325,16 @@ export async function buildCompactedRows(
         completedToolUseIds,
         toolNamesById,
       });
-      copiedUuids.set(row.uuid, copiedToolRow.uuid);
       rows.push(copiedToolRow);
       parentUuid = copiedToolRow.uuid;
     }
   }
 
   for (const turn of plan.preservedTurns) {
-    parentUuid = copyTurnRows(
-      turn,
-      rows,
-      copiedUuids,
-      sessionId,
-      timestamp,
-      parentUuid,
-    );
+    parentUuid = copyTurnRows(turn, rows, sessionId, timestamp, parentUuid);
   }
 
+  assertSingleParentChain(rows);
   await saveOmissionCache(sessionId, omissionCache);
   return rows;
 }
@@ -350,26 +342,55 @@ export async function buildCompactedRows(
 function copyTurnRows(
   turn: Turn,
   rows: TranscriptRow[],
-  copiedUuids: Map<string, string>,
   sessionId: string,
   timestamp: string,
   initialParentUuid: string | null,
 ): string | null {
   let parentUuid = initialParentUuid;
   for (const row of turn.rows) {
-    const copied = copyRow(
-      row,
-      sessionId,
-      timestamp,
-      row.parentUuid
-        ? (copiedUuids.get(row.parentUuid) ?? parentUuid)
-        : parentUuid,
-    );
-    copiedUuids.set(row.uuid, copied.uuid);
+    const copied = copyRow(row, sessionId, timestamp, parentUuid);
     rows.push(copied);
     parentUuid = copied.uuid;
   }
   return parentUuid;
+}
+
+// The emitted rows must form one unbroken chain of distinct rows: a fork
+// costs every row on the losing branch the moment the destination is read
+// back, and a duplicated uuid corrupts the reader's uuid-to-row map (one row
+// per id), turning its chain walk into a false cycle or a dropped stretch.
+// buildCompactedRows satisfies both properties by construction (a running
+// parentUuid, a fresh uuid at every push site), so this assertion is a
+// regression tripwire, not a guard against a reachable state: a future
+// emission change that breaks either property fails the compaction loudly
+// and leaves the source untouched, instead of shipping a destination that
+// drops rows at resume time. It checks structure only; a structurally valid
+// chain carrying the wrong rows still passes.
+export function assertSingleParentChain(rows: TranscriptRow[]): void {
+  if (rows.length === 0) {
+    return;
+  }
+  if (rows[0]!.parentUuid !== null) {
+    throw new Error(
+      `Compacted transcript chain is broken: row 0 (${rows[0]!.uuid}) has parent ${rows[0]!.parentUuid}, expected null.`,
+    );
+  }
+  const seenUuids = new Set<string>([rows[0]!.uuid]);
+  for (let index = 1; index < rows.length; index++) {
+    if (seenUuids.has(rows[index]!.uuid)) {
+      throw new Error(
+        `Compacted transcript uuid ${rows[index]!.uuid} appears more than once (row ${index}).`,
+      );
+    }
+    seenUuids.add(rows[index]!.uuid);
+    const expected = rows[index - 1]!.uuid;
+    if (rows[index]!.parentUuid !== expected) {
+      throw new Error(
+        `Compacted transcript chain is broken at row ${index} (${rows[index]!.uuid}): parent is `
+          + `${rows[index]!.parentUuid}, expected ${expected}.`,
+      );
+    }
+  }
 }
 
 function copyRow(

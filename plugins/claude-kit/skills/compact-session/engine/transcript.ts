@@ -240,23 +240,26 @@ function splitTurn(turn: Turn, nextContinuation: () => number): Turn[] {
 // differing, since two rows that cannot be shown to share a message must
 // not be merged into one step), or, when both ids are missing, tool results
 // have arrived since the previous assistant row. Tool-pair cohesion is
-// enforced, not assumed: every tool_use id an assistant row contributes is
-// recorded as unresolved until a tool_result block answers it, and no cut
-// is taken while any id is still unresolved, so a cut can never separate a
-// tool_use from its tool_result regardless of row ordering. Everything
-// else (tool results, attachments, system rows, the leading user rows)
-// rides with the step it follows. The turn's first assistant row never
-// opens a chunk, so in a multi-chunk turn the first chunk always contains
-// an assistant row and every later chunk begins with one.
+// enforced, not assumed: a chunk boundary is refused wherever
+// findBlockedBoundaries marks it, which keeps every answered
+// tool_use/tool_result pair inside one chunk, however many assistant
+// messages apart its rows land and whatever order they arrive in, and
+// keeps a chunk from opening directly behind an unanswered tool_use.
+// Everything else (tool results, attachments, system rows, the leading
+// user rows) rides with the step it follows. The turn's first assistant
+// row never opens a chunk, so in a multi-chunk turn the first chunk always
+// contains an assistant row and every later chunk begins with one.
 function buildStepChunks(rows: TranscriptRow[]): TranscriptRow[][] {
+  const blockedBoundaries = findBlockedBoundaries(rows);
+
   const chunks: TranscriptRow[][] = [];
   let current: TranscriptRow[] = [];
   let lastAssistantMessageId: string | null = null;
   let sawAssistant = false;
   let sawToolResultSinceAssistant = false;
-  const unresolvedToolUseIds = new Set<string>();
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]!;
     if (row.type === "assistant") {
       const messageId = getMessageId(row);
       const opensNewMessage =
@@ -267,7 +270,7 @@ function buildStepChunks(rows: TranscriptRow[]): TranscriptRow[][] {
       if (
         opensNewMessage
         && current.length > 0
-        && unresolvedToolUseIds.size === 0
+        && !blockedBoundaries[index]
       ) {
         chunks.push(current);
         current = [];
@@ -275,21 +278,8 @@ function buildStepChunks(rows: TranscriptRow[]): TranscriptRow[][] {
       sawAssistant = true;
       sawToolResultSinceAssistant = false;
       lastAssistantMessageId = messageId;
-      for (const block of getContentBlocks(row) ?? []) {
-        if (block["type"] === "tool_use" && typeof block["id"] === "string") {
-          unresolvedToolUseIds.add(block["id"]);
-        }
-      }
-    } else if (isToolResultRow(row)) {
+    } else if (rowHasToolResultBlock(row)) {
       sawToolResultSinceAssistant = true;
-      for (const block of getContentBlocks(row) ?? []) {
-        if (
-          block["type"] === "tool_result"
-          && typeof block["tool_use_id"] === "string"
-        ) {
-          unresolvedToolUseIds.delete(block["tool_use_id"]);
-        }
-      }
     }
     current.push(row);
   }
@@ -297,6 +287,68 @@ function buildStepChunks(rows: TranscriptRow[]): TranscriptRow[][] {
     chunks.push(current);
   }
   return chunks;
+}
+
+// Marks the row indices where a chunk boundary (a cut landing immediately
+// before that row) must be refused. Each tool_result pairs with the nearest
+// preceding unanswered tool_use of the same id, forming an index span; a
+// boundary strictly inside a span would separate the pair, so every index
+// from the tool_use's successor through the tool_result is blocked. Spans
+// are immune to row ordering and to re-issued ids: a tool_result with no
+// preceding unanswered tool_use forms no span, and a re-issued id pairs
+// each tool_result with its own preceding tool_use. A tool_use occurrence
+// no span answers (an interrupted turn, a cancelled tool, a tool_result
+// stranded off the active chain) blocks exactly one boundary, the one
+// immediately after its row: a cut there would emit the next segment's
+// summary row directly behind the unanswered tool_use, which resumes as an
+// invalid message sequence, so that candidate merges into the following
+// chunk instead. Tool blocks are detected by content shape on every row
+// type, matching the breadth of the emission path's tool-row filter, so no
+// tool_result the emitter would keep is invisible here.
+function findBlockedBoundaries(rows: TranscriptRow[]): boolean[] {
+  const pendingUsesById = new Map<string, number[]>();
+  const spans: { use: number; result: number }[] = [];
+  for (let index = 0; index < rows.length; index++) {
+    for (const block of getContentBlocks(rows[index]!) ?? []) {
+      if (block["type"] === "tool_use" && typeof block["id"] === "string") {
+        const pending = pendingUsesById.get(block["id"]) ?? [];
+        pending.push(index);
+        pendingUsesById.set(block["id"], pending);
+      } else if (
+        block["type"] === "tool_result"
+        && typeof block["tool_use_id"] === "string"
+      ) {
+        const use = pendingUsesById.get(block["tool_use_id"])?.pop();
+        if (use !== undefined) {
+          spans.push({ use, result: index });
+        }
+      }
+    }
+  }
+
+  const blocked = new Array<boolean>(rows.length).fill(false);
+  for (const { use, result } of spans) {
+    for (let index = use + 1; index <= result; index++) {
+      blocked[index] = true;
+    }
+  }
+  for (const pending of pendingUsesById.values()) {
+    for (const use of pending) {
+      if (use + 1 < rows.length) {
+        blocked[use + 1] = true;
+      }
+    }
+  }
+  return blocked;
+}
+
+// Content-shape counterpart of isToolResultRow, with no row-type
+// requirement: the emission path keeps any row whose content carries a tool
+// block, so the splitter's view of tool results must be at least as broad.
+function rowHasToolResultBlock(row: TranscriptRow): boolean {
+  return (getContentBlocks(row) ?? []).some(
+    block => block["type"] === "tool_result",
+  );
 }
 
 // Upper bound on a continuation snippet before anchor normalization.
@@ -367,7 +419,7 @@ function getContentBlocks(row: TranscriptRow): JsonRecord[] | null {
 // not model-visible; counting them would inflate many-small-row turns far
 // more than few-large-row turns and skew the budget the splitter packs
 // against.
-function estimateRowTokens(row: TranscriptRow): number {
+export function estimateRowTokens(row: TranscriptRow): number {
   const content = isRecord(row.message)
     ? row.message["content"]
     : row["attachment"];

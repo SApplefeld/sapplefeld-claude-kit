@@ -1,12 +1,15 @@
 // Pins the segment splitter contract: under-budget turns pass through by
 // object identity, oversized turns split only before an assistant row that
-// opens a new step, a tool_use/tool_result pair stays together even when
-// keeping it overshoots the budget (enforced via unresolved tool_use ids,
-// including id-less and recovered-parallel row shapes), concatenated
-// segment rows reproduce the original turn's rows exactly, and continuation
-// segments carry empty userRows plus deterministic, nonempty anchor
-// overrides that never agree with each other under the parser's
-// anchorsAgree cross-check, across every turn in one splitter call.
+// opens a new step, an answered tool_use/tool_result pair stays together
+// however far apart its rows land and whatever order they arrive in, even
+// when keeping it overshoots the budget (including id-less,
+// recovered-parallel, out-of-order, and re-issued-id row shapes, while an
+// unanswered tool_use blocks only the cut immediately after it),
+// concatenated segment rows reproduce the original turn's rows exactly,
+// and continuation segments carry empty userRows plus deterministic,
+// nonempty anchor overrides that never agree with each other under the
+// parser's anchorsAgree cross-check, across every turn in one splitter
+// call.
 // Run: bun test tools/engine-tests/
 import { describe, expect, test } from "bun:test";
 import {
@@ -14,6 +17,7 @@ import {
   getUserPromptText,
 } from "../../plugins/claude-kit/skills/compact-session/engine/compact";
 import {
+  estimateRowTokens,
   SEGMENT_TOKEN_BUDGET,
   splitOversizedTurns,
   type TranscriptRow,
@@ -27,19 +31,10 @@ function payload(budgetFraction: number): string {
   return "x".repeat(Math.round(SEGMENT_TOKEN_BUDGET * 4 * budgetFraction));
 }
 
-// Mirrors the splitter's estimate: chars/4 over each row's model-visible
-// content (a message's content blocks, or an attachment row's payload),
-// envelope fields excluded.
+// The splitter's own estimate, summed over rows, so a fixture is measured by
+// the same rule the splitter packs against and the two cannot drift.
 function estimatedTokens(rows: TranscriptRow[]): number {
-  return (
-    rows.reduce(
-      (sum, row) =>
-        sum
-        + JSON.stringify(row.message?.["content"] ?? row["attachment"] ?? "")
-          .length,
-      0,
-    ) / 4
-  );
+  return rows.reduce((sum, row) => sum + estimateRowTokens(row), 0);
 }
 
 type StepOptions = {
@@ -252,6 +247,49 @@ describe("splitOversizedTurns", () => {
     expectToolPairsCohere(segments);
   });
 
+  test("a tool pair stays together when its tool_result arrives two assistant messages later", () => {
+    // Two whole assistant messages, each a cut candidate on its own, land
+    // between the tool_use and its tool_result. The pair must block both
+    // candidates, not just the first: the answered-id pre-scan keeps the id
+    // tracked until its result row arrives, however many boundaries later.
+    const rows = [
+      ...makeStep("lead", { text: payload(0.6) }),
+      makeRow("late-tooluse", "assistant", {
+        id: "msg-late",
+        role: "assistant",
+        content: [
+          { type: "text", text: payload(0.3) },
+          { type: "tool_use", id: "tool-late", name: "Bash", input: {} },
+        ],
+      }),
+      makeRow("mid1-text", "assistant", {
+        id: "msg-mid1",
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.6) }],
+      }),
+      makeRow("mid2-text", "assistant", {
+        id: "msg-mid2",
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.6) }],
+      }),
+      makeRow("late-toolresult", "user", {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-late",
+            content: payload(0.3),
+          },
+        ],
+      }),
+    ];
+    const turn = makeTurn([rows]);
+    const segments = splitOversizedTurns([turn]);
+    expect(segments.length).toBe(2);
+    expectToolPairsCohere(segments);
+    expect(segments.flatMap(segment => segment.rows)).toEqual(turn.rows);
+  });
+
   test("tool pairs cohere when assistant rows carry no message id", () => {
     const rows = [
       makeRow("id1-text", "assistant", {
@@ -322,6 +360,148 @@ describe("splitOversizedTurns", () => {
         id: "msg-after",
         role: "assistant",
         content: [{ type: "text", text: payload(0.7) }],
+      }),
+    ];
+    const segments = splitOversizedTurns([makeTurn([rows])]);
+    expect(segments.length).toBe(2);
+    expectToolPairsCohere(segments);
+  });
+
+  test("an unanswered tool_use blocks only the cut immediately after it", () => {
+    // The first step's tool_use is never answered, the shape an interrupted
+    // turn or a cancelled tool leaves behind. It forms no span, so it cannot
+    // block later cuts, but the cut directly after it is refused: that cut
+    // would emit the next segment's summary row directly behind the
+    // unanswered tool_use, an invalid message sequence at resume time. The
+    // dangling step therefore merges with step b, and the cut before step c
+    // lands normally.
+    const rows = [
+      makeRow("dangle-text", "assistant", {
+        id: "msg-dangle",
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.6) }],
+      }),
+      makeRow("dangle-tooluse", "assistant", {
+        id: "msg-dangle",
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "tool-dangle", name: "Bash", input: {} },
+        ],
+      }),
+      ...makeStep("b", { text: payload(0.6), toolName: "Read" }),
+      ...makeStep("c", { text: payload(0.6), toolName: "Grep" }),
+    ];
+    const turn = makeTurn([rows]);
+    const segments = splitOversizedTurns([turn]);
+    expect(segments.length).toBe(2);
+
+    // The dangling step and step b share a segment; step c opens the next.
+    expect(
+      segments[0]!.rows.some(row => row.uuid === "dangle-tooluse"),
+    ).toBe(true);
+    expect(segments[0]!.rows.some(row => row.uuid === "b-toolresult")).toBe(
+      true,
+    );
+    expect(segments[1]!.rows[0]!.uuid).toBe("c-text");
+
+    const uses = toolBlockSegments(segments, "tool_use");
+    const results = toolBlockSegments(segments, "tool_result");
+    expect(results.get("tool-b")).toBe(uses.get("tool-b"));
+    expect(results.get("tool-c")).toBe(uses.get("tool-c"));
+
+    expect(segments.flatMap(segment => segment.rows).length).toBe(
+      turn.rows.length,
+    );
+  });
+
+  test("a tool_result ahead of its tool_use in row order blocks no later cuts", () => {
+    // Step b's tool_result row lands before its tool_use row. The
+    // out-of-order pair forms no span (a span requires the tool_use to
+    // precede the tool_result), so the only refused cut is the one
+    // immediately after the unanswered b-tooluse row; every later step
+    // boundary still lands.
+    const bStep = makeStep("b", { text: payload(0.6), toolName: "Bash" });
+    const reordered = [bStep[0]!, bStep[2]!, bStep[1]!];
+    const turn = makeTurn([
+      makeStep("a", { text: payload(0.6), toolName: "Read" }),
+      reordered,
+      makeStep("c", { text: payload(0.6), toolName: "Grep" }),
+      makeStep("d", { text: payload(0.6), toolName: "Edit" }),
+    ]);
+    const segments = splitOversizedTurns([turn]);
+    // Cuts before steps b and d land; only the cut before step c is refused,
+    // sitting immediately after the unanswered b-tooluse row.
+    expect(segments.length).toBe(3);
+    expect(segments[1]!.rows[0]!.uuid).toBe("b-text");
+    expect(segments[2]!.rows[0]!.uuid).toBe("d-text");
+    expect(segments.flatMap(segment => segment.rows)).toEqual(turn.rows);
+  });
+
+  test("a tool_use id re-issued after its result blocks no later cuts", () => {
+    // tool-a is answered inside step a, then the same id is issued again and
+    // never answered. Each tool_result pairs with its own preceding
+    // tool_use, so the answered pair's span is intact, the re-issued
+    // occurrence forms no span, and only the cut immediately after it is
+    // refused.
+    const rows = [
+      ...makeStep("a", { text: payload(0.6), toolName: "Bash" }),
+      makeRow("reissue-text", "assistant", {
+        id: "msg-reissue",
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.6) }],
+      }),
+      makeRow("reissue-tooluse", "assistant", {
+        id: "msg-reissue",
+        role: "assistant",
+        content: [{ type: "tool_use", id: "tool-a", name: "Bash", input: {} }],
+      }),
+      ...makeStep("c", { text: payload(0.6), toolName: "Read" }),
+      ...makeStep("d", { text: payload(0.6), toolName: "Grep" }),
+    ];
+    const turn = makeTurn([rows]);
+    const segments = splitOversizedTurns([turn]);
+    expect(segments.length).toBe(3);
+    expect(segments[1]!.rows[0]!.uuid).toBe("reissue-text");
+    expect(segments[2]!.rows[0]!.uuid).toBe("d-text");
+    expect(segments.flatMap(segment => segment.rows)).toEqual(turn.rows);
+  });
+
+  test("a tool_result on a non-user row still coheres with its tool_use", () => {
+    // Tool results are detected by content shape, not row type: the emission
+    // path keeps any row whose content carries a tool block, so a
+    // tool_result riding a system-typed row must block the cuts inside its
+    // pair like any other. Two assistant messages sit between the pair's
+    // rows, so a type-narrowed scan would land a cut inside the span rather
+    // than merely behind the tool_use.
+    const rows = [
+      ...makeStep("lead", { text: payload(0.6) }),
+      makeRow("odd-tooluse", "assistant", {
+        id: "msg-odd",
+        role: "assistant",
+        content: [
+          { type: "text", text: payload(0.3) },
+          { type: "tool_use", id: "tool-odd", name: "Bash", input: {} },
+        ],
+      }),
+      makeRow("mid1-text", "assistant", {
+        id: "msg-mid1",
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.6) }],
+      }),
+      makeRow("mid2-text", "assistant", {
+        id: "msg-mid2",
+        role: "assistant",
+        content: [{ type: "text", text: payload(0.6) }],
+      }),
+      makeRow("odd-toolresult", "system", {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-odd",
+            content: payload(0.1),
+          },
+        ],
       }),
     ];
     const segments = splitOversizedTurns([makeTurn([rows])]);

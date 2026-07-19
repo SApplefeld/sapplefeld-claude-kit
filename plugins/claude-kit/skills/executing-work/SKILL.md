@@ -78,6 +78,12 @@ For each Section of Work, in order:
      - Pin tests + new expected values, when the section changes a counted
        cross-cutting set
      - Standing Brief Amendments: every entry from the plan doc's block, when one exists
+     - Every load-bearing technical assertion you make marked confirmed or
+       inferred: a confirmed one names its evidence (file:line, the command you
+       ran), an inferred one says so and says to verify it before relying on it.
+       An unmarked assertion reads as settled fact and gets obeyed instead of
+       checked, which is how a wrong premise in a brief becomes a wrong
+       implementation that passes its own gate
      - Workaround bar: a workaround needing a paragraph to justify means fix the
        code or escalate
      - Style-skill file paths (agents inherit no skills)

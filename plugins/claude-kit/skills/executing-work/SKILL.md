@@ -116,9 +116,11 @@ For each Section of Work, in order:
    - **Branch-and-PR:** commit the section's code together with its Chapter (the plan doc update from step 6) to the feature branch, so the record rides with the change into the eventual merge. The PR happens in finishing-work. Pushing here is not merging: nothing is final until that merge.
    - **Commit-and-Push:** commit the section and push to origin. (If concurrency put you on a worktree branch, the merge to main and teardown happen in finishing-work, not here.)
 
-8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. Every close runs the same two observations, and the Chapter's Compaction line records their results, so a close that skipped them is visibly incomplete:
+8. **Compaction point (compact-session skill).** The section close (Chapter written, gate green, plan doc current) is the canonical moment to compact, because the plan doc already holds everything a summary could soften. Every close runs the same two observations first - before any judgment about the session's mode, before the Compaction line is written - and the line quotes their literal outputs, so a close that skipped them is visibly incomplete:
    - **Probe the relay.** The relay is armed when the directory `%LOCALAPPDATA%\claude-kit\resume-relay\` exists (PowerShell: `Test-Path "$env:LOCALAPPDATA\claude-kit\resume-relay"`). The compact-session skill owns what an armed relay does; this probe only answers armed or absent. Never conclude "unrelayed" without running it: the probe is one command, and a wrong "absent" silently forfeits every compaction for the rest of the run, each forfeited boundary re-billing 3-5x the post-compaction floor on every later call.
    - **Run the engine check.** The compact-session skill's `--check` against the session transcript; read its `recommendation`. The decision is the engine's, not a reflex (compacting below its minimum measurably costs more than it saves).
+
+   The observations' outputs are the only admissible inputs to the fork below. "The session is interactive / actively driven" is a conclusion about which fork arm applies, never a reason to skip the observations - and it holds only while I am actually present: a session is actively driven only if a message I typed (not a task notification, not hook feedback, not a subagent report) arrived within the current section. A run that last heard from me hours ago is unattended no matter how it started. Re-run both observations at every close; a Compaction line that inherits the previous Chapter's rationale instead of quoting fresh outputs turns one skipped close into the template for every later boundary, silently forfeiting the rest of the run.
 
    Then act on the pair:
    - Check says `skip`: continue to the next section; a skipped boundary costs nothing.
@@ -152,12 +154,12 @@ Implemented By: <main session | implementer-haiku | implementer-sonnet | impleme
 Metrics: <review rounds; NEEDS_CONTEXT count; escalations; advisor <model | off>>
 Decisions / Surprises: <anything resolved or discovered; "none" is acceptable>
 Review Findings: <Critical/Major addressed; Majors justified; Minors noted>
-Compaction: <context tokens at close; relay armed|absent; check compact|skip|not run: reason; action compacted|relayed|deferred|none>
+Compaction: <contextTokens number from --check> tokens; relay <armed|absent, the probe's result>; check <compact|skip|not run: reason>; action <compacted|relayed|deferred|none, with reason>
 Next: <next section, or "finishing-work">
 Commit Model: <Review-Only | Branch-and-PR | Commit-and-Push>
 ```
 
-Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader. The Metrics line doubles as the data feed for the kit's open experiments (the tier-band and advisor questions in `docs/backlog.md`), so record it even when every count is zero. The Compaction line is step 8's audit trail: it proves the boundary observations ran, and a `not run` there carries its reason.
+Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader. The Metrics line doubles as the data feed for the kit's open experiments (the tier-band and advisor questions in `docs/backlog.md`), so record it even when every count is zero. The Compaction line is step 8's audit trail: it proves the boundary observations ran, so every slot quotes a literal output (the token number from `--check`, the probe's armed/absent, the recommendation), and a `not run` there carries its reason. A line without the number and the check result is a skipped close - narrative fillers like "context heavy" do not satisfy it, and the context-tripwire hook flags such a line mechanically when it is written with the Edit or Write tools.
 
 ## When all sections are complete
 

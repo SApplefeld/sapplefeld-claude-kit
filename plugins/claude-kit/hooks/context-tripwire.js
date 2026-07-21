@@ -8,10 +8,14 @@
 // context re-bills the full window on every call. This hook is the
 // deterministic backstop, two teeth:
 //
-//   1. Band tripwire. On matched tool calls (the hooks.json matcher covers
-//      the write-shaped, shell, and agent-dispatch tools, which every real
+//   1. Band tripwire. Armed-goal sessions only: the band nudge exists for
+//      leashed plan runs (the /kit-goal case), and firing it in ideation or
+//      brainstorming sessions trains every session to discount it, so with
+//      no .kit/goal-state.json in the project it stays silent. When a goal
+//      is armed, matched tool calls (the hooks.json matcher covers the
+//      write-shaped, shell, and agent-dispatch tools, which every real
 //      working stretch uses; a read-only-tools stretch is uncovered until
-//      its next matched call), read the transcript's newest main-chain
+//      its next matched call) read the transcript's newest main-chain
 //      billed usage and, when context tokens cross a new 100K band at or
 //      above the engine's 200K compact trigger, inject an additionalContext
 //      reminder restating the contract. Fires once per band per climb: a
@@ -184,49 +188,26 @@ function writeLastBand(file, band) {
     }
 }
 
-// Is a plan run active in this project: a kit goal armed, or any In Progress
-// plan doc? Decides the message register only (contract language vs a plain
-// compact nudge); any failure reads as inactive. The Status match anchors on
-// the plan template's bare header form, the same anchor session-start.js
-// uses; the two must stay in step.
-function planRunActive(cwd) {
+// Is a kit goal armed for this project (.kit/goal-state.json naming a plan)?
+// The band tripwire's gate: an armed goal marks a leashed plan run, the only
+// session shape the nudge targets. Any failure reads as not armed (silent,
+// the calm direction for a nudge).
+function goalArmed(cwd) {
     try {
-        const goalPath = path.join(cwd, '.kit', 'goal-state.json');
-        const goal = JSON.parse(fs.readFileSync(goalPath, 'utf8'));
-        if (goal && goal.plan) return true;
-    } catch { /* no armed goal: fall through to the plan scan */ }
-    try {
-        const plansDir = path.join(cwd, 'docs', 'plans');
-        const entries = fs.readdirSync(plansDir)
-            .filter((f) => f.toLowerCase().endsWith('.md'))
-            .filter((f) => f.toLowerCase() !== 'readme.md')
-            .slice(0, 50);
-        for (const file of entries) {
-            try {
-                const fd = fs.openSync(path.join(plansDir, file), 'r');
-                const buf = Buffer.alloc(2048);
-                const bytes = fs.readSync(fd, buf, 0, 2048, 0);
-                fs.closeSync(fd);
-                let head = buf.toString('utf8', 0, bytes);
-                if (head.charCodeAt(0) === 0xFEFF) head = head.slice(1);
-                if (/^status:[^\S\r\n]*in[^\S\r\n]*progress/im.test(head)) return true;
-            } catch { /* unreadable file: skip it */ }
-        }
-    } catch { /* no docs/plans: not a plan project */ }
-    return false;
+        const goal = JSON.parse(fs.readFileSync(path.join(cwd, '.kit', 'goal-state.json'), 'utf8'));
+        return !!(goal && goal.plan);
+    } catch {
+        return false;
+    }
 }
 
 function formatTokens(n) {
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function bandMessage(tokens, contractActive) {
+function bandMessage(tokens) {
     const billed = 'Context tripwire: the last main-chain call billed '
         + formatTokens(tokens) + ' context tokens.';
-    if (!contractActive) {
-        return billed + ' Compaction pays for itself above 200K: at the next natural boundary,'
-            + ' compact (compact-session skill, or /compact). This reminder fires once per 100K band.';
-    }
     return billed + ' The compaction contract is live: at the next section close, run BOTH'
         + ' step-8 observations and quote their literal outputs in the Chapter\'s Compaction line:'
         + ' (1) relay probe: Test-Path "$env:LOCALAPPDATA\\claude-kit\\resume-relay";'
@@ -329,22 +310,23 @@ function main() {
         }
     } catch { /* validator is advisory: never let it kill the band check */ }
 
-    // Tooth 1: the band tripwire. The climb's state write happens after the
-    // nudge reaches stdout, so a failed emit errs toward re-reminding; a
-    // drop is recorded immediately (there is nothing to emit).
+    // Tooth 1: the band tripwire, gated on an armed kit goal (a leashed plan
+    // run is the only session shape it targets). The climb's state write
+    // happens after the nudge reaches stdout, so a failed emit errs toward
+    // re-reminding; a drop is recorded immediately (there is nothing to emit).
     let pendingBandWrite = null;
     try {
         const transcriptPath = payload.transcript_path || payload.transcriptPath;
         const sessionId = payload.session_id || payload.sessionId;
         const file = sessionId ? stateFile(sessionId) : null;
-        if (transcriptPath && file) {
+        const cwd = payload.cwd || process.cwd();
+        if (transcriptPath && file && goalArmed(cwd)) {
             const tokens = lastMainChainContextTokens(transcriptPath);
             if (tokens !== null) {
                 const band = bandOf(tokens);
                 const lastBand = readLastBand(file);
                 if (band > lastBand) {
-                    const cwd = payload.cwd || process.cwd();
-                    blocks.push(bandMessage(tokens, planRunActive(cwd)));
+                    blocks.push(bandMessage(tokens));
                     pendingBandWrite = { file, band };
                 } else if (band < lastBand) {
                     // A drop re-arms the crossed bands: a genuine reduction

@@ -88,6 +88,13 @@ function basePayload(overrides) {
     };
 }
 
+// Arm a kit goal in the fixture project: the band tripwire's gate. Band tests
+// arm it so their assertions exercise the band logic, not the gate.
+function armGoal(work) {
+    writeFile(path.join(work, '.kit', 'goal-state.json'),
+        JSON.stringify({ plan: 'docs/plans/x_spec_v1.md' }));
+}
+
 // ---------------------------------------------------------------------------
 // Band tripwire.
 // ---------------------------------------------------------------------------
@@ -95,6 +102,7 @@ function basePayload(overrides) {
 test('below the first band: silent', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(150000)]);
         const result = runHook(basePayload({ transcript_path: transcript, cwd: work }), path.join(work, 'state'));
@@ -105,6 +113,7 @@ test('below the first band: silent', () => {
 test('crossing the first band fires once, with the billed token count', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(210000)]);
         const stateDir = path.join(work, 'state');
@@ -122,6 +131,7 @@ test('crossing the first band fires once, with the billed token count', () => {
 test('a higher band fires again after an earlier nudge', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         const stateDir = path.join(work, 'state');
         const payload = basePayload({ transcript_path: transcript, cwd: work });
@@ -138,6 +148,7 @@ test('a higher band fires again after an earlier nudge', () => {
 test('a context drop re-arms the band for the next climb', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         const stateDir = path.join(work, 'state');
         const payload = basePayload({ transcript_path: transcript, cwd: work });
@@ -153,25 +164,23 @@ test('a context drop re-arms the band for the next climb', () => {
     } finally { rmDir(work); }
 });
 
-test('no plan run: the plain compact nudge, not the contract', () => {
+test('no armed goal: silent even above the band', () => {
     const work = makeDir('tripwire-');
     try {
         const transcript = path.join(work, 't.jsonl');
-        writeTranscript(transcript, [usageEntry(210000)]);
-        const msg = contextOf(runHook(
+        writeTranscript(transcript, [usageEntry(500000)]);
+        const result = runHook(
             basePayload({ transcript_path: transcript, cwd: work }),
             path.join(work, 'state')
-        ));
-        assert.match(msg, /Compaction pays for itself/);
-        assert.doesNotMatch(msg, /step-8/);
+        );
+        assert.strictEqual(result, null);
     } finally { rmDir(work); }
 });
 
-test('an armed kit goal switches the message to the contract register', () => {
+test('an armed kit goal fires the contract nudge', () => {
     const work = makeDir('tripwire-');
     try {
-        writeFile(path.join(work, '.kit', 'goal-state.json'),
-            JSON.stringify({ plan: 'docs/plans/x_spec_v1.md' }));
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(210000)]);
         const msg = contextOf(runHook(
@@ -184,24 +193,41 @@ test('an armed kit goal switches the message to the contract register', () => {
     } finally { rmDir(work); }
 });
 
-test('an In Progress plan doc also selects the contract register', () => {
+test('an In Progress plan doc without an armed goal does not fire the band nudge', () => {
     const work = makeDir('tripwire-');
     try {
         writeFile(path.join(work, 'docs', 'plans', 'y_spec_v1.md'),
             '# Y\n\nStatus: In Progress\nCommit Model: Review-Only\n');
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(210000)]);
-        const msg = contextOf(runHook(
+        const result = runHook(
             basePayload({ transcript_path: transcript, cwd: work }),
             path.join(work, 'state')
-        ));
-        assert.match(msg, /step-8 observations/);
+        );
+        assert.strictEqual(result, null);
+    } finally { rmDir(work); }
+});
+
+test('the validator still fires with no armed goal', () => {
+    const work = makeDir('tripwire-');
+    try {
+        const result = runHook(basePayload({
+            cwd: work,
+            tool_name: 'Edit',
+            tool_input: {
+                file_path: path.join(work, 'docs', 'plans', 'p.md'),
+                old_string: 'x',
+                new_string: 'Compaction: context heavy; action: none'
+            }
+        }), path.join(work, 'state'));
+        assert.match(contextOf(result), /without its required evidence/);
     } finally { rmDir(work); }
 });
 
 test('a subagent call is silent even above the band', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(500000)]);
         const result = runHook(
@@ -215,6 +241,7 @@ test('a subagent call is silent even above the band', () => {
 test('synthetic, zero-usage, and garbage rows are skipped to the older real row', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         // Newest-first noise: a garbage line, an API-error stub (synthetic
         // model), and an all-zero usage row all sit atop the real billed row.
@@ -232,6 +259,7 @@ test('synthetic, zero-usage, and garbage rows are skipped to the older real row'
 test('the nested cache_creation usage shape is counted', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(0, {
             usage: {
@@ -248,6 +276,7 @@ test('the nested cache_creation usage shape is counted', () => {
 test('a partial drop re-arms only the vacated bands', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         const stateDir = path.join(work, 'state');
         const payload = basePayload({ transcript_path: transcript, cwd: work });
@@ -266,6 +295,7 @@ test('a partial drop re-arms only the vacated bands', () => {
 test('sidechain usage rows are skipped: only the main chain bills the band', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         // Newest entry is a huge sidechain row; the main chain sits below band.
         writeTranscript(transcript, [
@@ -280,6 +310,7 @@ test('sidechain usage rows are skipped: only the main chain bills the band', () 
 test('missing transcript, missing session id, or garbage stdin: silent, exit 0', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const stateDir = path.join(work, 'state');
         assert.strictEqual(runHook(basePayload({ cwd: work }), stateDir), null);
         assert.strictEqual(runHook({ tool_name: 'Bash', tool_input: {} }, stateDir), null);
@@ -491,6 +522,7 @@ test('validator works without a transcript or session id in the payload', () => 
 test('band nudge and validator can combine into one injection', () => {
     const work = makeDir('tripwire-');
     try {
+        armGoal(work);
         const transcript = path.join(work, 't.jsonl');
         writeTranscript(transcript, [usageEntry(410000)]);
         const result = runHook(basePayload({

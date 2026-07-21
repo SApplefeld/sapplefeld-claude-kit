@@ -42,13 +42,16 @@ Two changes, teeth first:
      engine's row-acceptance rules exactly (ledger.ts: sidechain skip, synthetic-model
      skip, both cache_creation shapes, zero-total rows skipped with the scan
      continuing to older rows).
-   - **Band tripwire:** on crossing a band (200K = the engine's `CHECK_TRIGGER_TOKENS`,
-     then every 100K), injects `additionalContext` restating the step-8 contract: run
-     the probe and the check at the next section close and put their literal outputs
-     in the Compaction line. Once per band per session, tracked in a state file under
+   - **Band tripwire:** gated on an armed kit goal (`.kit/goal-state.json` naming a
+     plan): the nudge targets leashed plan runs only, and every other session shape
+     (ideation, brainstorming, ad-hoc work) stays silent so the reminder keeps its
+     authority where it is load-bearing. When armed, on crossing a band (200K = the
+     engine's `CHECK_TRIGGER_TOKENS`, then every 100K), injects `additionalContext`
+     restating the step-8 contract: run the probe and the check at the next section
+     close and put their literal outputs in the Compaction line. Once per band per
+     climb, tracked in a state file under
      `~/.claude/claude-kit/context-tripwire/<session_id>.json` (env-overridable for
-     tests). Message tailors on whether a kit goal is armed / an In Progress plan
-     exists (contract language) versus not (plain compact-at-a-boundary nudge).
+     tests).
    - **Compaction-line validator:** when an Edit/Write/MultiEdit targets a markdown
      file and its new content contains a `Compaction:` line, validate it carries
      evidence: a token count adjacent to the word "tokens" and a word-bounded literal
@@ -125,4 +128,14 @@ Decisions / Surprises: verdicts were security CLEAR (3 Minor), blind APPROVED_WI
 Review Findings: 6 Major addressed (2 were the same finding reported twice), 0 justified-open; Minors addressed except the declined Status-parse one; every fix pinned by a new test (25 hook tests total).
 Compaction: check not run: bun not installed on this machine, engine cannot run; relay armed (Test-Path True); action: none (interactive session, user-typed message within the current section).
 Next: finishing-work (delivered in this changeset: gate 120 pass / 0 fail vs baseline 95 / 0; live-fire against the ASR transcript reads 836,782 tokens post-fix)
+Commit Model: Commit-and-Push
+
+### Chapter 3 - 2026-07-20
+Completed: refinement round (Scott's request after live use): band tripwire gated on an armed kit goal
+Implemented By: main session (fable)
+Metrics: review rounds 0 (behavior-narrowing refinement of a change reviewed the same day; the removed plan-scan path had no findings against it); NEEDS_CONTEXT 0; escalations 0; advisor off
+Decisions / Surprises: the band nudge was firing in every session above 200K, including ideation and brainstorming sessions where it is noise, and unactionable reminders erode the authority of the load-bearing ones. The gate is now `.kit/goal-state.json` naming a plan, which is also the incident-faithful scope (the motivating run was /kit-goal-leashed). The generic no-plan message register and the In Progress plan-directory scan are deleted, not conditionalized: an In Progress plan being executed without an armed goal no longer receives band reminders, accepted deliberately because the leash is the signal that the completion contract, and therefore the push, is wanted. The Compaction-line validator stays unconditional: it fires only on a `Compaction:` line written into markdown, which no ideation session produces, so it cannot interrupt one, and it still catches an evidence-less line from an un-leashed plan run.
+Review Findings: none this round.
+Compaction: check not run: bun not installed on this machine, engine cannot run; relay armed (Test-Path True); action: none (interactive session, user-typed message within the current section).
+Next: none (refinement delivered in this changeset; gate 121 pass / 0 fail vs the prior commit's 120 / 0)
 Commit Model: Commit-and-Push

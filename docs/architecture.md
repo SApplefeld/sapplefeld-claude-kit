@@ -20,7 +20,7 @@ That split is the thing to hold onto when changing anything here. Prose surfaces
 
 - **SessionStart** runs `session-start.js` (resume surfacing and unarchived-plan flagging), `branch-reaper-nudge.js`, `kit-version-nudge.js`, `doctrine-refresh.js`, and `relay-refresh.js`. Matchers differ per hook: the doctrine refresh also fires on `clear`, and the branch and relay hooks skip the `compact` entry.
 - **PreToolUse** runs `docs-write-guard.js` on write-shaped tools, and `pr-docs-guard.js` and `merged-pr-push-guard.js` on shell tools.
-- **PostToolUse** runs `format-on-edit.js` after edits, and `context-tripwire.js` on write-shaped and shell tools: the compaction contract's advisory backstop, which injects a once-per-100K-band reminder when main-chain context crosses 200K and flags a Chapter Compaction line written without its literal evidence.
+- **PostToolUse** runs `format-on-edit.js` after edits, and `context-tripwire.js` on write-shaped, shell, and agent-dispatch tools: the compaction contract's advisory backstop. When a kit goal is armed it injects a once-per-100K-band reminder as main-chain context crosses 200K; in any session it flags a Chapter Compaction line written to markdown without its literal evidence.
 - **Stop** runs `stop-docs-hygiene.js` and `kit-goal-stop.js`, the deterministic leash that holds a `/kit-goal` run to completion across compaction and relay session swaps.
 
 ## Compaction engine

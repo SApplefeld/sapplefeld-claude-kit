@@ -1,7 +1,9 @@
 # Prints the AutoHotkey WinTitle expression ("ahk_id <hwnd>") that uniquely
 # identifies the terminal window hosting the current session, for the resume
 # relay to target. Exits 1 (emitting nothing) when no window can be resolved,
-# so the caller omits the target and the watcher falls back to window.txt.
+# so the caller writes no request and reports the manual /resume line instead
+# (the relay has no fallback plane; an uncapturable window means nothing is
+# safe to type into).
 #
 # Resolution order:
 #   1. By console (primary, when it yields a VISIBLE window). The current
@@ -23,7 +25,7 @@
 #      test, tolerating the CLI's own live title decoration (a progress dot
 #      during execution, a status icon at each stop) that no external write can
 #      override. Zero or more than one match falls through rather than guessing.
-#   3. Neither resolved: exit 1, and the watcher uses window.txt.
+#   3. Neither resolved: exit 1; the caller writes no request.
 #
 # The name path can name only a window this session does not own if this
 # session has no console window AND its own terminal is not among the matches
@@ -142,5 +144,6 @@ if ($name -and $name.Trim() -ne "" -and $name -ne "Claude Code") {
     }
 }
 
-# (3) Nothing resolved: the watcher falls back to window.txt.
+# (3) Nothing resolved: the caller writes no request and reports the manual
+# /resume line.
 exit 1

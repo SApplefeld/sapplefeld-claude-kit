@@ -3,8 +3,10 @@
 //
 // The Win32 window match and the console lookup are environment-dependent and
 // validated live (Section 4). The session-name extraction is pure, fixture-
-// testable logic and is the crux of the relay window fix: a silent extraction
-// failure reproduces the "falls back to stale window.txt" bug the fix closes.
+// testable logic and is load-bearing twice over: the name drives capture
+// path 2's window match on console-less hosts, and it rides as the request's
+// line-5 anchor, so a silent extraction failure leaves sessions with no
+// capturable window and therefore no relay request at all.
 // The script's `-NameOnly` switch prints the resolved name and exits before any
 // window resolution, so this suite drives that seam over crafted JSONL.
 //
@@ -76,7 +78,7 @@ test('a trailing [UNCOMPACTED] relabel is returned verbatim as the latest name',
         '[UNCOMPACTED] MCP: Chapter 3');
 });
 
-test('an unnamed session yields no name (drives the console/window.txt fallback)', { skip: !isWin }, () => {
+test('an unnamed session yields no name (capture exits 1; the caller writes no request)', { skip: !isWin }, () => {
     assert.strictEqual(extractName([{ type: 'user', message: { role: 'user', content: 'hi' } }]), '');
 });
 

@@ -6,12 +6,15 @@ Persistent
 ; boundary and types "/resume <id>" plus the continue prompt into the Claude
 ; desktop window, so an unattended run continues without a human at the keys.
 ;
-; Request contract (request.txt, three to five UTF-8 lines):
+; Request contract (request.txt, four or five UTF-8 lines; a legacy 3-line
+; shape still parses but always fails with the no-target reason):
 ;   line 1: session UUID
 ;   line 2: absolute transcript path (filename must be "<uuid>.jsonl")
 ;   line 3: single-line continue prompt
-;   line 4: optional target window as "ahk_id <hwnd>", the requesting session's
-;           own window; absent means use the fallback window
+;   line 4: target window as "ahk_id <hwnd>", the requesting session's own
+;           window. Mandatory: there is no fallback plane, so a request
+;           without it fails through the standard retry/archive flow and the
+;           manual /resume line the writer reports is the recovery
 ;   line 5: optional window-title anchor (the session name), accepted only when
 ;           line 4 is present. A captured hwnd is minutes old by typing time and
 ;           window churn in that gap (a tab dragged out to a new window) leaves
@@ -55,20 +58,14 @@ DRYRUN_MARKER := "[doctor-dryrun]"
 
 ; Each request names the exact window to type into (line 4, an "ahk_id <hwnd>"
 ; expression the requesting session captured for its own terminal), so
-; concurrent sessions in separate windows each resume into their own. A request
-; without that line falls back to FALLBACK_WINDOW, read from window.txt at
-; startup; when window.txt is absent or blank the fallback is a process-only
-; match, which the exactly-one-window guard below keeps safe by refusing to
-; type whenever more than one window matches. The Desktop app is never a valid
-; target: the /resume slash command does not exist there.
-FALLBACK_WINDOW := "ahk_exe WindowsTerminal.exe"
-if FileExist(RELAY_DIR "\window.txt") {
-    try {
-        configuredWindow := Trim(FileRead(RELAY_DIR "\window.txt", "UTF-8"), " `t`r`n")
-        if (configuredWindow != "")
-            FALLBACK_WINDOW := configuredWindow
-    }
-}
+; concurrent sessions in separate windows each resume into their own. There is
+; no fallback plane: a request without line 4 fails like any validation error
+; (retried, then archived to failed\), because no window a hand-maintained
+; expression could name is safe to type into (requests are machine-global
+; across repos, and a wrong window holding a shell would execute the typed
+; prompt), and the honest degradation is the manual /resume line the
+; relay-mode flow reports at every boundary anyway. The Desktop app is never a
+; valid target: the /resume slash command does not exist there.
 POLL_INTERVAL_MS := 10000
 MAX_ATTEMPTS := 3
 UUID_PATTERN := "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -185,26 +182,29 @@ ProcessRequest() {
         Fail("empty continue prompt")
         return
     }
-    ; Line 4, when present, is the requesting session's own captured window
-    ; ("ahk_id <hwnd>") and takes precedence, so concurrent sessions each resume
-    ; into their own window. Only that exact shape is accepted: the sole
-    ; producer is capture-window.ps1, so anything else is a malformed request,
-    ; not a free-form WinTitle to trust at the keyboard. A 3-line request uses
-    ; the fallback window; line 5 (the name anchor) is only accepted riding on a
-    ; line-4 request, and its own shape is validated before it can steer
-    ; anything: 4..120 chars trimmed, no control characters, and never the
-    ; "[UNCOMPACTED]" tag (that marks the stale transcript, so a name carrying
-    ; it could only match the wrong window).
-    target := FALLBACK_WINDOW
+    ; Line 4 is the requesting session's own captured window ("ahk_id <hwnd>"),
+    ; so concurrent sessions each resume into their own window. Only that exact
+    ; shape is accepted: the sole producer is capture-window.ps1, so anything
+    ; else is a malformed request, not a free-form WinTitle to trust at the
+    ; keyboard. A request without line 4 fails through the standard retry and
+    ; archive flow (there is no fallback window); the writer's reported manual
+    ; /resume line is the recovery.
+    ; Line 5 (the name anchor) is only accepted riding on a line-4 request, and
+    ; its own shape is validated before it can steer anything: 4..120 chars
+    ; trimmed, no control characters, and never the "[UNCOMPACTED]" tag (that
+    ; marks the stale transcript, so a name carrying it could only match the
+    ; wrong window).
     nameAnchor := ""
-    if (lines.Length >= 4) {
-        requestedTarget := Trim(lines[4], " `t`r")
-        if !RegExMatch(requestedTarget, "^ahk_id \d+$") {
-            Fail("malformed target window on line 4: " requestedTarget)
-            return
-        }
-        target := requestedTarget
+    if (lines.Length < 4) {
+        Fail("no target window captured (request has no ahk_id line); resume manually with /resume " sessionId)
+        return
     }
+    requestedTarget := Trim(lines[4], " `t`r")
+    if !RegExMatch(requestedTarget, "^ahk_id \d+$") {
+        Fail("malformed target window on line 4: " requestedTarget)
+        return
+    }
+    target := requestedTarget
     if (lines.Length = 5) {
         candidate := Trim(lines[5], " `t`r")
         ; An unfit anchor is dropped, never fatal: line 4 still names a
@@ -225,15 +225,10 @@ ProcessRequest() {
             Log("dropping unfit name anchor on line 5; proceeding on the hwnd alone")
         }
     }
-    if (target = "") {
-        Fail("no target window: empty fallback and no per-request target")
-        return
-    }
-    ; The target must resolve to exactly one window. A per-request ahk_id names
-    ; one window (or none, if it has since closed); a process-only fallback can
-    ; match several, and typing into whichever is active would deliver the
-    ; resume to the wrong session, so refuse and let the retry flow surface it.
-    ; The anchor is a fire-time check on the captured hwnd, both directions:
+    ; The target must resolve to exactly one window: an ahk_id names one window
+    ; (or none, if it has since closed), and typing anywhere else would deliver
+    ; the resume to the wrong session, so refuse and let the retry flow surface
+    ; it. The anchor is a fire-time check on the captured hwnd, both directions:
     ; window churn in the capture-to-typing gap (a tab dragged out to a new
     ; window) can leave the handle dead, or alive but showing a different
     ; session (the drag source survives when other tabs remain), so a live

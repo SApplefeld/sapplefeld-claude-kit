@@ -139,3 +139,13 @@ Review Findings: none this round.
 Compaction: check not run: bun not installed on this machine, engine cannot run; relay armed (Test-Path True); action: none (interactive session, user-typed message within the current section).
 Next: none (refinement delivered in this changeset; gate 121 pass / 0 fail vs the prior commit's 120 / 0)
 Commit Model: Commit-and-Push
+
+### Chapter 4 - 2026-07-21
+Completed: validator false-positive fix (a live ASR session reported the Compaction-line validator rejecting lines that carried the numeric count and literal check output)
+Implemented By: main session (fable)
+Metrics: review rounds 0 (two-regex widening with the standing 27-test suite as the gate; the bypass-regression test pins the loosening); NEEDS_CONTEXT 0; escalations 0; advisor off
+Decisions / Surprises: the report was confirmed in mechanism from the code alone (the predicates demanded adjacency phrasings, so a line quoting the engine's own field vocabulary, contextTokens and recommendation, failed both) and corrected in characterization (clause ordering was never checked; the regexes search independently, but adjacency strictness is indistinguishable from an ordering requirement from inside a rejected session). The two verbatim rejected lines were not recoverable at fix time (the ASR transcript export syncs on a lag and the reporting session postdates the last sync); the fix targets the provable defect, and the specimens can retro-confirm it when the export catches up. hasNumber now accepts the number on either side of the tokens vocabulary, hasCheck accepts the engine's recommendation field; the "skipping the observations" bypass regression test still flags, proving the loosening reopens nothing.
+Review Findings: none this round.
+Compaction: check not run: bun present on this machine but not on PATH, engine cannot run from this session; relay armed (Test-Path True); action: none (interactive session, user-typed message within the current section).
+Next: none (delivered in this changeset; gate 122 pass / 0 fail vs the prior commit's 121 / 0)
+Commit Model: Commit-and-Push

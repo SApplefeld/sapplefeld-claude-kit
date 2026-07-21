@@ -250,12 +250,17 @@ function isTemplatePlaceholder(rest) {
 }
 
 // Does written text contain a Compaction line that lacks its evidence? A
-// compliant line carries a token count adjacent to the word "tokens" (the
-// template's literal shape; grouped or bare, four digits and up since the
-// post-compaction floor sits in the tens of thousands) plus a word-bounded
-// literal check result, or an explicit "check not run:" with a non-empty
-// reason (the honest fallback when the engine cannot run has no number to
-// quote, but it never gets the exemption without saying why).
+// compliant line carries a token count (grouped or bare, four digits and up
+// since the post-compaction floor sits in the tens of thousands) in either
+// phrasing direction ("412,338 tokens", or the engine's own field vocabulary
+// "contextTokens: 412338" / "tokens: 412,338"), plus a literal check result
+// ("check compact|skip", or the engine's "recommendation: compact|skip"), or
+// an explicit "check not run:" with a non-empty reason (the honest fallback
+// when the engine cannot run has no number to quote, but it never gets the
+// exemption without saying why). Accepting the engine's field names matters:
+// the contract demands the literal outputs, so a validator that rejects the
+// engine's own vocabulary is stricter than the contract it enforces and
+// trains sessions toward one blessed phrasing instead of toward evidence.
 function findEvidencelessCompactionLine(text) {
     const lines = text.split('\n');
     for (const line of lines) {
@@ -264,8 +269,10 @@ function findEvidencelessCompactionLine(text) {
         const rest = line.slice(at);
         if (isTemplatePlaceholder(rest)) continue;
         if (/check:?\s*not\s+run\s*:\s*\S/i.test(rest)) continue;
-        const hasNumber = /(\d{1,3}(,\d{3})+|\d{4,})\s*(context\s+)?tokens/i.test(rest);
-        const hasCheck = /check:?\s*(compact|skip)\b/i.test(rest);
+        const hasNumber = /(\d{1,3}(,\d{3})+|\d{4,})\s*(context\s+)?tokens/i.test(rest)
+            || /(contextTokens|tokens)\s*[:=]?\s*"?(\d{1,3}(,\d{3})+|\d{4,})/i.test(rest);
+        const hasCheck = /check:?\s*(compact|skip)\b/i.test(rest)
+            || /recommendation\s*[:=]?\s*"?(compact|skip)\b/i.test(rest);
         if (!hasNumber || !hasCheck) return rest.trim().slice(0, 200);
     }
     return null;

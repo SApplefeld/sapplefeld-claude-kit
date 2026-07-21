@@ -451,6 +451,26 @@ test('a reasonless "check not run" is flagged', () => {
     } finally { rmDir(work); }
 });
 
+test('the engine field vocabulary passes in both phrasing directions', () => {
+    const work = makeDir('tripwire-');
+    try {
+        const cases = [
+            'Compaction: contextTokens 412338 per --check; recommendation: compact; relay armed; action: relayed',
+            'Compaction: tokens: 412,338; recommendation: skip; relay absent; action: none',
+            'Compaction: 412,338 context tokens at close; check: compact; relay armed; action: relayed'
+        ];
+        for (const line of cases) {
+            const result = runHook(basePayload({
+                transcript_path: quietTranscript(work),
+                cwd: work,
+                tool_name: 'Edit',
+                tool_input: { file_path: path.join(work, 'docs', 'plans', 'p.md'), old_string: 'x', new_string: line }
+            }), path.join(work, 'state'));
+            assert.strictEqual(result, null, 'should pass: ' + line);
+        }
+    } finally { rmDir(work); }
+});
+
 test('an unanchored "skipping" narrative with an incidental number is flagged', () => {
     const work = makeDir('tripwire-');
     try {

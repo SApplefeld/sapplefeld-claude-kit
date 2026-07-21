@@ -6,12 +6,26 @@ Persistent
 ; boundary and types "/resume <id>" plus the continue prompt into the Claude
 ; desktop window, so an unattended run continues without a human at the keys.
 ;
-; Request contract (request.txt, three or four UTF-8 lines):
+; Request contract (request.txt, three to five UTF-8 lines):
 ;   line 1: session UUID
 ;   line 2: absolute transcript path (filename must be "<uuid>.jsonl")
 ;   line 3: single-line continue prompt
 ;   line 4: optional target window as "ahk_id <hwnd>", the requesting session's
 ;           own window; absent means use the fallback window
+;   line 5: optional window-title anchor (the session name), accepted only when
+;           line 4 is present. A captured hwnd is minutes old by typing time and
+;           window churn in that gap (a tab dragged out to a new window) leaves
+;           it dead, or worse, alive but showing a different session. With an
+;           anchor present the watcher verifies at fire time that the target
+;           window's title still carries it (ordinal match, as the capture's
+;           own matcher), and a dead or stale hwnd is re-resolved by name:
+;           exactly one visible WindowsTerminal.exe window whose title contains
+;           the anchor and not "[UNCOMPACTED]". Zero or several matches fail
+;           the request exactly as a bare not-found does. An unfit anchor
+;           (wrong length, control characters, no alphanumerics, the generic
+;           "Claude Code") is dropped with a log line and the request proceeds
+;           on its hwnd alone: a cosmetic line-5 defect must never strand a
+;           request whose line 4 still names a live, correct window.
 ;
 ; A "dryrun.on" flag file in the relay directory validates and logs without
 ; focusing or typing. The only text ever sent to the window is the fixed
@@ -96,6 +110,12 @@ if FileExist(DRYRUN_FLAG) {
     }
 }
 
+; Window matching (WinGetList, WinGetTitle, ResolveByName's enumeration) sees
+; visible windows only. That is AHK's default, pinned here so the visibility
+; filter is a stated invariant of the keystroke-targeting logic rather than an
+; inherited setting.
+DetectHiddenWindows(false)
+
 Log("watcher started, polling every " POLL_INTERVAL_MS // 1000 "s")
 SetTimer(Poll, POLL_INTERVAL_MS)
 
@@ -136,8 +156,8 @@ ProcessRequest() {
     }
 
     lines := StrSplit(Trim(raw, " `t`r`n"), "`n")
-    if (lines.Length != 3 && lines.Length != 4) {
-        Fail("request must be 3 or 4 lines, got " lines.Length)
+    if (lines.Length < 3 || lines.Length > 5) {
+        Fail("request must be 3 to 5 lines, got " lines.Length)
         return
     }
 
@@ -170,15 +190,40 @@ ProcessRequest() {
     ; into their own window. Only that exact shape is accepted: the sole
     ; producer is capture-window.ps1, so anything else is a malformed request,
     ; not a free-form WinTitle to trust at the keyboard. A 3-line request uses
-    ; the fallback window.
+    ; the fallback window; line 5 (the name anchor) is only accepted riding on a
+    ; line-4 request, and its own shape is validated before it can steer
+    ; anything: 4..120 chars trimmed, no control characters, and never the
+    ; "[UNCOMPACTED]" tag (that marks the stale transcript, so a name carrying
+    ; it could only match the wrong window).
     target := FALLBACK_WINDOW
-    if (lines.Length = 4) {
+    nameAnchor := ""
+    if (lines.Length >= 4) {
         requestedTarget := Trim(lines[4], " `t`r")
         if !RegExMatch(requestedTarget, "^ahk_id \d+$") {
             Fail("malformed target window on line 4: " requestedTarget)
             return
         }
         target := requestedTarget
+    }
+    if (lines.Length = 5) {
+        candidate := Trim(lines[5], " `t`r")
+        ; An unfit anchor is dropped, never fatal: line 4 still names a
+        ; checkable window, and a request that would relay fine on its hwnd
+        ; must not three-strike to failed\ over a cosmetic line-5 defect.
+        ; Dropped means no fire-time verification and no re-resolution. Fit:
+        ; trimmed length 4..120, no control characters (C0, DEL, C1), at
+        ; least one alphanumeric, never the "[UNCOMPACTED]" tag, and never
+        ; the generic "Claude Code" (capture's own matcher refuses to match
+        ; on it, so honoring it here could only select a wrong window).
+        if (StrLen(candidate) >= 4 && StrLen(candidate) <= 120
+            && !RegExMatch(candidate, "[\x00-\x1F\x7F-\x9F]")
+            && RegExMatch(candidate, "[A-Za-z0-9]")
+            && !InStr(candidate, "[UNCOMPACTED]", true)
+            && candidate != "Claude Code") {
+            nameAnchor := candidate
+        } else {
+            Log("dropping unfit name anchor on line 5; proceeding on the hwnd alone")
+        }
     }
     if (target = "") {
         Fail("no target window: empty fallback and no per-request target")
@@ -188,7 +233,38 @@ ProcessRequest() {
     ; one window (or none, if it has since closed); a process-only fallback can
     ; match several, and typing into whichever is active would deliver the
     ; resume to the wrong session, so refuse and let the retry flow surface it.
+    ; The anchor is a fire-time check on the captured hwnd, both directions:
+    ; window churn in the capture-to-typing gap (a tab dragged out to a new
+    ; window) can leave the handle dead, or alive but showing a different
+    ; session (the drag source survives when other tabs remain), so a live
+    ; hwnd whose title no longer carries the anchor is treated exactly like a
+    ; vanished one. Either way the anchor drives one re-resolution repeating
+    ; the capture's own match (visible WindowsTerminal.exe windows, ordinal
+    ; title-contains, never the "[UNCOMPACTED]" tag), rebinding only on
+    ; exactly one hit; zero or several fall through to the same Fail/retry
+    ; path as a bare not-found, with the match count logged for triage.
     matchedWindows := WinGetList(target)
+    staleReason := ""
+    if (nameAnchor != "" && matchedWindows.Length = 1) {
+        liveTitle := ""
+        try liveTitle := WinGetTitle("ahk_id " matchedWindows[1])
+        if (!InStr(liveTitle, nameAnchor, true) || InStr(liveTitle, "[UNCOMPACTED]", true)) {
+            staleReason := "hwnd alive but its title no longer carries the anchor"
+            matchedWindows := []
+        }
+    }
+    if (matchedWindows.Length = 0 && nameAnchor != "") {
+        matchCount := 0
+        resolved := ResolveByName(nameAnchor, &matchCount)
+        if (resolved != 0) {
+            Log("re-resolved " target " (" (staleReason != "" ? staleReason : "window gone") ") by name to ahk_id " resolved)
+            target := "ahk_id " resolved
+            matchedWindows := WinGetList(target)
+        } else {
+            Fail("target window unusable: " target " (" (staleReason != "" ? staleReason : "not found") "); name re-resolution matched " matchCount " windows")
+            return
+        }
+    }
     if (matchedWindows.Length = 0) {
         Fail("target window not found: " target)
         return
@@ -245,6 +321,28 @@ EnsureActive(target) {
         return false
     WinActivate(target)
     return WinWaitActive(target, , 5) != 0
+}
+
+; Fire-time re-resolution of a dead or stale captured hwnd: the hwnd of the
+; one visible WindowsTerminal.exe window whose title contains the name anchor
+; and does not carry the "[UNCOMPACTED]" tag, or 0 when zero or several match
+; (the caller fails rather than guesses; typing into a maybe-window is never
+; acceptable). matchCount reports how many matched, so a failed relay's log
+; distinguishes window-gone from name-ambiguous. Both InStr calls are ordinal
+; case-sensitive to mirror capture-window.ps1's .NET Contains, so capture and
+; re-resolution agree on what "this session's window" means.
+ResolveByName(nameAnchor, &matchCount) {
+    matchCount := 0
+    hit := 0
+    for hwnd in WinGetList("ahk_exe WindowsTerminal.exe") {
+        title := ""
+        try title := WinGetTitle("ahk_id " hwnd)
+        if (title = "" || !InStr(title, nameAnchor, true) || InStr(title, "[UNCOMPACTED]", true))
+            continue
+        matchCount += 1
+        hit := hwnd
+    }
+    return (matchCount = 1) ? hit : 0
 }
 
 Fail(reason) {

@@ -111,7 +111,10 @@ function Get-SessionName([string]$path) {
 
 if ($NameOnly) {
     $n = Get-SessionName $TranscriptPath
-    if ($null -ne $n) { $n }
+    # Flattened to one line: the name rides as a single request line (the
+    # watcher's line-5 anchor), and a raw embedded newline would shift the
+    # request's line structure and fail the whole request.
+    if ($null -ne $n) { ($n -replace "[\r\n]+", " ").Trim() }
     exit 0
 }
 

@@ -43,15 +43,26 @@ Persistent
 ; Failure disposition: validation and pre-typing failures retry up to
 ; MAX_ATTEMPTS polls, then the request moves to failed\. Once typing has
 ; begun, a lost window is a hard failure straight to failed\ (a retry would
-; re-type "/resume" into the already-resumed session). A request that was
-; typed but could not be archived is remembered by content and re-archived,
-; never re-typed.
+; re-type "/resume" into the already-resumed session), and so is a missing
+; resume confirmation: the continue prompt is released only by the ready\
+; stamp the resumed session's own SessionStart hook writes (relay-ready.js),
+; never by a timer, so a /resume that has not provably completed strands the
+; prompt loudly instead of typing it into the original full-context session.
+; The stamp is session-scoped, not request-scoped: any resume of that session
+; id on this machine confirms it (a human typing the manual /resume fallback
+; in another terminal included), so the gate proves the session loaded
+; somewhere, not that this window finished loading. The recovery for a
+; timed-out request is therefore typing the continue prompt by hand, never a
+; second request.
+; A request that was typed but could not be archived is remembered by content
+; and re-archived, never re-typed.
 
 RELAY_DIR := EnvGet("LOCALAPPDATA") "\claude-kit\resume-relay"
 REQUEST_FILE := RELAY_DIR "\request.txt"
 LOG_FILE := RELAY_DIR "\relay.log"
 PROCESSED_DIR := RELAY_DIR "\processed"
 FAILED_DIR := RELAY_DIR "\failed"
+READY_DIR := RELAY_DIR "\ready"
 DRYRUN_FLAG := RELAY_DIR "\dryrun.on"
 ; A request whose prompt line starts with this token is a diagnostic probe:
 ; validate and log it, never type it. The marker rides inside the request, so
@@ -75,14 +86,23 @@ POLL_INTERVAL_MS := 10000
 MAX_ATTEMPTS := 3
 UUID_PATTERN := "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
-; Settle delays around the typing sequence. SESSION_LOAD_MS is the tunable
-; knob if the live-fire test shows the resumed session needs longer to load
-; before the continue prompt lands.
+; Settle delays around the typing sequence. MENU_SETTLE_MS covers the slash
+; menu after "/resume <id>" is typed. The continue prompt is gated on a
+; resume confirmation, not a timer: the resumed session's SessionStart hook
+; (relay-ready.js) stamps ready\<session id>, and the watcher waits for that
+; stamp up to READY_TIMEOUT_MS before typing (a timer cannot distinguish a
+; slow resume from a completed one, and a prompt typed before completion
+; lands in the original full-context session). READY_SETTLE_MS is the
+; tunable knob between the stamp (hooks fire during session load) and the
+; prompt keystrokes (the input line must exist to receive them).
 MENU_SETTLE_MS := 800
-SESSION_LOAD_MS := 6000
+READY_POLL_MS := 500
+READY_TIMEOUT_MS := 60000
+READY_SETTLE_MS := 1500
 
 DirCreate(PROCESSED_DIR)
 DirCreate(FAILED_DIR)
+DirCreate(READY_DIR)
 
 ; Attempt tracking is keyed to the request's content so a new request never
 ; inherits a dead request's failure count. handledContent/handledDir remember
@@ -292,6 +312,20 @@ ProcessRequest() {
         return
     }
 
+    ; Consume-before-send: a stale stamp from an earlier resume of this same
+    ; session would release the prompt before this /resume completes, so the
+    ; stamp that releases it must be provably younger than the keystroke.
+    ; Typing has not begun yet, so a stamp that survives the delete (an AV or
+    ; indexer lock) is a retryable failure, never a proceed: waiting on a
+    ; stamp that predates the /resume is the exact race this gate closes.
+    ; sessionId is shape-validated above, so it is safe as a filename.
+    staleStamp := READY_DIR "\" sessionId
+    try FileDelete(staleStamp)
+    if FileExist(staleStamp) {
+        Fail("stale ready stamp could not be cleared: " staleStamp)
+        return
+    }
+
     SendText("/resume " sessionId)
     ; Typing has begun: from here every keystroke group re-verifies focus and
     ; a lost window is a hard failure, never a retry.
@@ -301,7 +335,22 @@ ProcessRequest() {
         return
     }
     Send("{Enter}")
-    Sleep(SESSION_LOAD_MS)
+    ; The continue prompt is fail-closed behind the resume confirmation: only
+    ; the ready\ stamp releases it, and a timeout hard-fails with the prompt
+    ; unsent. The one outcome this gate exists to prevent is typing the
+    ; prompt while the /resume is still loading, which delivers it to the
+    ; original full-context session and silently re-bills that context on
+    ; every later call; a stalled-but-resumed session, by contrast, is loud
+    ; (failed\ plus the session-start nudge) and costs nothing while it
+    ; waits. A machine whose session process predates the relay-ready hook
+    ; times out here by design rather than typing unconfirmed.
+    waitedMs := WaitForResumeReady(sessionId)
+    if (waitedMs < 0) {
+        HardFail(raw, "no resume confirmation within " READY_TIMEOUT_MS // 1000 "s; session " sessionId " may or may not have resumed; continue prompt NOT sent, check the window and send it manually")
+        return
+    }
+    Log("resume confirmed after " waitedMs "ms")
+    Sleep(READY_SETTLE_MS)
     if !EnsureActive(target) {
         HardFail(raw, "focus lost before continue prompt; session " sessionId " resumed but prompt not sent")
         return
@@ -317,6 +366,35 @@ ProcessRequest() {
     Log("typed resume + prompt for " sessionId)
     MarkHandled(raw, PROCESSED_DIR, "done")
     Archive(PROCESSED_DIR, "done")
+}
+
+; Poll for the resume-confirmation stamp the relay-ready SessionStart hook
+; writes (ready\<session id>) when the resumed session starts. Returns the
+; measured wait in ms on confirmation, consuming the stamp; -1 on timeout.
+; The measured wait is logged by the caller and is the live evidence for
+; tuning READY_TIMEOUT_MS against real session-load times.
+WaitForResumeReady(sessionId) {
+    stamp := READY_DIR "\" sessionId
+    waited := 0
+    loop {
+        if FileExist(stamp) {
+            ; A failed consume is bounded (the next request's verified
+            ; pre-clear removes it) but logged, so the residue is visible.
+            try {
+                FileDelete(stamp)
+            } catch {
+                Log("WARN: consumed ready stamp could not be deleted: " stamp)
+            }
+            return waited
+        }
+        ; Timeout check after the existence check, so a stamp landing in the
+        ; final poll interval is still honored and READY_TIMEOUT_MS means
+        ; what it says.
+        if (waited >= READY_TIMEOUT_MS)
+            return -1
+        Sleep(READY_POLL_MS)
+        waited += READY_POLL_MS
+    }
 }
 
 EnsureActive(target) {

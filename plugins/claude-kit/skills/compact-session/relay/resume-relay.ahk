@@ -21,9 +21,14 @@ Persistent
 ;           it dead, or worse, alive but showing a different session. With an
 ;           anchor present the watcher verifies at fire time that the target
 ;           window's title still carries it (ordinal match, as the capture's
-;           own matcher), and a dead or stale hwnd is re-resolved by name:
-;           exactly one visible WindowsTerminal.exe window whose title contains
-;           the anchor and not "[UNCOMPACTED]". Zero or several matches fail
+;           own matcher), and a dead or stale hwnd is re-resolved by name
+;           among visible WindowsTerminal.exe windows whose titles contain the
+;           anchor. The engine relabels the stale transcript the moment
+;           compaction succeeds, so at fire time the correct window's title
+;           legitimately reads "[UNCOMPACTED] <name>" once the boundary turn
+;           ends; the tag is never grounds to refuse a window, only to rank
+;           re-resolution candidates (the sole clean match wins, else the sole
+;           tagged match). Zero or ambiguous matches fail
 ;           the request exactly as a bare not-found does. An unfit anchor
 ;           (wrong length, control characters, no alphanumerics, the generic
 ;           "Claude Code") is dropped with a log line and the request proceeds
@@ -191,9 +196,9 @@ ProcessRequest() {
     ; /resume line is the recovery.
     ; Line 5 (the name anchor) is only accepted riding on a line-4 request, and
     ; its own shape is validated before it can steer anything: 4..120 chars
-    ; trimmed, no control characters, and never the "[UNCOMPACTED]" tag (that
-    ; marks the stale transcript, so a name carrying it could only match the
-    ; wrong window).
+    ; trimmed, no control characters, and never the "[UNCOMPACTED]" tag (the
+    ; capture writes the clean session name, so a tagged anchor is malformed
+    ; input, not a name to honor).
     nameAnchor := ""
     if (lines.Length < 4) {
         Fail("no target window captured (request has no ahk_id line); resume manually with /resume " sessionId)
@@ -212,7 +217,8 @@ ProcessRequest() {
         ; must not three-strike to failed\ over a cosmetic line-5 defect.
         ; Dropped means no fire-time verification and no re-resolution. Fit:
         ; trimmed length 4..120, no control characters (C0, DEL, C1), at
-        ; least one alphanumeric, never the "[UNCOMPACTED]" tag, and never
+        ; least one alphanumeric, never the "[UNCOMPACTED]" tag (a tagged
+        ; anchor is malformed input; capture writes clean names), and never
         ; the generic "Claude Code" (capture's own matcher refuses to match
         ; on it, so honoring it here could only select a wrong window).
         if (StrLen(candidate) >= 4 && StrLen(candidate) <= 120
@@ -233,17 +239,21 @@ ProcessRequest() {
     ; window) can leave the handle dead, or alive but showing a different
     ; session (the drag source survives when other tabs remain), so a live
     ; hwnd whose title no longer carries the anchor is treated exactly like a
-    ; vanished one. Either way the anchor drives one re-resolution repeating
-    ; the capture's own match (visible WindowsTerminal.exe windows, ordinal
-    ; title-contains, never the "[UNCOMPACTED]" tag), rebinding only on
-    ; exactly one hit; zero or several fall through to the same Fail/retry
+    ; vanished one. The "[UNCOMPACTED]" tag is no part of that check: the
+    ; engine relabels the stale transcript the moment compaction succeeds, so
+    ; the correct window's title carries the tag from the instant the boundary
+    ; turn ends, and typing /resume into that window is the design intent.
+    ; Either failure drives one re-resolution repeating the capture's own
+    ; match (visible WindowsTerminal.exe windows, ordinal title-contains,
+    ; clean title preferred over tagged), rebinding only on an unambiguous
+    ; hit; zero or ambiguous matches fall through to the same Fail/retry
     ; path as a bare not-found, with the match count logged for triage.
     matchedWindows := WinGetList(target)
     staleReason := ""
     if (nameAnchor != "" && matchedWindows.Length = 1) {
         liveTitle := ""
         try liveTitle := WinGetTitle("ahk_id " matchedWindows[1])
-        if (!InStr(liveTitle, nameAnchor, true) || InStr(liveTitle, "[UNCOMPACTED]", true)) {
+        if !InStr(liveTitle, nameAnchor, true) {
             staleReason := "hwnd alive but its title no longer carries the anchor"
             matchedWindows := []
         }
@@ -315,29 +325,70 @@ EnsureActive(target) {
     if !WinExist(target)
         return false
     WinActivate(target)
-    return WinWaitActive(target, , 5) != 0
+    if (WinWaitActive(target, , 5) != 0)
+        return true
+    LogActivationDiagnostics(target)
+    return false
 }
 
-; Fire-time re-resolution of a dead or stale captured hwnd: the hwnd of the
-; one visible WindowsTerminal.exe window whose title contains the name anchor
-; and does not carry the "[UNCOMPACTED]" tag, or 0 when zero or several match
-; (the caller fails rather than guesses; typing into a maybe-window is never
-; acceptable). matchCount reports how many matched, so a failed relay's log
-; distinguishes window-gone from name-ambiguous. Both InStr calls are ordinal
-; case-sensitive to mirror capture-window.ps1's .NET Contains, so capture and
-; re-resolution agree on what "this session's window" means.
+; Station telemetry for an activation timeout on a window that exists: the
+; target's live title, plus what (if anything) holds the foreground. A desktop
+; with no foreground window at all is the signature of a non-interactive
+; station (locked, or a disconnected remote session), where no activation can
+; succeed until a human reattaches it; a different window holding the
+; foreground points at focus contention instead. One log line here replaces a
+; forensic reconstruction later.
+LogActivationDiagnostics(target) {
+    targetTitle := ""
+    try targetTitle := WinGetTitle(target)
+    fg := DllCall("user32\GetForegroundWindow", "ptr")
+    if (fg = 0) {
+        Log("activation diagnostics: no foreground window on this desktop (station likely non-interactive); target title: " targetTitle)
+    } else {
+        fgTitle := ""
+        try fgTitle := WinGetTitle("ahk_id " fg)
+        Log("activation diagnostics: foreground is ahk_id " fg " (" fgTitle "); target title: " targetTitle)
+    }
+}
+
+; Fire-time re-resolution of a dead or stale captured hwnd among the visible
+; WindowsTerminal.exe windows whose titles contain the name anchor, ranked by
+; the "[UNCOMPACTED]" tag: a clean title is the right window's pre-boundary
+; state and the sole clean match wins outright (a tagged same-named window
+; beside it is a dormant leftover); a tagged title is the right window's
+; expected post-boundary state (the engine relabels the stale transcript the
+; moment compaction succeeds), so the sole tagged match is accepted when no
+; clean one exists. Anything ambiguous returns 0: the caller fails rather
+; than guesses, because typing into a maybe-window is never acceptable.
+; matchCount reports the total that carried the anchor, so a failed relay's
+; log distinguishes window-gone from name-ambiguous. Both InStr calls are
+; ordinal case-sensitive to mirror capture-window.ps1's .NET Contains, so
+; capture and re-resolution agree on what "this session's window" means.
 ResolveByName(nameAnchor, &matchCount) {
     matchCount := 0
-    hit := 0
+    cleanCount := 0
+    cleanHit := 0
+    taggedCount := 0
+    taggedHit := 0
     for hwnd in WinGetList("ahk_exe WindowsTerminal.exe") {
         title := ""
         try title := WinGetTitle("ahk_id " hwnd)
-        if (title = "" || !InStr(title, nameAnchor, true) || InStr(title, "[UNCOMPACTED]", true))
+        if (title = "" || !InStr(title, nameAnchor, true))
             continue
-        matchCount += 1
-        hit := hwnd
+        if InStr(title, "[UNCOMPACTED]", true) {
+            taggedCount += 1
+            taggedHit := hwnd
+        } else {
+            cleanCount += 1
+            cleanHit := hwnd
+        }
     }
-    return (matchCount = 1) ? hit : 0
+    matchCount := cleanCount + taggedCount
+    if (cleanCount = 1)
+        return cleanHit
+    if (cleanCount = 0 && taggedCount = 1)
+        return taggedHit
+    return 0
 }
 
 Fail(reason) {

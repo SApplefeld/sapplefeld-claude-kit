@@ -11,7 +11,11 @@
 //   1. Band tripwire. Armed-goal sessions only: the band nudge exists for
 //      leashed plan runs (the /kit-goal case), and firing it in ideation or
 //      brainstorming sessions trains every session to discount it, so with
-//      no .kit/goal-state.json in the project it stays silent. When a goal
+//      no .kit/goal-state.json in the project it stays silent. It also stays
+//      silent when KIT_EXTERNAL_ENGINE is set in the environment: an external
+//      engine's worker never compacts itself (the engine spawns a fresh
+//      worker per section), so nudging it toward the compaction contract
+//      steers it against its own execution model. When a goal
 //      is armed, matched tool calls (the hooks.json matcher covers the
 //      write-shaped, shell, and agent-dispatch tools, which every real
 //      working stretch uses; a read-only-tools stretch is uncovered until
@@ -188,6 +192,16 @@ function writeLastBand(file, band) {
     }
 }
 
+// Is this session an external engine's worker (KIT_EXTERNAL_ENGINE set at
+// spawn)? Such a worker never compacts itself - the engine owns continuation
+// by spawning a fresh worker per section - so the band nudge stands down. The
+// Compaction-line validator stays active regardless: a stand-down line's
+// "check not run:" escape already passes it.
+function externalEngineDriven() {
+    const v = process.env.KIT_EXTERNAL_ENGINE;
+    return typeof v === 'string' && v.trim().length > 0;
+}
+
 // Is a kit goal armed for this project (.kit/goal-state.json naming a plan)?
 // The band tripwire's gate: an armed goal marks a leashed plan run, the only
 // session shape the nudge targets. Any failure reads as not armed (silent,
@@ -327,7 +341,7 @@ function main() {
         const sessionId = payload.session_id || payload.sessionId;
         const file = sessionId ? stateFile(sessionId) : null;
         const cwd = payload.cwd || process.cwd();
-        if (transcriptPath && file && goalArmed(cwd)) {
+        if (transcriptPath && file && !externalEngineDriven() && goalArmed(cwd)) {
             const tokens = lastMainChainContextTokens(transcriptPath);
             if (tokens !== null) {
                 const band = bandOf(tokens);

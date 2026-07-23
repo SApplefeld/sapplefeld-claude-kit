@@ -60,12 +60,16 @@ function writeTranscript(full, entries) {
 }
 
 // Spawn the hook with a payload and a hermetic state dir; return parsed
-// stdout (null when silent).
-function runHook(payload, stateDir) {
+// stdout (null when silent). KIT_EXTERNAL_ENGINE is stripped so a suite run
+// inside an external engine's worker cannot silence the band tests; a test
+// exercising that gate passes it back via extraEnv.
+function runHook(payload, stateDir, extraEnv) {
+    const env = { ...process.env, KIT_TRIPWIRE_STATE_DIR: stateDir, ...extraEnv };
+    if (!extraEnv || !('KIT_EXTERNAL_ENGINE' in extraEnv)) delete env.KIT_EXTERNAL_ENGINE;
     const res = spawnSync(process.execPath, [HOOK], {
         input: typeof payload === 'string' ? payload : JSON.stringify(payload),
         encoding: 'utf8',
-        env: { ...process.env, KIT_TRIPWIRE_STATE_DIR: stateDir }
+        env
     });
     assert.strictEqual(res.status, 0, 'hook must always exit 0');
     const out = (res.stdout || '').trim();
@@ -221,6 +225,52 @@ test('the validator still fires with no armed goal', () => {
             }
         }), path.join(work, 'state'));
         assert.match(contextOf(result), /without its required evidence/);
+    } finally { rmDir(work); }
+});
+
+test('KIT_EXTERNAL_ENGINE silences the band nudge that fires without it', () => {
+    const work = makeDir('tripwire-');
+    try {
+        armGoal(work);
+        const transcript = path.join(work, 't.jsonl');
+        writeTranscript(transcript, [usageEntry(210000)]);
+        const payload = basePayload({ transcript_path: transcript, cwd: work });
+
+        const unmarked = runHook(payload, path.join(work, 'state-a'));
+        assert.match(contextOf(unmarked), /Context tripwire/,
+            'without the marker this fixture must fire, or the gated run proves nothing');
+
+        const marked = runHook(payload, path.join(work, 'state-b'), { KIT_EXTERNAL_ENGINE: '1' });
+        assert.strictEqual(marked, null, 'an external engine worker never gets the band nudge');
+    } finally { rmDir(work); }
+});
+
+test('the validator stays active under KIT_EXTERNAL_ENGINE', () => {
+    const work = makeDir('tripwire-');
+    try {
+        const transcript = path.join(work, 't.jsonl');
+        writeTranscript(transcript, [usageEntry(50000)]);
+        const edit = (line) => basePayload({
+            transcript_path: transcript,
+            cwd: work,
+            tool_name: 'Edit',
+            tool_input: {
+                file_path: path.join(work, 'docs', 'plans', 'p.md'),
+                old_string: 'x',
+                new_string: line
+            }
+        });
+
+        const standDown = runHook(
+            edit('Compaction: check not run: external engine owns continuation (fresh worker per section)'),
+            path.join(work, 'state'), { KIT_EXTERNAL_ENGINE: '1' });
+        assert.strictEqual(standDown, null, 'the stand-down line is evidence-bearing');
+
+        const narrative = runHook(
+            edit('Compaction: context heavy; engine will handle it; action: none'),
+            path.join(work, 'state'), { KIT_EXTERNAL_ENGINE: '1' });
+        assert.match(contextOf(narrative), /without its required evidence/,
+            'the marker gates the nudge, not the evidence rule');
     } finally { rmDir(work); }
 });
 

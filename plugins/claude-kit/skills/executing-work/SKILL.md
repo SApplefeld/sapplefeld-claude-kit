@@ -43,7 +43,7 @@ Red flags that you are about to stop wrongly: "say the word and continue", "hold
 - a destructive or irreversible action that needs my yes,
 - a systematic-debugging dead end.
 
-When you stop, lead the message with `BLOCKED: <exactly what you need from me>` so I see it in seconds rather than discovering a silent halt hours later. A progress update is not a stop and must not be written as one. The `/goal` Stop hook is a backstop, not the mechanism; this contract is the mechanism.
+When you stop, the message's very first characters are `BLOCKED: <exactly what you need from me>`, so I see it in seconds rather than discovering a silent halt hours later. The bare prefix opens the message: no close-out summary above it, no bold or heading wrapping it; put any shipped-work recap after the BLOCKED paragraph. The Stop hook releases only on that exact leading prefix and deliberately ignores a `BLOCKED:` sitting mid-message (quoting the convention must never release the leash), so a summary-first stop bounces and costs an extra turn. A progress update is not a stop and must not be written as one. The `/goal` Stop hook is a backstop, not the mechanism; this contract is the mechanism.
 
 **The goal template.** A plan run's completion leash is armed in one line with `/kit-goal docs/plans/<plan>.md`. The kit-goal skill owns the canonical condition and enforces it with a deterministic kit Stop hook; the condition is met when (a) every section is complete and closed out, (b) you are BLOCKED on a decision only I can make and have documented what you need from me and how I can provide it, or (c) you have just compacted at a section boundary and written the resume-relay request for this plan, handing off to a successor session.
 

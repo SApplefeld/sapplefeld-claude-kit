@@ -246,7 +246,8 @@ const SEMANTIC_SHOWN_FOR_TEST = memq.SEMANTIC_SHOWN;
 // control below rather than passing as empty-but-green. A text containing
 // EMBEDFAIL throws, the seam the partial-sweep case uses; a text containing
 // NANVEC yields a vector with a NaN component, the seam the non-finite-query
-// case uses.
+// case uses; and a text containing HANGVEC never returns inside any caller's
+// patience, the seam the neighbours block's time bound is read against.
 const FAKE_EMBEDDER_SOURCE = `'use strict';
 const crypto = require('crypto');
 const DIM = 384;
@@ -272,6 +273,9 @@ module.exports = {
                 if (String(texts[i]).includes('EMBEDFAIL')) {
                     throw new Error('stub embedder refuses this text');
                 }
+                if (String(texts[i]).includes('HANGVEC')) {
+                    await new Promise((r) => setTimeout(r, 22000));
+                }
                 if (String(texts[i]).includes('NANVEC')) {
                     const bad = vec(texts[i]);
                     bad[0] = NaN;
@@ -288,10 +292,17 @@ module.exports = {
 
 // Build the fake install under its own temp root; the caller removes it.
 // options.modelless leaves the model cache empty, the interrupted-install
-// state the probe reports as unusable rather than absent.
+// state the probe reports as unusable rather than absent. options.at installs
+// at a path the caller names instead, for a case that needs the stack where the
+// child resolves it with no variable pinning it: memory-index derives that
+// location from the home directory, so a redirected home is where such an
+// install goes, and the caller's own home cleanup removes it.
 function makeFakeEmbedder(options) {
     const opts = options || {};
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-emb-'));
+    const root = opts.at === undefined
+        ? fs.mkdtempSync(path.join(os.tmpdir(), 'memq-emb-'))
+        : opts.at;
+    if (opts.at !== undefined) fs.mkdirSync(root, { recursive: true });
     const pkg = path.join(root, 'node_modules', '@huggingface', 'transformers');
     fs.mkdirSync(pkg, { recursive: true });
     fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({
@@ -10832,6 +10843,24 @@ function runHome(store, args, extra) {
     });
 }
 
+// runHome for a case that holds its own HTTP server: spawnSync blocks the loop
+// that server answers on, so a child waiting for it would wait for a reply
+// nobody is in a position to send. The environment is homeChildEnv's, screens
+// and all, so a served case cannot reach the store a blocking one cannot.
+function runHomeServed(store, args, extra) {
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, [MEMQ].concat(args), {
+            cwd: store.proj,
+            env: homeChildEnv(store, extra)
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => { stdout += d; });
+        child.stderr.on('data', (d) => { stderr += d; });
+        child.on('close', (status) => resolve({ status, stdout, stderr }));
+    });
+}
+
 // Whether the home redirect actually took, asked of the same environment the
 // children run under and answered by the same resolver they use. These cases
 // are the only ones in this suite without KIT_MEMORY_ROOT, which they have to
@@ -18741,6 +18770,13 @@ test('a type record whose name is taken in the write window is refused', () => {
     // module holds, so the name can be a document by the time the write runs.
     // A plain write would replace it, and what it replaces is another
     // machine's memory, in a store with no version control under it.
+    //
+    // The plant lands on the third read of this path, which is the exclusive
+    // create's own: the create path reads it twice before that, once for the
+    // advisory refusal ahead of the neighbours block and once for the same
+    // refusal under the lock. An ordinal naming an earlier read tests one of
+    // those refusals instead, and says so, since only the create prints the
+    // was-not-created line this asserts on.
     const store = makeStore();
     try {
         const dir = typeDirPath(store, 'ptype');
@@ -18749,7 +18785,7 @@ test('a type record whose name is taken in the write window is refused', () => {
         const pulled = '# a-fact\n\npulled from the remote\n';
 
         const res = run(store, ['add-type', 'ptype', 'a-fact', 'words', '--body', 'mine'],
-            { NODE_OPTIONS: plantAtLstatPreload(store.root, memPath, pulled, 2) });
+            { NODE_OPTIONS: plantAtLstatPreload(store.root, memPath, pulled, 3) });
         assert.strictEqual(res.status, 1, res.stdout);
         assert.match(res.stderr, /a-fact\.md was not created/);
         assert.strictEqual(fs.readFileSync(memPath, 'utf8'), pulled,
@@ -18769,7 +18805,7 @@ test('an operator record whose name is taken in the write window is refused', ()
         const pulled = '# o-fact\n\npulled from the remote\n';
 
         const res = run(store, ['add-operator', 'o-fact', 'words', '--body', 'mine'],
-            { NODE_OPTIONS: plantAtLstatPreload(store.root, memPath, pulled, 2) });
+            { NODE_OPTIONS: plantAtLstatPreload(store.root, memPath, pulled, 3) });
         assert.strictEqual(res.status, 1, res.stdout);
         assert.match(res.stderr, /o-fact\.md was not created/);
         assert.strictEqual(fs.readFileSync(memPath, 'utf8'), pulled,
@@ -27205,3 +27241,901 @@ test('an installed copy with no prompts directory degrades instead of failing th
             rmStore(store);
         }
     });
+
+// -------------------------------- the authoring verbs' neighbours block -----
+//
+// Before a shared-tier record is written, `add-type` and `add-operator` run the
+// store's own semantic search over the record about to be created and print the
+// nearest neighbours on stderr, labelling any at or above NEIGHBOUR_FLOOR a
+// likely overlap. The block never gates: every case here asserts the record
+// landed as well as what printed.
+//
+// Two conditions skip the check, both keyed on the mere presence of a variable:
+// KIT_MEMORY_ROOT, and KIT_EMBEDDER_ROOT. That is what decides which harness a
+// case may take. The suite's ordinary children carry both, so a case built on
+// `run` prints a skip line and would pass while checking nothing, which reads
+// exactly like a green test of a check that ran. Every case that needs the check
+// to run therefore takes the home-redirected harness above, with the fake
+// embedder installed where a child with no override resolves it (under the
+// redirected home) and the harness's own KIT_EMBEDDER_ROOT blanked. The skips
+// themselves are pinned from the other side, by the two cases that set each
+// variable on purpose.
+
+// The fake embedding stack where a child resolves it with nothing pinning it:
+// memory-index derives that location from the home directory, so a
+// home-redirected store is the one place an install can sit without the
+// variable that makes the block stand down. EMBEDDER_DIR comes from the module
+// rather than being spelled here, so the fixture and the resolver cannot drift.
+// The blank KIT_EMBEDDER_ROOT overrides homeEnv's absent-install default: an
+// empty value is falsy on both readings, the resolver's and the block's.
+const HOME_EMBEDDER = { KIT_EMBEDDER_ROOT: '' };
+
+function installHomeEmbedder(store) {
+    makeFakeEmbedder({ at: path.join(store.root, mi.EMBEDDER_DIR) });
+}
+
+// Every line the block prints about the write promises the check rather than the
+// write, and the promise is spelled once here: refusals still sit between the
+// block and the record (the supersedes pointer's target, the tier lock, and the
+// duplicate and non-record reads taken again under it), so a line promising the
+// write would promise what this part of the command cannot deliver.
+const NO_BLOCK_PROMISE = '; this check does not block the write';
+const OVERLAP_REMEDY = 'memq: a likely overlap is a candidate for --supersedes,'
+    + ' a repair, or a delete' + NO_BLOCK_PROMISE;
+// Each skip line names the variable that fired rather than a condition, because
+// either variable fires it on its own: the honored pair storeSignalsPresent()
+// asks for is not what this branch reads, so a line naming the fleet store
+// signals would state a condition that does not hold in half the states that
+// reach it.
+const PINNED_STORE_SKIP = 'memq: neighbours not checked under a pinned store root'
+    + ' (KIT_MEMORY_ROOT)' + NO_BLOCK_PROMISE;
+const PINNED_EMBEDDER_SKIP = 'memq: neighbours not checked under a pinned embedder root'
+    + ' (KIT_EMBEDDER_ROOT)' + NO_BLOCK_PROMISE;
+
+// The neighbours block as its parts, read out of stderr, which is the only
+// channel it prints on: the heading, the fence line under it where one printed,
+// and the indented hit lines. null where no block printed at all, which is what
+// an --update and every skip produce.
+function neighbourBlock(stderr) {
+    const lines = stderr.split('\n');
+    const at = lines.findIndex((l) => l.startsWith('memq: nearest neighbours of '));
+    if (at === -1) return null;
+    let i = at + 1;
+    const fence = lines[i] === SEMANTIC_FENCE ? lines[i++] : null;
+    const hits = [];
+    for (; i < lines.length && lines[i].startsWith('  '); i++) hits.push(lines[i]);
+    return { heading: lines[at], fence, hits };
+}
+
+// The similarity a block line prints, as a number, so a case can hold it
+// against the module's own floor rather than against a mirrored literal.
+function neighbourScore(line) {
+    const m = / {2}(\d\.\d\d) {2}\(/.exec(line);
+    assert.ok(m !== null, 'the line carries a similarity: ' + line);
+    return Number(m[1]);
+}
+
+// Applied stamps for records of one tier, at distinct days so the boost counts
+// them: the tally reads distinct days, capped at SEMANTIC_BOOST_CAP_DAYS, so ten
+// days is the whole boost a record can carry.
+function stampAppliedDays(dir, names, days) {
+    const lines = [];
+    for (const name of names) {
+        for (let i = 0; i < days; i++) {
+            lines.push(JSON.stringify({
+                ts: daysAgo(40 - i).toISOString(), file: name + '.md', kind: 'applied'
+            }));
+        }
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'usage.jsonl'), lines.join('\n') + '\n', 'utf8');
+}
+
+test('an add-type whose description paraphrases a record of its own tier prints that record'
+    + ' as a likely overlap under the semantic fence, and writes anyway', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        plantAt(store, ['memory-types', 'webapp'], 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n'
+            + 'the web session times out after thirty idle minutes\n');
+        const res = runHome(store, ['add-type', 'webapp', 'idle-session-timeout',
+            'the web session times out after thirty idle minutes'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, 'the block printed: ' + res.stderr);
+        assert.strictEqual(block.heading, 'memq: nearest neighbours of idle-session-timeout');
+        // The fence this channel's hits ride under wherever they print: the
+        // names reach every store and archive on the machine, so the block says
+        // what they are before it prints them.
+        assert.strictEqual(block.fence, SEMANTIC_FENCE,
+            'the hits are fenced: ' + JSON.stringify(res.stderr));
+        assert.strictEqual(block.hits.length, 1, JSON.stringify(block.hits));
+        assert.match(block.hits[0],
+            / {2}session-times-out-after-thirty-idle-minutes {2}\d\.\d\d {2}\(type:webapp\) {2}likely overlap$/,
+            'name, similarity, provenance, label: ' + block.hits[0]);
+        assert.ok(neighbourScore(block.hits[0]) >= memq.NEIGHBOUR_FLOOR,
+            'the labelled score is at or above the floor: ' + block.hits[0]);
+        assert.ok(res.stderr.includes(OVERLAP_REMEDY),
+            'the closing line routes the author: ' + res.stderr);
+
+        // The write is never gated: the overlap is a label on a line, and the
+        // record and its index line land exactly as they do with no neighbour in
+        // the store at all.
+        const dir = path.join(store.root, 'memory-types', 'webapp');
+        assert.ok(fs.existsSync(path.join(dir, 'idle-session-timeout.md')), 'the record landed');
+        assert.match(fs.readFileSync(path.join(dir, 'MEMORY.md'), 'utf8'),
+            /- \[idle-session-timeout\]\(idle-session-timeout\.md\) - the web session times out/,
+            'and so did its index line');
+        // Stderr only: stdout is the success line it always was, and no part of
+        // the block reaches the channel a caller parses.
+        assert.strictEqual(res.stdout,
+            'added idle-session-timeout to type webapp (body 51 chars)\n');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('an add-operator prints neighbours from another tier and another project store with'
+    + ' their provenance', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // One neighbour in each place the check must reach past its own tier: a
+        // type tier, and a project store this project is not. Both are above the
+        // floor, so the labels are asserted individually rather than through a
+        // count a tier-incomplete reader would still satisfy.
+        plantAt(store, ['memory-types', 'webapp'], 'type-tier-twin',
+            '# type-tier-twin\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        plantAt(store, ['projects', 'D--proj-beta', 'memory'], 'other-store-twin',
+            '# other-store-twin\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const res = runHome(store, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, 'the block printed: ' + res.stderr);
+        for (const [name, label] of [['type-tier-twin', '(type:webapp)'],
+            ['other-store-twin', '(project:D--proj-beta)']]) {
+            const line = block.hits.find((l) => l.includes('  ' + name + '  '));
+            assert.ok(line !== undefined, name + ' surfaced: ' + JSON.stringify(block.hits));
+            assert.ok(line.includes(label), name + ' carries ' + label + ': ' + line);
+            assert.ok(line.endsWith('  likely overlap'), name + ' is labelled: ' + line);
+        }
+        assert.ok(res.stderr.includes(OVERLAP_REMEDY), res.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'unsigned-artifacts-are-refused.md')), 'the record landed');
+        assert.strictEqual(res.stdout,
+            'added unsigned-artifacts-are-refused to the operator tier (body 48 chars)\n');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a neighbour the search admits below the floor prints as a line with no label and no'
+    + ' remedy, and the write lands', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The floor labels; it never filters. A regression that dropped hits
+        // below NEIGHBOUR_FLOOR instead of labelling them, or a floor set to
+        // zero, both leave every other case here green, so this is the case that
+        // holds the decision: the author sees the whole page and the word
+        // `likely overlap` is what the number buys.
+        plantAt(store, ['memory-operator'], 'distant-cousin',
+            '# distant-cousin\n\nthe pipeline refuses tuesday parsnips oxide lantern quorum\n');
+        const res = runHome(store, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy verifier rejects an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, res.stderr);
+        const line = block.hits.find((l) => l.includes('  distant-cousin  '));
+        assert.ok(line !== undefined, 'the admitted hit prints: ' + JSON.stringify(block.hits));
+        const score = neighbourScore(line);
+        assert.ok(score < memq.NEIGHBOUR_FLOOR,
+            'the fixture sits below the floor: ' + line);
+        assert.ok(score > 0, 'and above the search\'s own admission floor: ' + line);
+        assert.ok(!line.includes('likely overlap'),
+            'so the line carries no label: ' + line);
+        assert.ok(!res.stderr.includes(OVERLAP_REMEDY),
+            'and the block closes with no remedy: ' + res.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'unsigned-artifacts-are-refused.md')), 'the record landed');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('the block orders by raw similarity, not by the search\'s blended rank', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // Two neighbours a hair apart in similarity, the farther one carrying a
+        // full applied boost: SEMANTIC_APPLIED_BOOST is 0.01 per distinct day
+        // capped at ten days, so the boost is 0.1 and the fixture's gap is under
+        // it. The search's own ranking therefore puts `low` first and this block
+        // must put `high` first, because what it asks is how close two texts are
+        // and an applied tally is no evidence about that.
+        plantAt(store, ['memory-operator'], 'high-alpha-bravo',
+            '# high-alpha-bravo\n\ncharlie delta echo foxtrot zulu\n');
+        plantAt(store, ['memory-operator'], 'low-alpha-bravo',
+            '# low-alpha-bravo\n\ncharlie delta echo foxtrot zulu yankee\n');
+        stampAppliedDays(path.join(store.root, 'memory-operator'), ['low-alpha-bravo'], 10);
+
+        // The search's own order first, so the inversion is read against this
+        // machine's actual arithmetic rather than against an assumption about it.
+        const found = runHome(store, ['find', 'qq alpha bravo charlie delta echo foxtrot'],
+            HOME_EMBEDDER);
+        assert.strictEqual(found.status, 0, found.stderr);
+        const ranked = semanticBlockLines(found.stdout);
+        assert.ok(ranked !== null, found.stdout);
+        const lowRanked = ranked.findIndex((l) => l.includes('  low-alpha-bravo  '));
+        const highRanked = ranked.findIndex((l) => l.includes('  high-alpha-bravo  '));
+        assert.ok(lowRanked !== -1 && highRanked !== -1, JSON.stringify(ranked));
+        assert.ok(lowRanked < highRanked,
+            'the blend puts the boosted record first: ' + JSON.stringify(ranked));
+
+        const res = runHome(store, ['add-operator', 'qq-alpha-bravo-charlie',
+            'delta echo foxtrot'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, res.stderr);
+        const lowAt = block.hits.findIndex((l) => l.includes('  low-alpha-bravo  '));
+        const highAt = block.hits.findIndex((l) => l.includes('  high-alpha-bravo  '));
+        assert.ok(lowAt !== -1 && highAt !== -1, JSON.stringify(block.hits));
+        assert.ok(highAt < lowAt,
+            'the block puts the closer record first: ' + JSON.stringify(block.hits));
+        assert.ok(neighbourScore(block.hits[highAt]) > neighbourScore(block.hits[lowAt]),
+            'and the printed numbers say why: ' + JSON.stringify(block.hits));
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('the nearest record survives a blend-ranked truncation of the ranking', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // A full display page of boosted records, each slightly farther from the
+        // incoming record than the one that matters, plus the nearest record
+        // carrying no stamps at all. The search shows ten hits ranked by blend,
+        // so the nearest record is cut from that page entirely: a block that took
+        // the search's page and re-sorted it would print three of the fillers and
+        // never name the record the author is about to duplicate, which is an
+        // overlap warning naming the wrong records. The order and the cap are
+        // asked of the search ahead of its own cut, so the nearest record leads.
+        const fillers = [];
+        for (let i = 0; i < memq.SEMANTIC_SHOWN + 2; i++) {
+            const name = 'filler-' + String.fromCharCode(97 + i) + 'z-alpha-bravo';
+            fillers.push(name);
+            plantAt(store, ['memory-operator'], name,
+                '# ' + name + '\n\ncharlie delta echo foxtrot zulu yankee\n');
+        }
+        plantAt(store, ['memory-operator'], 'high-alpha-bravo',
+            '# high-alpha-bravo\n\ncharlie delta echo foxtrot zulu\n');
+        stampAppliedDays(path.join(store.root, 'memory-operator'), fillers, 10);
+
+        // The cut, read off the search itself: the nearest record is not on the
+        // page the search shows.
+        const found = runHome(store, ['find', 'qq alpha bravo charlie delta echo foxtrot'],
+            HOME_EMBEDDER);
+        assert.strictEqual(found.status, 0, found.stderr);
+        const ranked = semanticBlockLines(found.stdout);
+        assert.ok(ranked !== null, found.stdout);
+        assert.strictEqual(ranked.length, memq.SEMANTIC_SHOWN, JSON.stringify(ranked));
+        assert.ok(!ranked.some((l) => l.includes('  high-alpha-bravo  ')),
+            'the blend-ranked page cuts the nearest record: ' + JSON.stringify(ranked));
+
+        const res = runHome(store, ['add-operator', 'qq-alpha-bravo-charlie',
+            'delta echo foxtrot'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, res.stderr);
+        assert.strictEqual(block.hits.length, memq.NEIGHBOURS_SHOWN, JSON.stringify(block.hits));
+        // Presence is the whole assertion, and the control above is what gives it
+        // meaning: this record is not on the page the search returns, so a block
+        // fed that page could not name it however it re-sorted afterwards. Which
+        // slot it takes is the other case's question, and the stub embedder's
+        // hash collisions make a filler's exact similarity its own business.
+        assert.ok(block.hits.some((l) => l.includes('  high-alpha-bravo  ')),
+            'the nearest record is in the block the author reads: ' + JSON.stringify(block.hits));
+        const ordered = block.hits.map(neighbourScore);
+        for (let i = 1; i < ordered.length; i++) {
+            assert.ok(ordered[i - 1] >= ordered[i],
+                'and the block is ordered by the number it prints: ' + JSON.stringify(block.hits));
+        }
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a superseded neighbour carries the search\'s own supersession label', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The label is a fact about the tier rather than about the hit: a live
+        // record of the same tier points at this one, so the store already holds
+        // a newer answer and the line has to say so, since a likely overlap with
+        // a record already replaced routes an author to a different remedy.
+        plantAt(store, ['memory-operator'], 'unsigned-artifacts-are-refused',
+            '# unsigned-artifacts-are-refused\n\nthe deploy pipeline refuses an unsigned'
+            + ' artifact\n');
+        plantAt(store, ['memory-operator'], 'newer-answer',
+            '---\nsupersedes: unsigned-artifacts-are-refused\n---\n# newer-answer\n\n'
+            + 'bananas are yellow fruit\n');
+        const res = runHome(store, ['add-operator', 'unsigned-artifact-refusal',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, res.stderr);
+        const line = block.hits.find((l) => l.includes('  unsigned-artifacts-are-refused  '));
+        assert.ok(line !== undefined, JSON.stringify(block.hits));
+        assert.match(line, / {2}\(operator\) {2}superseded {2}likely overlap$/,
+            'the label sits between the provenance and the overlap: ' + line);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a neighbour scoped to another machine carries that scope on its line', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The block adds a judgment that depends on the scope: a record true of
+        // another box is not a fact this author overlaps with, so a line calling
+        // it a likely overlap while omitting the scope reads as a local
+        // duplicate. The local name is resolved at runtime by the CLI, so the
+        // fixture resolves it the same way rather than hard-coding this box's.
+        plantAt(store, ['memory-operator'], 'foreign-twin',
+            '---\nmachine: other-box\n---\n# foreign-twin\n\nthe deploy pipeline refuses an'
+            + ' unsigned artifact\n');
+        plantAt(store, ['memory-operator'], 'local-twin',
+            '---\nmachine: ' + os.hostname() + '\n---\n# local-twin\n\nthe deploy pipeline'
+            + ' refuses an unsigned artifact\n');
+        const res = runHome(store, ['add-operator', 'unsigned-artifact-refusal',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, res.stderr);
+        const foreign = block.hits.find((l) => l.includes('  foreign-twin  '));
+        const local = block.hits.find((l) => l.includes('  local-twin  '));
+        assert.ok(foreign !== undefined && local !== undefined, JSON.stringify(block.hits));
+        assert.ok(foreign.includes('  machine:other-box'), 'the foreign scope prints: ' + foreign);
+        assert.ok(!local.includes('machine:'), 'and this box is not labelled: ' + local);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('an add the search finds no neighbour for prints the heading, no fence and no lines,'
+    + ' and writes', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // A store that is not empty and holds nothing the floor admits: the
+        // heading with nothing under it is the answer, and it is a different
+        // answer from a check that did not run, which every skip pins by its own
+        // line. No fence either, there being no indented line to frame.
+        plantAt(store, ['memory-operator'], 'yellow-fruit',
+            '# yellow-fruit\n\nbananas are yellow fruit\n');
+        const res = runHome(store, ['add-operator', 'zebra-quantum-fact',
+            'zebra quantum entanglement calibration'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, 'the heading printed: ' + res.stderr);
+        assert.strictEqual(block.hits.length, 0, JSON.stringify(block.hits));
+        assert.strictEqual(block.fence, null, 'no fence over nothing: ' + res.stderr);
+        assert.ok(!res.stderr.includes(OVERLAP_REMEDY),
+            'and no closing line, nothing being labelled: ' + res.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'zebra-quantum-fact.md')), 'the record landed');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a retired near-duplicate is counted at the overlap floor, and one below that floor is'
+    + ' not counted at all', (t) => {
+    const near = makeHomeStore();
+    const far = makeHomeStore();
+    try {
+        if (!homeRedirected(near)) return t.skip(HOME_REDIRECT_SKIP);
+        for (const store of [near, far]) installHomeEmbedder(store);
+        // The archive is withheld from the lines, a retired record being no
+        // reason to hold a write, and the count still has to be said: a bare
+        // heading is this surface's reading for a store holding nothing like
+        // this record, and a store whose only near-duplicate is retired would
+        // otherwise borrow it.
+        plantAt(near, ['memory-operator', 'archive'], 'retired-twin',
+            '# retired-twin\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const res = runHome(near, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null, res.stderr);
+        assert.strictEqual(block.hits.length, 0,
+            'the retired record is not listed: ' + JSON.stringify(block.hits));
+        const counted = res.stderr.split('\n')
+            .find((l) => l.startsWith('memq: 1 retired record(s) also match'));
+        assert.ok(counted !== undefined, 'and it is counted: ' + res.stderr);
+        // The floor the count was taken at is the one the lines above label an
+        // overlap at, and the line names it: a count taken at the search's
+        // admission floor instead would promise overlaps this block's own
+        // standard never found, and nothing on screen would reconcile the two.
+        assert.ok(counted.includes('at or above the overlap floor ('
+            + memq.NEIGHBOUR_FLOOR.toFixed(2) + ')'),
+        'the line names the floor it used: ' + counted);
+
+        // The other direction, which is the whole of what the floor buys here: a
+        // retired record the search admits but the floor does not is no overlap,
+        // so it is not counted. The fixture is the pair the live below-floor case
+        // uses, retired instead of live, so the two cases hold the same distance
+        // against the same floor from either side of the archive.
+        plantAt(far, ['memory-operator', 'archive'], 'retired-cousin',
+            '# retired-cousin\n\nthe pipeline refuses tuesday parsnips oxide lantern quorum\n');
+        const admits = runHome(far, ['find', '--archived', 'the deploy verifier rejects'
+            + ' an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(admits.status, 0, admits.stderr);
+        assert.ok(admits.stdout.includes('retired-cousin'),
+            'the fixture is admitted by the search at all: ' + admits.stdout);
+        const below = runHome(far, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy verifier rejects an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(below.status, 0, below.stderr);
+        assert.ok(neighbourBlock(below.stderr) !== null, below.stderr);
+        assert.ok(!below.stderr.includes('retired record(s) also match'),
+            'a retired record below the floor is not counted: ' + below.stderr);
+        for (const store of [near, far]) {
+            assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+                'unsigned-artifacts-are-refused.md')), 'the record landed either way');
+        }
+    } finally {
+        rmHomeStore(near);
+        rmHomeStore(far);
+    }
+});
+
+test('an --update prints no neighbours block at all', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const created = runHome(store, ['add-operator', 'idle-session-timeout',
+            'the web session times out after thirty idle minutes'], HOME_EMBEDDER);
+        assert.strictEqual(created.status, 0, created.stderr);
+        // The record now in the store is the closest thing there is to the
+        // repair's own text, so a check on this path would rank the record
+        // against itself; it runs on the creation path alone.
+        const res = runHome(store, ['add-operator', 'idle-session-timeout',
+            'the web session times out after thirty idle minutes, exactly', '--update'],
+        HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null, res.stderr);
+        assert.ok(!res.stderr.includes('neighbours not checked'),
+            'and no line about a check that had nothing to say: ' + res.stderr);
+        assert.strictEqual(res.stdout, 'updated idle-session-timeout in the operator tier\n');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a name the tier already holds is refused before the block runs, so nothing promises'
+    + ' a write that will not happen', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const created = runHome(store, ['add-operator', 'idle-session-timeout',
+            'the web session times out after thirty idle minutes'], HOME_EMBEDDER);
+        assert.strictEqual(created.status, 0, created.stderr);
+        // Re-adding the name: the record the search would rank first is that
+        // record itself, near 1.00 and labelled a likely overlap, over a name
+        // this command is about to refuse. The refusal answers first instead, so
+        // no page of overlap advice prints for a record nobody is writing.
+        const res = runHome(store, ['add-operator', 'idle-session-timeout',
+            'a second description entirely'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 1, res.stderr);
+        assert.ok(res.stderr.includes('already exists in the operator tier'),
+            'the duplicate refusal is what answers: ' + res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null,
+            'and no neighbours were printed: ' + res.stderr);
+        assert.ok(!res.stderr.includes(NO_BLOCK_PROMISE)
+            && !res.stderr.includes('the write proceeds'),
+        'nor any line of the block about a write, under either wording: ' + res.stderr);
+        assert.strictEqual(res.stdout, '');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('with the embedder absent the add says the neighbours were not checked, in find\'s own'
+    + ' cause and remedy, and the write lands', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        // No install anywhere this child resolves: no pinned root, and nothing
+        // under the redirected home.
+        plantAt(store, ['memory-operator'], 'yellow-fruit',
+            '# yellow-fruit\n\nbananas are yellow fruit\n');
+        const res = runHome(store, ['add-operator', 'zebra-quantum-fact',
+            'zebra quantum entanglement calibration'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null,
+            'no heading over a ranking that does not exist: ' + res.stderr);
+        const line = res.stderr.split('\n')
+            .find((l) => l.startsWith('memq: neighbours not checked ('));
+        assert.ok(line !== undefined, 'the degrade line printed: ' + res.stderr);
+        assert.ok(line.includes('(the local embedding stack is not installed)'),
+            'it names the condition: ' + line);
+        assert.ok(line.endsWith(NO_BLOCK_PROMISE), line);
+        // The cause and the remedy are the search's own strings rather than a
+        // second spelling of them: a find against this same store says the same
+        // two things, and a drift in either would fail here.
+        const found = runHome(store, ['find', 'zebra quantum'], HOME_EMBEDDER);
+        const off = found.stderr.split('\n')
+            .find((l) => l.startsWith('memq: semantic search off ('));
+        assert.ok(off !== undefined, 'find degrades too: ' + found.stderr);
+        assert.ok(line.includes('(' + /off \((.*?)\); serving/.exec(off)[1] + ')'),
+            'one cause across both surfaces: ' + line + ' / ' + off);
+        assert.ok(line.includes('; remedy: ' + /\. remedy: (.*)$/.exec(off)[1] + ';'),
+            'one remedy across both surfaces: ' + line + ' / ' + off);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'zebra-quantum-fact.md')), 'the record landed');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+// Whether the ranking pass ran, read off the one thing it does before it reads
+// anything else: the local machine name, which this whole file asks for exactly
+// once and only there, above the loop that resolves each hit's provenance. The
+// pass sits behind the channel's cancellation point, so a marker printed under a
+// query that was abandoned is the abandoned ranking carrying on. The control in
+// the case below prints it, which is what makes its absence a reading rather
+// than a silence. Patched in the child for the reason every fs-layer fault here
+// is, and forward-slashed because Node reads a backslash in NODE_OPTIONS as an
+// escape.
+const RANKING_PASS_MARKER = 'fixture: the ranking pass ran';
+
+function reportRankingPassPreload(dir) {
+    const shim = path.join(dir, 'report-ranking-pass.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        "const os = require('os');",
+        'const realHostname = os.hostname;',
+        'os.hostname = function () {',
+        '    process.stderr.write(' + JSON.stringify(RANKING_PASS_MARKER + '\n') + ');',
+        '    return realHostname.apply(os, arguments);',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+test('a search that does not answer inside its budget still lets the record land, and the'
+    + ' abandoned search stops rather than ranking for nobody', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The stub hangs on any text carrying the marker, which the query does
+        // because the description does: a write cannot wait on a read's clock,
+        // and without the bound the record does not exist until the embedder
+        // answers, with a Ctrl-C losing it. This case is deliberately as slow as
+        // the bound, since what it pins is the bound. The stub answers shortly
+        // after the bound rather than never, which is what lets the same run
+        // report what the abandoned search did with its answer.
+        const res = runHome(store, ['add-operator', 'slow-embedder-fact',
+            'HANGVEC the local stack never answers'],
+        { ...HOME_EMBEDDER, NODE_OPTIONS: reportRankingPassPreload(store.home) });
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null, res.stderr);
+        assert.ok(res.stderr.includes('memq: neighbours not checked (the search did not answer'
+            + ' within ' + memq.NEIGHBOUR_TIMEOUT_MS + 'ms)' + NO_BLOCK_PROMISE),
+        'the expiry names the bound: ' + res.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'slow-embedder-fact.md')), 'and the record landed anyway');
+        assert.strictEqual(res.stdout,
+            'added slow-embedder-fact to the operator tier (body 37 chars)\n');
+        // The expiry cancels the check as well as ending the wait: when the
+        // embedder finally answers, the ranking this file owns is not done for a
+        // block that has already printed its line. What the cancellation cannot
+        // reach is the embedder load and the store sweep inside memory-index,
+        // which take no signal, so this is a reading of the part that is
+        // cancellable and not of the whole cost.
+        assert.ok(!res.stderr.includes(RANKING_PASS_MARKER),
+            'the abandoned ranking never started: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('the ranking pass a cancelled search skips is the one an answered search runs', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The control the case above rests on. Same store, same preload, a query
+        // the stub answers inside the bound: the marker prints, so the instrument
+        // reports a ranking pass that ran, and the silence above is the
+        // cancellation rather than a patch that never fired.
+        plantAt(store, ['memory-operator'], 'twin-note',
+            '# twin-note\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const res = runHome(store, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'],
+        { ...HOME_EMBEDDER, NODE_OPTIONS: reportRankingPassPreload(store.home) });
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.ok(res.stderr.includes(RANKING_PASS_MARKER),
+            'the ranking pass reports itself when it runs: ' + res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null && block.hits.length === 1,
+            'and it produced the block: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+// Make the block throw where nothing else can reach it: the first write of its
+// heading. That write sits after the channel has answered and inside the printing
+// the guard exists for, so a throw there is the block failing at its own
+// formatting rather than the channel failing at the embedder, which every other
+// case here already covers by its own line. Injected in the child because the
+// block's printing has no seam a fixture can reach from outside, the same reason
+// the fs-layer faults elsewhere in this suite are injected rather than provoked.
+// The patch fires once, so the guard's own line reaches the real stream. The
+// preload path is forward-slashed because Node parses NODE_OPTIONS with
+// backslash as an escape character.
+const BLOCK_WRITE_FAILURE = 'the fixture refuses this write';
+
+function throwOnBlockHeadingPreload(dir) {
+    const shim = path.join(dir, 'throw-on-block-heading.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        'const realWrite = process.stderr.write;',
+        'let fired = false;',
+        'process.stderr.write = function (chunk) {',
+        '    if (!fired && typeof chunk === \'string\''
+            + ' && chunk.startsWith(\'memq: nearest neighbours of \')) {',
+        '        fired = true;',
+        '        throw new Error(' + JSON.stringify(BLOCK_WRITE_FAILURE) + ');',
+        '    }',
+        '    return realWrite.apply(process.stderr, arguments);',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+test('a block that throws while printing costs the author the block and not the record', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // A store with a neighbour above the floor, so the run reaches the
+        // heading with a ranking in hand: what fails here is the block's own
+        // printing, at the point where a healthy run would start putting the
+        // author's answer on screen.
+        plantAt(store, ['memory-operator'], 'twin-note',
+            '# twin-note\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const res = runHome(store, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'],
+        { ...HOME_EMBEDDER, NODE_OPTIONS: throwOnBlockHeadingPreload(store.home) });
+
+        // The guard's line, naming the failure it caught: the promise that a
+        // broken check never costs a write is only worth what this case is worth,
+        // every other path here being one the channel answers for.
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.ok(res.stderr.includes('memq: neighbours not checked (the check failed: '
+            + BLOCK_WRITE_FAILURE + ')' + NO_BLOCK_PROMISE),
+        'the guard says what failed: ' + res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null,
+            'and no half-printed block stands in for a ranking: ' + res.stderr);
+
+        // The record and its index line, which is the whole point of the guard.
+        const dir = path.join(store.root, 'memory-operator');
+        assert.ok(fs.existsSync(path.join(dir, 'unsigned-artifacts-are-refused.md')),
+            'the record landed: ' + res.stderr);
+        assert.match(fs.readFileSync(path.join(dir, 'MEMORY.md'), 'utf8'),
+            /- \[unsigned-artifacts-are-refused\]\(unsigned-artifacts-are-refused\.md\) - /,
+            'and its index line with it');
+        assert.strictEqual(res.stdout,
+            'added unsigned-artifacts-are-refused to the operator tier (body 48 chars)\n');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('an index the sweep cannot persist is reported in this caller\'s terms, and not at all'
+    + ' where there was nothing to persist', (t) => {
+    const withRecords = makeHomeStore();
+    const empty = makeHomeStore();
+    try {
+        if (!homeRedirected(withRecords)) return t.skip(HOME_REDIRECT_SKIP);
+        for (const store of [withRecords, empty]) {
+            installHomeEmbedder(store);
+            // A directory where the index file goes: the sweep answers and the
+            // persist fails, which is the state the note exists for.
+            fs.mkdirSync(path.join(store.root, 'memory-index.jsonl'), { recursive: true });
+        }
+        plantAt(withRecords, ['memory-operator'], 'twin-note',
+            '# twin-note\n\nthe deploy pipeline refuses an unsigned artifact\n');
+
+        const res = runHome(withRecords, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const note = res.stderr.split('\n')
+            .find((l) => l.startsWith('memq: could not persist the semantic index'));
+        assert.ok(note !== undefined, 'the failure is reported: ' + res.stderr);
+        assert.ok(note.endsWith('these neighbours are complete, and the next command that needs'
+            + ' the index sweeps again'), 'in this caller\'s terms: ' + note);
+        assert.ok(!note.includes('the next find sweeps again'),
+            'not in a find\'s: ' + note);
+
+        // The same failure with nothing swept says nothing: a store with no
+        // records is the ordinary state of a first shared-tier write, and an
+        // error above the heading of a wholly healthy write is noise.
+        const first = runHome(empty, ['add-operator', 'first-record-here',
+            'the very first fact this store holds'], HOME_EMBEDDER);
+        assert.strictEqual(first.status, 0, first.stderr);
+        assert.ok(!first.stderr.includes('could not persist'),
+            'nothing to persist, nothing said: ' + first.stderr);
+        assert.ok(first.stderr.includes('memq: nearest neighbours of first-record-here'),
+            'and the block itself still printed: ' + first.stderr);
+    } finally {
+        rmHomeStore(withRecords);
+        rmHomeStore(empty);
+    }
+});
+
+test('under the engine store signals the check is skipped with a line, and the write lands', () => {
+    const store = makeStore();
+    const emb = makeFakeEmbedder();
+    try {
+        // The embedder is installed and reachable, so the skip is the signals'
+        // doing rather than an absent stack: the grant that lets a fleet worker
+        // run this verb withholds `find` for the embedder load, and an in-process
+        // load inside a granted verb would route around that.
+        plantAt(store, ['memory-operator'], 'twin-note',
+            '# twin-note\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const res = run(store, ['add-operator', 'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'], withEmbedder(emb));
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.ok(res.stderr.includes(PINNED_STORE_SKIP), 'the skip line printed: ' + res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null,
+            'and no ranking was printed: ' + res.stderr);
+        assert.ok(!res.stderr.includes('semantic'),
+            'nor any line from a channel that was never called: ' + res.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'unsigned-artifacts-are-refused.md')), 'the record landed');
+        assert.strictEqual(res.stdout,
+            'added unsigned-artifacts-are-refused to the operator tier (body 48 chars)\n');
+    } finally {
+        rmFakeEmbedder(emb);
+        rmStore(store);
+    }
+});
+
+test('the skip is no narrower than the grant: a store root with no data signal beside it,'
+    + ' and a pinned embedder root, each skip on their own', (t) => {
+    const store = makeHomeStore();
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-skip-'));
+    const emb = makeFakeEmbedder();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+
+        // The grant is decided in the hook's process over the hook's own
+        // environment, and this check runs in the child. The Bash tool's shell
+        // persists across calls, so a variable an earlier call exported is in the
+        // child's block and not in the hook's: a granted add whose shell has
+        // since dropped KIT_MEMORY_ROOT_ALLOW_DATA would otherwise load the
+        // embedder out of a home-derived directory, which is the reach the verb
+        // list withholds find for.
+        //
+        // The environment is the harness's, so this case's writes are kept off
+        // the operator's real store by the same redirect the precondition above
+        // probed, and the store signal is set on the built block rather than
+        // handed through extra: the builder refuses a store signal in extra
+        // because one passed that way would move the store out from under that
+        // precondition, and here the signal carries no data gate, so it moves
+        // nothing. What it does is make the child's environment name a store
+        // root, which is the whole subject of this half. The data gate needs no
+        // deleting, the builder dropping every casing of it already.
+        //
+        // The root named is deliberately not the store the redirected home
+        // derives: an ungated signal that was honored anyway would put the record
+        // under this path instead, so the two assertions below read the skip and
+        // the unhonored signal separately rather than sharing one directory that
+        // would satisfy either outcome.
+        const unhonouredRoot = path.join(fakeHome, 'named-but-ungated');
+        const env = homeChildEnv(store, HOME_EMBEDDER);
+        env.KIT_MEMORY_ROOT = unhonouredRoot;
+        const halfSignalled = spawnSync(process.execPath,
+            [MEMQ, 'add-operator', 'half-signalled-fact', 'a store root and no data signal'],
+            { cwd: store.proj, encoding: 'utf8', env });
+        assert.strictEqual(halfSignalled.status, 0, halfSignalled.stderr);
+        assert.ok(halfSignalled.stderr.includes(PINNED_STORE_SKIP),
+            'a store root alone is enough to skip: ' + halfSignalled.stderr);
+        assert.strictEqual(neighbourBlock(halfSignalled.stderr), null, halfSignalled.stderr);
+        // Where the record landed is the second half of the reading: the store
+        // signal was not honored, so the write went to the store the redirected
+        // home derives, which is this fixture's own and not the operator's.
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'half-signalled-fact.md')), 'and the record landed in the store it resolved');
+        assert.ok(!fs.existsSync(path.join(unhonouredRoot, 'memory-operator')),
+            'not in the root the ungated signal named: ' + unhonouredRoot);
+
+        // The other half: an embedder root pinned by variable is code loaded from
+        // a directory the command line does not name, which is the same reach
+        // whatever the store signals say.
+        const pinned = runHome(store, ['add-operator', 'pinned-embedder-fact',
+            'an embedder root pinned by variable'], withEmbedder(emb));
+        assert.strictEqual(pinned.status, 0, pinned.stderr);
+        assert.ok(pinned.stderr.includes(PINNED_EMBEDDER_SKIP),
+            'the pinned root skips on its own: ' + pinned.stderr);
+        assert.strictEqual(neighbourBlock(pinned.stderr), null, pinned.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'pinned-embedder-fact.md')), 'and that record landed too');
+
+        // The other direction, so neither line is a skip that fires everywhere:
+        // with neither variable set the same store runs the check.
+        const checked = runHome(store, ['add-operator', 'checked-fact',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(checked.status, 0, checked.stderr);
+        assert.ok(neighbourBlock(checked.stderr) !== null,
+            'with neither variable the check runs: ' + checked.stderr);
+        assert.ok(!checked.stderr.includes('not checked'), checked.stderr);
+    } finally {
+        rmFakeEmbedder(emb);
+        rmHome(fakeHome);
+        rmHomeStore(store);
+    }
+});
+
+test('an add sends nothing to the model endpoint, on a store where a find does', async (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The judged channel is configured and live for the whole of this case,
+        // in the same home the store resolves out of. The neighbours check is the
+        // local semantic channel and nothing else, so an author's record name and
+        // description never leave the machine, and the request log is what says
+        // so: empty against a server that is listening and that the control
+        // below, on this same store and build, does reach.
+        const server = await rankingEndpoint(t, () => rankedAnswer([]));
+        fs.mkdirSync(path.join(store.root), { recursive: true });
+        fs.writeFileSync(path.join(store.root, 'kit-endpoint.json'),
+            JSON.stringify({ url: server.url, model: 'test-model' }), 'utf8');
+        plantAt(store, ['memory-operator'], 'twin-note',
+            '# twin-note\n\nthe deploy pipeline refuses an unsigned artifact\n');
+
+        const res = await runHomeServed(store, ['add-operator',
+            'unsigned-artifacts-are-refused',
+            'the deploy pipeline refuses an unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null && block.hits.length === 1,
+            'the local check ran and answered: ' + res.stderr);
+        assert.strictEqual(server.requests.length, 0,
+            'nothing crossed the wire: ' + JSON.stringify(server.requests));
+        assert.ok(!res.stderr.includes('model-judged'),
+            'and no line about a channel an authoring verb never calls: ' + res.stderr);
+
+        // The control that gives the empty log its meaning: the same store, the
+        // same home, the same server, reached by the one verb that does rank
+        // through the model.
+        const found = await runHomeServed(store, ['find', 'unsigned artifact'], HOME_EMBEDDER);
+        assert.strictEqual(found.status, 0, found.stderr);
+        assert.ok(server.requests.length > 0,
+            'the endpoint is reachable from this fixture: ' + found.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});

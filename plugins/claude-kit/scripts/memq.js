@@ -519,6 +519,44 @@ const SEMANTIC_BOOST_CAP_DAYS = 10;    // days the boost counts, so no tally can
 const SEMANTIC_ARCHIVE_DEMOTION = 0.1; // rank subtracted from a retired record
 const SEMANTIC_SUPERSEDED_DEMOTION = 0.1; // rank subtracted from a superseded record
 
+// The similarity at or above which the authoring verbs call a neighbour a
+// likely overlap, on the block they print before a shared-tier record is
+// written. It labels and never gates: the block prints its lines whatever the
+// scores and the write proceeds either way, so a floor set too low costs a
+// word on a line the author already sees rather than a refused write.
+//
+// A seed rather than a measurement, and clear of both readings it sits
+// between: the semantic module's own known-answer control scores a paraphrase
+// near 0.26, and a duplicate pair this store holds scores near 0.59. It is
+// retuned at a decay pass with a pairs block to read, which is where the
+// store's own distribution can be seen, in the way the decay thresholds beside
+// it are tuned.
+const NEIGHBOUR_FLOOR = 0.30;          // similarity at or above which a neighbour reads as an overlap
+const NEIGHBOURS_SHOWN = 3;            // neighbour lines the authoring block prints
+
+// How long the neighbours block waits for the search before it gives up and
+// says so. The judged channel's two timeouts are the precedent, and the reason
+// this bound exists at all is that a write cannot pay what a read can: `find`
+// answers nothing until the embedder does, so a slow stack costs a searcher
+// time and no more, while the same wait sits between an author and a record
+// that does not exist yet, on a command that has no way to decline the check.
+// A Ctrl-C there loses the record.
+//
+// Well past a healthy cold start (the load of a local model dominates the
+// figure and is measured in seconds) and well inside the patience of someone
+// who typed one command. What the bound buys is the record: at expiry the
+// block prints its not-checked line and the write goes through.
+//
+// Expiry cancels the check as well as ending the wait, and the cancellation
+// reaches exactly as far as this file's own work: the channel drops out at its
+// resumption point, so the frontmatter read per hit, the tally, the
+// supersession lookups and the sort are never done for a ranking nobody will
+// read. The embedder load and the store sweep behind it are memory-index's,
+// which takes no cancellation signal, so that work runs to completion with no
+// consumer and can hold the process open past the expiry line; by then the
+// record is on disk, which is the part that was at risk.
+const NEIGHBOUR_TIMEOUT_MS = 20000;    // the bound on this process's wait, not on the load and sweep
+
 // The store root this process reads and writes under.
 //
 // KIT_MEMORY_ROOT is honored only when KIT_MEMORY_ROOT_ALLOW_DATA=1 is also
@@ -5613,6 +5651,40 @@ function supersedesForTier(cache, liveTier, store) {
 // notes: never a throw and never a nonzero exit, because whatever the
 // embedder's condition, the caller still owes its lexical results.
 //
+// `options` is how a second caller asks for a different reading of the same
+// ranking, and it exists because the truncation is not a display detail. The
+// admission floor is 0.1 and a mature tier holds hundreds of records, so far
+// more hits clear admission than any caller shows, and the blend can move a
+// live hit by up to the applied boost plus the supersession demotion. A caller
+// that ordered the returned page by raw score would therefore be ordering
+// whatever survived a blend-ranked cut, and the single nearest record can sit
+// below that cut while records less like the query fill the page: for a caller
+// whose whole output is an overlap warning, that is a warning naming the wrong
+// records, which is worse than none. So the order and the cap are asked for
+// together, before the cut, or not at all. `rawOrder` ranks by similarity alone
+// and `limit` sets the page; `find` passes neither and its output is unchanged.
+//
+// `off` is the same degradation the notes carry, in parts rather than in a
+// sentence: null when the channel answered, and otherwise the cause and the
+// remedy this channel would name for it. It exists because a second caller
+// (the authoring verbs' neighbours block) has to say the same condition in
+// its own words, no lexical results being served there, and a caller that
+// recomposed the cause by hand would be a second spelling of the embedder's
+// condition that could drift from this one and from the doctor's.
+//
+// `signal` is how a caller under a clock stops paying for a ranking it will
+// never print, the shape kit-endpoint-lib's timeout path takes: the caller owns
+// the controller and the deadline, and an aborted signal drops the work this
+// function has left rather than finishing it for a reader who has gone. It is
+// read once, at the resumption after memory-index answers, so an abort arriving
+// earlier is acted on at that point and not before, and that point is where
+// every remaining cost of this function sits: the ranking below reads
+// frontmatter, applied tallies and
+// supersession pointers per hit across every store on the machine. What the
+// signal cannot reach is memory-index's own embedder load and store sweep,
+// which take no cancellation of any kind, so an abandoned query still runs
+// there to completion.
+//
 // The require of memory-index.js is lazy and rides after an await, both
 // deliberately. memory-index requires this module back for the store's
 // shape, and this file assigns module.exports at its bottom, after main()
@@ -5622,8 +5694,16 @@ function supersedesForTier(cache, liveTier, store) {
 // which drains only after this file finishes evaluating, so by the time the
 // require runs the export object is the real one. Lazy also keeps every
 // non-find command from loading a module it never uses.
-async function semanticChannel(term, tag, alreadyShown, showArchived) {
+async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
     await null;
+    const opts = options || {};
+    // Both defaults are find's, so a caller that passes nothing gets exactly
+    // what shipped before this parameter existed. A limit is taken only as a
+    // positive integer: anything else is a caller bug, and silently ranking a
+    // whole mature tier into one block is the wrong way to report one.
+    const displayCap = Number.isInteger(opts.limit) && opts.limit > 0
+        ? opts.limit : SEMANTIC_SHOWN;
+    const byRawScore = opts.rawOrder === true;
     let mi;
     let result;
     try {
@@ -5638,12 +5718,33 @@ async function semanticChannel(term, tag, alreadyShown, showArchived) {
         // memory-index answers every expected embedder condition as a typed
         // status, so a throw here is a genuine bug in the optional stack; it
         // still degrades, because absence-or-breakage never fails a find.
+        const cause = failureText(err);
         return {
             notes: ['memq: semantic search failed ('
-                + failureText(err)
+                + cause
                 + '); serving lexical matches only'],
             hits: [],
-            withheld: null
+            withheld: null,
+            off: { reason: 'the semantic search failed: ' + cause, remedy: null }
+        };
+    }
+    // The cancellation point, read here because everything below is this
+    // function's own cost and there is no reader left to pay it for: a caller
+    // whose signal is aborted has already printed whatever it says instead of
+    // this ranking. The returned shape is a whole one all the same, off carrying
+    // the abandonment the way it carries an absent embedder, so a caller that
+    // did keep the promise around reads a result rather than a hole. No caller
+    // does today: the only one that passes a signal is the neighbours block,
+    // which prints its own expiry line and never reads what the race lost. The
+    // payload is built for the caller that will, so nobody hunting for its
+    // consumer has to conclude the branch is dead.
+    if (opts.signal && opts.signal.aborted) {
+        return {
+            notes: [],
+            hits: [],
+            withheld: null,
+            off: { reason: 'the search was abandoned before it answered', remedy: null },
+            sweep: null
         };
     }
     if (result.status === 'absent' || result.status === 'unusable') {
@@ -5653,22 +5754,25 @@ async function semanticChannel(term, tag, alreadyShown, showArchived) {
         const reason = result.status === 'absent'
             ? 'the local embedding stack is not installed'
             : 'the local embedding stack is installed but unusable';
-        const remedy = result.embedder && result.embedder.remedy
-            ? result.embedder.remedy : mi.INSTALL_REMEDY;
+        const remedy = sanitize(result.embedder && result.embedder.remedy
+            ? result.embedder.remedy : mi.INSTALL_REMEDY, 200);
         return {
             notes: ['memq: semantic search off (' + reason
-                + '); serving lexical matches only. remedy: ' + sanitize(remedy, 200)],
+                + '); serving lexical matches only. remedy: ' + remedy],
             hits: [],
-            withheld: null
+            withheld: null,
+            off: { reason, remedy }
         };
     }
     if (result.status !== 'ok') {
+        const cause = sanitize(result.detail
+            || 'the embedder returned no vector for the query', 200);
         return {
             notes: ['memq: semantic search failed ('
-                + sanitize(result.detail || 'the embedder returned no vector for the query', 200)
-                + '); serving lexical matches only'],
+                + cause + '); serving lexical matches only'],
             hits: [],
-            withheld: null
+            withheld: null,
+            off: { reason: 'the semantic search failed: ' + cause, remedy: null }
         };
     }
 
@@ -5778,14 +5882,17 @@ async function semanticChannel(term, tag, alreadyShown, showArchived) {
             tierOrder: mi.TIERS.indexOf(h.tier)
         });
     }
-    // Blend descending, then the index's own tier, store, and name order, so
-    // equal blends print in one order however the pool arrived.
-    admitted.sort((a, b) => b.rank - a.rank
+    // Blend descending by default, or raw similarity where the caller asked for
+    // it, then the index's own tier, store, and name order, so equal keys print
+    // in one order however the pool arrived. The chosen key runs before the cap
+    // below, which is the whole point of asking for the order here rather than
+    // re-sorting a returned page.
+    admitted.sort((a, b) => (byRawScore ? b.score - a.score : b.rank - a.rank)
         || a.tierOrder - b.tierOrder
         || (a.store < b.store ? -1 : a.store > b.store ? 1 : 0)
         || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     // Archive suppression runs after admission and ranking, and before the
-    // SEMANTIC_SHOWN slice, so a live hit fills the display slot an archived
+    // display slice, so a live hit fills the display slot an archived
     // one would otherwise have taken: the admission floor, the cross-channel
     // dedupe, the recordPath resolution, and the tag filter have all already
     // run by this point, and suppression is one more filter over that same
@@ -5806,26 +5913,54 @@ async function semanticChannel(term, tag, alreadyShown, showArchived) {
     // floor admits far more than the cap shows, so the line states both
     // whenever they differ rather than picking one and quietly losing the
     // other.
+    //
+    // `atOverlapFloor` is a third count, over the same archived set at
+    // NEIGHBOUR_FLOOR instead of at admission, and it exists because a caller
+    // whose whole notion of a match is that floor cannot derive it from a total
+    // taken at SEMANTIC_FLOOR: the two answer different questions, and a count
+    // of records the admission floor let through, printed under lines labelled
+    // at the overlap floor, promises an overlap the block's own standard would
+    // not find. It is counted here rather than by the caller because the
+    // archived hits and their raw scores never leave this function.
     let withheld = null;
     let visible = admitted;
     if (!showArchived) {
         const kept = [];
         let total = 0;
+        let atOverlapFloor = 0;
         for (const a of admitted) {
-            if (a.archived) total += 1;
-            else kept.push(a);
+            if (a.archived) {
+                total += 1;
+                if (a.score >= NEIGHBOUR_FLOOR) atOverlapFloor += 1;
+            } else kept.push(a);
         }
         let shown = 0;
         let best = -Infinity;
-        for (const a of admitted.slice(0, SEMANTIC_SHOWN)) {
+        for (const a of admitted.slice(0, displayCap)) {
             if (!a.archived) continue;
             shown += 1;
             if (a.score > best) best = a.score;
         }
         visible = kept;
-        if (total > 0) withheld = { shown, best, total };
+        if (total > 0) withheld = { shown, best, total, atOverlapFloor };
     }
-    return { notes, hits: visible.slice(0, SEMANTIC_SHOWN), withheld };
+    return {
+        notes,
+        hits: visible.slice(0, displayCap),
+        withheld,
+        off: null,
+        // The sweep behind this ranking, in parts, for the same reason `off` is
+        // in parts: the notes above are worded for a find, and a caller that
+        // serves no lexical results and never runs a second find has to say the
+        // same two facts in its own words.
+        sweep: {
+            failed: failedCount,
+            carried: carriedCount,
+            records: swept && Array.isArray(swept.records) ? swept.records.length : 0,
+            writeError: swept && swept.written === false && swept.writeError
+                ? sanitize(swept.writeError, 200) : null
+        }
+    };
 }
 
 // One displayed line per semantic hit, indented under the channel's fence:
@@ -13689,6 +13824,253 @@ function removeUsageStamps(dir, file, options) {
     return removed + removedFromTail;
 }
 
+// The neighbours block the two authoring verbs print before a shared-tier
+// record is written: the store's own semantic search, run over the record
+// about to be created, so an author writing a fact the store already holds
+// sees the records that hold it while they are still the author. Without it
+// the only duplicate check on this path is an exact filename collision, so a
+// record that says what an existing record says is written against the
+// author's recall rather than against the store, and the overlap is found
+// later by a reader who happened to search first, or never.
+//
+// Warn, never gate. Every path here ends with the write proceeding and says
+// so on its own line, because the alternative is a refusal keyed on a
+// similarity nobody has measured against this store's distribution: the
+// block's job is to put the neighbours in front of the author, and whether one
+// of them is the same fact is the author's judgment.
+//
+// Where there is no ranking to print, a line prints in its place and names why
+// rather than going quiet, since a silent block cannot be told apart from a
+// store holding no neighbours, which is the one reading this surface exists to
+// prevent. The conditions, each with its own line:
+//   - the embedder is absent, unusable, or answered nothing: the channel's own
+//     cause and remedy, reshaped because no lexical matches are served here.
+//     `find` degrades into its lexical block and this caller has nothing to
+//     degrade into, so the sentence that fits there does not fit here, and the
+//     parts are taken from the channel so the two lines and the doctor cannot
+//     drift.
+//   - a store root or an embedder root is named in the environment: skipped
+//     rather than served, for the reason the skips state where they are read.
+//   - the search did not answer inside NEIGHBOUR_TIMEOUT_MS: the wait ends, the
+//     check is cancelled, and the line names the bound.
+//   - the check itself threw: the channel's contract is that it never throws
+//     whatever the embedder's condition, so a throw arriving here is a bug in
+//     the optional stack, and a bug in a convenience never costs an author
+//     their record.
+//
+// Every one of those lines, and the closing line over a labelled hit, says that
+// this check does not block the write rather than that the write proceeds. The
+// narrower promise is the true one: refusals still sit between this block and
+// the record (the supersedes pointer's target, the tier lock, and the duplicate
+// and non-record reads taken again under it), so a line promising the write
+// would be a promise made by the one part of this command that cannot keep it.
+//
+// The block is stderr only, so the success line on stdout, which is what a
+// caller parses, is exactly what it was; and a neighbour's name comes out of
+// stores this project never opened, which is a thing to put in front of a
+// reader's eyes rather than into another program's input.
+async function printNeighbourBlock(name, description) {
+    // The whole body is guarded rather than the channel call alone. The channel
+    // promises never to throw and the formatting below still can (a hit missing
+    // its score, a label field of a shape this reader did not expect), and a
+    // throw anywhere in here would leave the verb with no record written for the
+    // sake of a convenience that had already done its job or failed at it. The
+    // rule is the one the channel states for a find and it binds harder here:
+    // absence or breakage never fails a find, and it may never fail a write.
+    try {
+        await neighbourBlock(name, description);
+    } catch (err) {
+        process.stderr.write('memq: neighbours not checked (the check failed: '
+            + failureText(err) + '); this check does not block the write\n');
+    }
+}
+
+// The block itself, called only through the guard above.
+async function neighbourBlock(name, description) {
+    // Two conditions skip the check, and both are wider than the honored pair
+    // every other caller in this file asks storeSignalsPresent about. That is
+    // deliberate and local to this block, because the question here is not the
+    // one storeSignalsPresent answers.
+    //
+    // What each variable does on its own is not the same in the two cases, and
+    // neither case reduces to the other. KIT_EMBEDDER_ROOT selects which code
+    // runs only with KIT_EMBEDDER_ROOT_ALLOW_CODE=1 beside it: with the pair the
+    // embedder really is required out of a directory the command line does not
+    // name, and without it memory-index ignores the variable with a note and
+    // loads from the install location instead. KIT_MEMORY_ROOT moves the store
+    // only with KIT_MEMORY_ROOT_ALLOW_DATA=1 beside it, and moves nothing on its
+    // own. So each bare variable is a skip that was not strictly necessary.
+    //
+    // The breadth is the point all the same, and the reason is where the two
+    // parties stand: the grant that lets an unattended worker run this verb with
+    // no prompt is decided in the hook's process, over the hook's own
+    // environment, while this check runs in the child. The Bash tool's shell
+    // persists across calls, so a variable an earlier call exported is in the
+    // child's environment and not in the hook's, and the hook cannot see which
+    // pair the child will hold. Keying on the presence of either variable is
+    // what makes the child's stand-down no narrower than the hook's grant
+    // condition. The cost is a skipped convenience in a shell carrying a stray
+    // variable, and the line says which condition skipped it.
+    if (process.env.KIT_MEMORY_ROOT) {
+        process.stderr.write('memq: neighbours not checked under a pinned store root'
+            + ' (KIT_MEMORY_ROOT); this check does not block the write\n');
+        return;
+    }
+    if (process.env.KIT_EMBEDDER_ROOT) {
+        process.stderr.write('memq: neighbours not checked under a pinned embedder root'
+            + ' (KIT_EMBEDDER_ROOT); this check does not block the write\n');
+        return;
+    }
+    // The bound, and what it is a bound on: the embedder load and the whole
+    // store sweep behind the first similarity of a process. The sentinel is a
+    // local object rather than a value the channel could return, so a channel
+    // result can never be mistaken for an expiry. The timer is cleared on the
+    // fast path, since a pending timer would hold the process open for the rest
+    // of its budget after a write that has already been reported.
+    //
+    // The expiry cancels as well as ends the wait, kit-endpoint-lib's shape at
+    // its own timeouts: a controller owned here, aborted by the timer, and the
+    // signal handed to the work so it stops rather than finishing for a reader
+    // that has gone. The two halves of that shape matter in both directions.
+    // Clearing the timer in the finally is what keeps a completion from being
+    // followed by an abort it has already outrun, so the fast path never
+    // cancels a channel whose answer this block is about to print. And an abort
+    // that lands in the same tick as a completion changes nothing, because the
+    // race is already settled and its winner alone decides what prints: the
+    // signal reaches only the work still ahead of the channel's resumption.
+    // How far it reaches is stated at NEIGHBOUR_TIMEOUT_MS, and the short of it
+    // is that memory-index's load and sweep take no cancellation, so the wait is
+    // bounded here and that work is not.
+    const EXPIRED = {};
+    const controller = new AbortController();
+    let timer = null;
+    let channel;
+    try {
+        channel = await Promise.race([
+            // The query is the record as the author has stated it: the name,
+            // which in this store is a fact-bearing phrase (records are named
+            // for what they teach, not numbered), and the description that
+            // becomes its index line. The empty already-shown set and the
+            // withheld archive are this caller's needs rather than `find`'s:
+            // nothing printed above this block needs deduping against, and a
+            // retired record is not a fact the store still answers with, so it
+            // is no reason to reconsider a write. The order and the cap are
+            // asked of the channel rather than applied to its answer, for the
+            // reason its own options comment gives.
+            semanticChannel(name + ': ' + description, null, new Set(), false,
+                { rawOrder: true, limit: NEIGHBOURS_SHOWN, signal: controller.signal }),
+            new Promise((resolve) => {
+                timer = setTimeout(() => {
+                    controller.abort();
+                    resolve(EXPIRED);
+                }, NEIGHBOUR_TIMEOUT_MS);
+            })
+        ]);
+    } finally {
+        if (timer !== null) clearTimeout(timer);
+    }
+    if (channel === EXPIRED) {
+        process.stderr.write('memq: neighbours not checked (the search did not answer within '
+            + NEIGHBOUR_TIMEOUT_MS + 'ms); this check does not block the write\n');
+        return;
+    }
+    // A truthiness check rather than a null identity, cmdFind's care with this
+    // same contract: a future degradation path returning without the key at all
+    // would otherwise turn the channel's promise into a TypeError here, which is
+    // exactly the failure this block may never cause.
+    if (channel.off) {
+        process.stderr.write('memq: neighbours not checked (' + channel.off.reason + ')'
+            + (channel.off.remedy ? '; remedy: ' + channel.off.remedy : '')
+            + '; this check does not block the write\n');
+        return;
+    }
+    // The sweep's two facts, said before any hit prints and worded for this
+    // caller rather than borrowed from the find that composed them.
+    //
+    // The partial sweep is said for the reason the channel gives: a record it
+    // could not read or embed is missing from this ranking, and an author about
+    // to read the block as the store's answer has to hear that the answer is
+    // partial. The stake is higher here than in a find, a missed neighbour
+    // costing a duplicate record rather than a rerun.
+    //
+    // The persist failure is said only where the sweep actually had records to
+    // persist. A store whose root does not exist yet is the ordinary state of
+    // the first shared-tier write, and there the index write fails for the same
+    // reason there was nothing to index; a line about a failed persist over an
+    // empty sweep would put an error above the heading of a wholly healthy
+    // write. Where there were records, the failure means the next command sweeps
+    // again, which is a real cost and is said in this caller's terms.
+    const sweep = channel.sweep || { failed: 0, carried: 0, records: 0, writeError: null };
+    if (sweep.failed > 0 || sweep.carried > 0) {
+        process.stderr.write('memq: this ranking is partial (' + sweep.failed
+            + ' record(s) unreadable or unembeddable and so missing, ' + sweep.carried
+            + ' served unverified from a directory that could not be scanned);'
+            + ' no neighbour here proves there is none\n');
+    }
+    if (sweep.writeError !== null && sweep.records > 0) {
+        process.stderr.write('memq: could not persist the semantic index ('
+            + sweep.writeError + '); these neighbours are complete, and the next'
+            + ' command that needs the index sweeps again\n');
+    }
+    process.stderr.write('memq: nearest neighbours of ' + sanitize(name, NAME_CAP) + '\n');
+    // The same fence the find path puts over this same channel's hits, and for
+    // the same reason: these names come from every store and archive on the
+    // machine, written by projects this one never opened and by other machines
+    // the store syncs from. A charset-closed identifier is still eighty
+    // characters a reader's model sees, so the block that carries them says what
+    // they are before it prints them, in the one wording every memq hop uses.
+    // Printed only where there is an indented line to frame, find's own rule: a
+    // fence over nothing frames nothing and reads as a block that went missing.
+    if (channel.hits.length > 0) process.stderr.write(fenceLine([semanticClause()]) + '\n');
+    let overlap = false;
+    for (const h of channel.hits) {
+        const near = h.score >= NEIGHBOUR_FLOOR;
+        if (near) overlap = true;
+        // A name, a number and provenance, held to the emission rules the
+        // semantic hit line is held to: this is that same cross-store channel,
+        // so the name takes that line's sanitize, the tier takes its shared
+        // label rather than a second spelling of one, and the machine scope
+        // takes its cap. The scope is carried because this block adds a judgment
+        // that depends on it: an operator-tier record scoped to another box is
+        // not a fact about this machine, and a line that omitted the scope would
+        // put `likely overlap` on a record the author has no overlap with.
+        process.stderr.write('  ' + sanitize(h.name, NAME_CAP) + '  '
+            + h.score.toFixed(2)
+            + '  (' + tierProvenanceLabel(h.tier, h.store) + ')'
+            + (h.superseded ? '  superseded' : '')
+            + (h.machine !== null ? '  machine:' + sanitize(h.machine, MACHINE_CAP) : '')
+            + (near ? '  likely overlap' : '') + '\n');
+    }
+    // A retired near-duplicate is withheld from the lines above, and the count
+    // is said rather than left out: a bare heading over no lines is this
+    // surface's reading for a store that holds nothing like this record, and a
+    // store whose only near-duplicate is retired would otherwise borrow it.
+    // What the author does with the count is a different judgment from the one
+    // the lines above ask for, which is why it is a count and a route rather
+    // than a line per record: a retired record is not a fact the store answers
+    // with, so it is no reason to hold the write, and it may well be the reason
+    // this record is being written.
+    //
+    // The count is taken at NEIGHBOUR_FLOOR, the floor the lines above label an
+    // overlap at, and the line names the floor it used. The channel's own
+    // withheld total is taken at the admission floor instead, which sits well
+    // below this one: printed here it would report retired records this block
+    // would never have called an overlap, under a heading whose lines the
+    // author is reading at the overlap floor, with nothing on screen to
+    // reconcile the two numbers. So the narrower count is the one that prints,
+    // and a store whose retired matches all sit below the floor gets no line,
+    // which is the same answer the live lines give for the same store.
+    if (channel.withheld && channel.withheld.atOverlapFloor > 0) {
+        process.stderr.write('memq: ' + channel.withheld.atOverlapFloor + ' retired record(s)'
+            + ' also match at or above the overlap floor (' + NEIGHBOUR_FLOOR.toFixed(2)
+            + ') and are not listed; `memq find` with --archived shows them\n');
+    }
+    if (overlap) {
+        process.stderr.write('memq: a likely overlap is a candidate for --supersedes,'
+            + ' a repair, or a delete; this check does not block the write\n');
+    }
+}
+
 // memq add-type: the type tier's authoring flow. A memory is written into
 // <root>/memory-types/<type>/ and its index line into that tier's MEMORY.md
 // in one command, both under the tier's store.lock. Authoring goes through a
@@ -13754,7 +14136,7 @@ function removeUsageStamps(dir, file, options) {
 // the debt as it is incurred rather than a tier of records later. The flag
 // is refused under the engine store signals, on what the line reaches rather
 // than on what this record holds; the check below owns that reasoning.
-function cmdAddType(argv) {
+async function cmdAddType(argv) {
     const positionals = [];
     const tags = [];
     const triggers = [];
@@ -14176,6 +14558,62 @@ function cmdAddType(argv) {
             + ' shared-tier text over it is refused rather than silently cut. Shorten it and rerun');
     }
 
+    // The two refusals that decide whether this name can be written at all,
+    // asked here as well as under the lock. They are what keeps the block below
+    // off a command that is already doomed: against a name the tier already
+    // holds, the record the search ranks first is that record itself, at a
+    // similarity near 1.00 labelled a likely overlap, and a page of overlap
+    // warnings over a name that cannot be written is a page of advice about a
+    // record the author is not writing. Both reads are side-effect free, so
+    // asking twice costs two stats. The copies under the lock stay the
+    // authoritative ones, since only a check holding the lock
+    // excludes a concurrent writer, and these are the no-side-effect early exits
+    // this command already prefers ahead of it: acquireLock mints the tier
+    // directory to place its lock file, so a name that was never writable must
+    // not leave one behind.
+    if (!update) {
+        // Before the duplicate check, on the create path's own rule: existsSync
+        // follows a link, so a dangling one at this name reads as absent here
+        // exactly as it does under the lock.
+        if (nonRecordRefusal(path.join(dir, file), name,
+            ' in type \'' + sanitize(type, TYPE_CAP) + '\'', 'add-type', true)) {
+            return;
+        }
+        if (fs.existsSync(path.join(dir, file))) {
+            process.stderr.write('memq: \'' + sanitize(name, NAME_CAP)
+                + '\' already exists in type \'' + sanitize(type, TYPE_CAP) + '\'\n');
+            process.exitCode = 1;
+            return;
+        }
+    }
+    // The neighbours block, on the creation path alone and last among the
+    // pre-lock work: an --update repairs a record whose neighbours were shown
+    // when it was written, against which its own prior version would rank first.
+    // It runs before the lock rather than under it, because it reads every store
+    // on the machine and no other writer of this tier should queue behind an
+    // embedder load. Nothing it prints decides anything about the write, so a
+    // neighbour landing in the window between the block and the lock costs a
+    // line on screen and nothing more.
+    if (!update) await printNeighbourBlock(name, description);
+    // The pointer's target, re-asserted after the block. The check further up
+    // ran before an embedder load and a whole-store sweep, which widens the gap
+    // between reading the target and writing the pointer from microseconds to
+    // seconds, and a target deleted inside that gap leaves an inert pointer: no
+    // reader ever looks a missing name up, so nothing afterwards says the claim
+    // is empty. Two path reads on the create path, which is the whole cost of
+    // closing a window this block opened.
+    //
+    // storeTypeSpelling is deliberately not re-asserted, and its own account is
+    // why: no lock this command can take would make that check authoritative,
+    // the lock living in the type directory acquireLock mints, so two spellings
+    // take two locks in two directories and exclude each other nowhere. What
+    // holds the invariant is that every door reading a named type afterwards
+    // refuses the variant, which is as true after a wider window as before it.
+    if (supersedes !== undefined && supersedesTargetRefusal(dir, name, supersedes,
+        ' in type \'' + sanitize(type, TYPE_CAP) + '\'')) {
+        return;
+    }
+
     const lock = acquireLock(path.join(dir, STORE_LOCK_FILE));
     if (!lock.ok) {
         process.stderr.write('memq: type store locked, nothing written: '
@@ -14423,7 +14861,7 @@ function cmdAddType(argv) {
 // about, and it is wider here: this tier is read by every project on the
 // machine and by every machine the store syncs to, where the type tier is
 // read by the projects of one type.
-function cmdAddOperator(argv) {
+async function cmdAddOperator(argv) {
     const positionals = [];
     const tags = [];
     const triggers = [];
@@ -14737,6 +15175,35 @@ function cmdAddOperator(argv) {
         return usage('the record is ' + content.length + ' characters (its body is '
             + stored.length + '); the cap is ' + BODY_CAP + ', the whole `get` prints, and'
             + ' shared-tier text over it is refused rather than silently cut. Shorten it and rerun');
+    }
+
+    // The two refusals that decide whether this name can be written at all,
+    // asked here as well as under the lock, on add-type's rule and for
+    // add-type's reason: against a name the tier already holds, the block below
+    // would rank that record's own reflection first and advise the author about
+    // a write this command is going to refuse.
+    if (!update) {
+        if (nonRecordRefusal(path.join(dir, file), name, ' in the operator tier',
+            'add-operator', true)) {
+            return;
+        }
+        if (fs.existsSync(path.join(dir, file))) {
+            process.stderr.write('memq: \'' + sanitize(name, NAME_CAP)
+                + '\' already exists in the operator tier\n');
+            process.exitCode = 1;
+            return;
+        }
+    }
+    // The neighbours block, on add-type's rule and for add-type's reasons: the
+    // creation path alone, last among the pre-lock work, and before the lock.
+    if (!update) await printNeighbourBlock(name, description);
+    // The pointer's target re-asserted after the block, add-type's reason: the
+    // block widens the gap between reading the target and writing the pointer
+    // from microseconds to seconds, and a pointer naming nothing is inert at
+    // read time.
+    if (supersedes !== undefined && supersedesTargetRefusal(dir, name, supersedes,
+        ' in the operator tier')) {
+        return;
     }
 
     const lock = acquireLock(path.join(dir, STORE_LOCK_FILE));
@@ -15955,8 +16422,26 @@ function main() {
     else if (cmd === 'touch') cmdTouch(rest);
     else if (cmd === 'anchor') cmdAnchor(rest);
     else if (cmd === 'triggers') cmdTriggers(rest);
-    else if (cmd === 'add-type') cmdAddType(rest);
-    else if (cmd === 'add-operator') cmdAddOperator(rest);
+    // The two authoring verbs are async for the neighbours block they print
+    // before the write, find's reason and find's backstop: every expected
+    // embedder condition is answered inside the block (each degrades to a
+    // printed line and the command carries on), so this catch is for a genuine
+    // bug, reported like any other failed command rather than left to crash as
+    // an unhandled rejection.
+    else if (cmd === 'add-type') {
+        cmdAddType(rest).catch((err) => {
+            process.stderr.write('memq: add-type failed: '
+                + failureText(err) + '\n');
+            process.exitCode = 1;
+        });
+    }
+    else if (cmd === 'add-operator') {
+        cmdAddOperator(rest).catch((err) => {
+            process.stderr.write('memq: add-operator failed: '
+                + failureText(err) + '\n');
+            process.exitCode = 1;
+        });
+    }
     else if (cmd === 'delete-type') cmdDeleteType(rest);
     else if (cmd === 'delete-operator') cmdDeleteOperator(rest);
     else if (cmd === 'decay-scan') cmdDecayScan(rest);
@@ -16033,6 +16518,9 @@ module.exports = {
     JUDGED_CALL_TIMEOUT_MS,
     SEMANTIC_SHOWN,
     SEMANTIC_SUPERSEDED_DEMOTION,
+    NEIGHBOUR_FLOOR,
+    NEIGHBOURS_SHOWN,
+    NEIGHBOUR_TIMEOUT_MS,
     parseSince,
     ARCHIVE_DIR,
     OPERATOR_LABEL,

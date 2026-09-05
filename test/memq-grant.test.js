@@ -277,11 +277,14 @@ test('a verb the grant does not name gets no grant, whether or not memq has it',
 });
 
 test('find gets no grant, and an embedder root beside it withholds nothing else', () => {
-    // find is the one verb that loads code out of a directory the command
-    // line does not name: it requires scripts/memory-index.js, which requires
-    // an embedder package under KIT_EMBEDDER_ROOT and runs it in process. The
-    // verb is what the hook withholds, because the directory cannot be
-    // screened for: embedderRoot() falls back under os.homedir(), and HOME is
+    // find loads code out of a directory the command line does not name: it
+    // requires scripts/memory-index.js, which requires an embedder package
+    // under KIT_EMBEDDER_ROOT and runs it in process. The two authoring verbs
+    // reach that same require through their neighbours check, so find is not
+    // alone in reaching it; what makes find the one the hook withholds is that
+    // its ranking is its whole output, where the check is a convenience an
+    // authoring verb stands down. The verb is what the hook withholds rather
+    // than the variable, because the directory cannot be screened for: embedderRoot() falls back under os.homedir(), and HOME is
     // set on every machine, so refusing on the presence of what selects that
     // directory would refuse every command there is.
     const planted = { KIT_EMBEDDER_ROOT: path.join(os.tmpdir(), 'planted-embedder'),
@@ -289,11 +292,14 @@ test('find gets no grant, and an embedder root beside it withholds nothing else'
     assertNoDecision(runHook('node "' + MEMQ + '" find a term'), 'find in a clean environment');
     assertNoDecision(runHook('node "' + MEMQ + '" find a term', { env: { ...FLEET, ...planted } }),
         'find under a planted embedder root');
-    // The other half: with find withheld, an embedder root in the environment
-    // selects a directory nothing granted here reaches, so it costs no other
-    // command its grant. A refusal on those variables would have taken the
-    // reads and writes a fleet worker runs on every machine that has an
-    // embedder installed.
+    // The other half: an embedder root in the environment costs no other
+    // command its grant. What keeps the granted write off that directory is not
+    // an absence of reach, add-operator's neighbours check reaching the same
+    // require, but the check's own stand-down, which skips on the presence of
+    // KIT_EMBEDDER_ROOT or KIT_MEMORY_ROOT and so on exactly what this case
+    // plants. A refusal on those variables would have taken the reads and
+    // writes a fleet worker runs on every machine that has an embedder
+    // installed.
     assertGrant(runHook('node "' + MEMQ + '" recall', { env: { ...FLEET, ...planted } }),
         'recall under a planted embedder root');
     assertGrant(runHook('node "' + MEMQ + '" add-operator fact "words" --body "a body"',
@@ -824,15 +830,24 @@ function runMemq(args) {
     });
 }
 
-test('memq loads code out of a directory in one place, and that place is find', () => {
-    // The reason find is left off the grant's verb list is that it is the only
-    // verb whose path loads code from a directory the command line does not
-    // name. That claim is about memq's source, so it is checked against the
-    // source rather than restated: one code load past the built-ins at the top
-    // of the file, inside semanticChannel, which is reached from cmdFind and
-    // nowhere else. A second one anywhere below that block, or this one moving
-    // under another verb, reds here rather than silently widening what a
+test('memq loads code out of a directory in one place, reachable from find and from the two'
+    + ' authoring verbs behind their store-signal skip', () => {
+    // The reason find is left off the grant's verb list is that its path loads
+    // code from a directory the command line does not name. That claim is about
+    // memq's source, so it is checked against the source rather than restated:
+    // one code load past the built-ins at the top of the file, inside
+    // semanticChannel. A second one anywhere below that block, or this one
+    // moving under another verb, reds here rather than silently widening what a
     // prompt-free allow can load.
+    //
+    // Three dispatch roots reach it, and the two granted ones reach it only
+    // with the signals off. The authoring verbs print a neighbours block before
+    // a write, which is that same channel, so the load is inside two verbs the
+    // fleet grant does allow; what keeps the grant's reasoning intact is that
+    // the block's first act under those signals is to skip, so a granted
+    // invocation loads no embedder at all. That ordering is asserted below,
+    // because it is the whole of what distinguishes this reach from the one the
+    // grant withholds find for.
     //
     // Three named exceptions ride in the same contiguous top-of-file block as
     // the node built-ins, each a fixed, kit-shipped sibling under hooks/:
@@ -902,12 +917,13 @@ test('memq loads code out of a directory in one place, and that place is find', 
         'the code loads past the built-in block, and where each one sits: '
             + JSON.stringify(dynamic));
 
-    // And the property those loads are policed for: no verb but find can reach
-    // one. Asked as the transitive closure of callers rather than one function's
-    // direct callers, because a load now sits three functions deep and a
-    // one-level check would go quiet the moment a helper picked up a second
-    // caller under another verb. The closure's only dispatch function is
-    // cmdFind, which is the whole claim the grant's withheld-verb list rests on.
+    // And the property those loads are policed for: no verb outside the three
+    // named roots can reach one. Asked as the transitive closure of callers
+    // rather than one function's direct callers, because a load now sits three
+    // functions deep and a one-level check would go quiet the moment a helper
+    // picked up a second caller under another verb. The closure's dispatch
+    // functions are those three and no others, which is the claim the grant's
+    // verb list rests on.
     const callersOf = (name) => {
         const found = new Set();
         const pattern = new RegExp('\\b' + name + '\\s*\\(');
@@ -918,16 +934,18 @@ test('memq loads code out of a directory in one place, and that place is find', 
         });
         return found;
     };
+    // The accepted dispatch roots: main reaches each of these by name and the
+    // walk stops at them rather than climbing into main. That stop is what
+    // gives main's presence in the finished set its meaning, since main calls
+    // every verb and would otherwise be in the closure of any load at all. With
+    // the stops in place, main appears only when a load is reachable from main
+    // by some path that is not through one of these three, which is the failure
+    // this test exists to catch. Widening this list is how a fourth verb's
+    // reach would be admitted, so it is spelled here and nowhere else.
+    const ROOTS = ['cmdFind', 'cmdAddType', 'cmdAddOperator'];
     const closure = new Set(dynamic.map((d) => enclosing(d.line)));
     for (const name of closure) {
-        // cmdFind is the accepted root: the dispatch reaches it by name and the
-        // walk stops there rather than climbing into main. That stop is what
-        // gives main's presence in the finished set its meaning, since main
-        // calls every verb and would otherwise be in the closure of any load at
-        // all. With the stop in place, main appears only when a load is
-        // reachable from main by some path that is not through find, which is
-        // the failure this test exists to catch.
-        if (name === 'cmdFind') continue;
+        if (ROOTS.includes(name)) continue;
         for (const caller of callersOf(name)) closure.add(caller);
     }
     // The whole closure, compared against the set named here rather than
@@ -944,14 +962,53 @@ test('memq loads code out of a directory in one place, and that place is find', 
     // module for is resolved inside the guard and passed in instead, and its
     // reappearance here is that regression.
     assert.deepStrictEqual([...closure].sort(), [
+        'cmdAddOperator',
+        'cmdAddType',
         'cmdFind',
         'judgedCandidates',
         'judgedChannel',
+        'neighbourBlock',
         'parseJudgedAnswer',
+        'printNeighbourBlock',
         'relevancePrompt',
         'semanticChannel'
-    ], 'every function that can reach a code load is one of find\'s own, and find is '
-        + 'the only dispatch root among them: ' + JSON.stringify([...closure]));
+    ], 'every function that can reach a code load belongs to find or to the neighbours '
+        + 'block, and the only dispatch roots among them are the three named: '
+        + JSON.stringify([...closure]));
+
+    // The ordering the two granted roots' reach rests on: inside the block, both
+    // store-signal skips answer before the call that loads the embedder, so an
+    // invocation carrying either signal returns without a load. Read off the
+    // source for the reason the loads above are: the claim is about what a
+    // granted command line can make this file do, and a check that ran after the
+    // load would satisfy every behavioural assertion about the printed line
+    // while loading exactly the code the grant's reasoning says it does not. The
+    // block reads the two variables directly rather than through
+    // storeSignalsPresent, which answers a narrower question (the honored pair),
+    // so the pin names the variables.
+    const blockStart = src.findIndex((l) => /^async function neighbourBlock\(/.test(l));
+    assert.ok(blockStart !== -1, 'the neighbours block is a function of this file');
+    let blockEnd = src.length;
+    for (let i = blockStart + 1; i < src.length; i++) {
+        if (src[i] === '}') { blockEnd = i; break; }
+    }
+    const body = src.slice(blockStart, blockEnd);
+    const callAt = body.findIndex((l) => /await semanticChannel\(|semanticChannel\(name/.test(l) && isCode(l));
+    assert.ok(callAt !== -1, 'the block calls the channel: ' + JSON.stringify(body));
+    for (const variable of ['KIT_MEMORY_ROOT', 'KIT_EMBEDDER_ROOT']) {
+        // The variable whole, with no identifier character after it. A substring
+        // match on KIT_MEMORY_ROOT also matches a read of
+        // KIT_MEMORY_ROOT_ALLOW_DATA, which is a different question (the honored
+        // pair) and could sit anywhere in the block, so the pin would be reading
+        // a line it was not asked about and could pass or fail on it.
+        const reads = new RegExp('process\\.env\\.' + variable + '(?![0-9A-Za-z_$])');
+        const skipAt = body.findIndex((l) => reads.test(l) && isCode(l));
+        assert.ok(skipAt !== -1,
+            'the block reads ' + variable + ': ' + JSON.stringify(body));
+        assert.ok(skipAt < callAt,
+            'the ' + variable + ' skip answers before the channel is called: skip at line '
+                + (blockStart + skipAt + 1) + ', call at line ' + (blockStart + callAt + 1));
+    }
 });
 
 // Every load site in a module, as { line, text, module, in }, with `module`

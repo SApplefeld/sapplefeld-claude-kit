@@ -1,10 +1,10 @@
 # The store's authoring verbs show a record's nearest neighbours before writing it, and the decay scan nominates live pairs that read as one fact
 
-Status: Ready
+Status: In Progress
 Commit Model: Commit-and-Push
 Created: 2026-09-04
 
-Session model: any executor session in the kit repo; three sections in order, since section 2 reuses the pairwise reading section 1 introduces and section 3 documents both. Authored by the KIT: Expert seat on a capability gap the operator proposed and the NEO-CLAUDE coordinator seat captured to the kaizen inbox (kaizen/notes-NEO-CLAUDE.md, the 2026-09-04 note on the absent write-time duplicate check), forwarded by the operator at the keyboard. Anchors are authoring-time and named by function; re-locate every hit by content.
+Session model: any executor session in the kit repo; the sections below run in order, since the decay scan reuses the pairwise reading the authoring verbs introduce, the skill documents both, and the index work closes what the first section's own budget cannot. Authored by the KIT: Expert seat on a capability gap the operator proposed and the NEO-CLAUDE coordinator seat captured to the kaizen inbox (kaizen/notes-NEO-CLAUDE.md, the 2026-09-04 note on the absent write-time duplicate check), forwarded by the operator at the keyboard. Anchors are authoring-time and named by function; re-locate every hit by content.
 
 ## Dispatch Authorization
 
@@ -26,7 +26,7 @@ The memory store's search is strong, and its write path consults none of it. `me
 
 ## Approach
 
-Before the lock, on the creation path only, the two authoring verbs run the semantic channel in-process with the query `<name>: <description>`, take the three highest-scoring live hits the search admits, ordered by raw similarity rather than the search's blended rank, across every tier and store the index reaches, archived records excluded and superseded ones labeled as the search labels them, and print them on stderr as a neighbours block: name, score, tier and store, and the word `likely overlap` on any hit at or above `NEIGHBOUR_FLOOR`. Then the write proceeds exactly as today. The block is three lines wherever the search admits three hits, so the floor is a label on a line the author already sees and never a gate. A `--update` runs no check: it repairs a record already there, whose neighbours were shown when it was written, and the record's own prior version would otherwise rank first against itself. Embedder absent or unusable: one line, `memq: neighbours not checked (<cause>); remedy: <remedy>; the write proceeds`, the cause and remedy the search's own and the line reshaped because no lexical matches are served here, and the write proceeds. Under the engine store signals (`KIT_MEMORY_ROOT` with `KIT_MEMORY_ROOT_ALLOW_DATA=1`) the check is skipped and one line says so: the fleet grant withholds `find` because it loads an embedder from an unnamed directory, and an in-process load inside a granted verb would route around that reason. The model-judged block is never used by an authoring verb, so nothing an author types leaves the machine.
+Before the lock, on the creation path only, the two authoring verbs run the semantic channel in-process with the query `<name>: <description>`, take the three highest-scoring live hits the search admits, ordered by raw similarity rather than the search's blended rank, across every tier and store the index reaches, archived records excluded and superseded ones labeled as the search labels them, and print them on stderr as a neighbours block: name, score, tier and store, a `superseded` token where the record points at a successor, a `machine:<scope>` segment where an operator-tier record is scoped to one box, and the word `likely overlap` on any hit at or above `NEIGHBOUR_FLOOR`. Then the command continues to its refusals and the write exactly as today. The block is three lines wherever the search admits three hits, so the floor is a label on a line the author already sees and never a gate. A `--update` runs no check: it repairs a record already there, whose neighbours were shown when it was written, and the record's own prior version would otherwise rank first against itself. Embedder absent or unusable: one line, `memq: neighbours not checked (<cause>); remedy: <remedy>; this check does not block the write`, the cause and remedy the search's own and the line reshaped because no lexical matches are served here. Whenever `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT` is present at all, the honored pair deliberately not consulted, the check is skipped and one line names the variable that did it: the fleet grant withholds `find` because it loads an embedder from an unnamed directory, an in-process load inside a granted verb would route around that reason, and the stand-down keys on bare presence because it runs in the child while the grant is decided in the hook, so it must never be narrower than the grant condition. Around the hits the block also prints the shared fence line wherever a hit line follows, find's own rule; an expiry line in the not-checked shape when `NEIGHBOUR_TIMEOUT_MS` passes first; a partial-ranking line and a persist-failure line above the heading when the sweep behind the check was partial or could not write the index, both this tool's own words at column zero; and a count of retired records matching at or above the floor, which are never listed. The model-judged block is never used by an authoring verb, so nothing an author types leaves the machine.
 
 The decay scan gains a pairs block on stderr after its anchor-drift block: for each tier the scan reaches, every live pair at or above the floor, one line per pair with both names and the score, pinned records listed, pairs already joined by a `supersedes:` pointer excluded since the store already holds their answer. It reads vectors from the index `memory-index.js` keeps and embeds what the index lacks the way the search does, so a scan on a freshly synced store still answers. It nominates and never moves: no `decay-prune` flag acts on a pair, and the remedy is the author's, a fresh record carrying `--supersedes`, a repair, or a delete, per the skill's four remedies. Embedder absent, or the engine store signals set: the block's heading says not checked and why.
 
@@ -44,15 +44,43 @@ Decided 2026-09-04 by the Expert seat; reversible at arming.
 4. **Skip the check under the engine store signals rather than load the embedder there.** The grant's reason for withholding `find` is the load, and the check is a convenience the unattended vector can do without; the write still lands.
 5. **The project tier is covered by instruction, not by the frontmatter guard.** The guard is a shape check at the write door of a PreToolUse hook; loading an embedder there would put seconds of latency in front of every memory Write for a check the author can run as `memq find` in their own words, which is what the skill will say.
 
+## Standing Brief Amendments
+
+Binding on every section opened after the entry's date, dispatched or inline. Section 2 inherits both.
+
+1. amended 2026-09-05, at section 1's round-3 adjudication, on a consult ruling: a statement in
+   `docs/security-model.md`, or in a hook's own code comments, that a section's code falsifies belongs to that
+   section rather than to a later documentation section. Name the file on the section's `Files in scope:` line at
+   the adjudication that finds it and make the statement true before the section closes. The reason is this
+   plan's commit model: a Commit-and-Push section close pushes to main, which is this kit's install surface with
+   no CI between a commit and a `claude plugin update`, so a section that publishes code while the security
+   document describing it stays false publishes the falsehood. A merely absent sentence is not covered and may
+   travel with the documentation section, the distinction being that a reader acts on a false statement and only
+   lacks guidance from a missing one. For section 2 specifically: its pairs block prints record names from every
+   tier the scan reaches on stderr, which is a further machine-wide emission path, so that path's row in
+   `docs/security-model.md`'s fence table is section 2's to land, not section 3's. The prose above that
+   table carries no count of its rows, deliberately, per amendment 2; do not reintroduce one.
+2. amended 2026-09-05, at the same adjudication, then corrected the same day against the operator-tier memory
+   `a-restated-count-is-a-cross-file-invariant`: a count restated in curated prose over a set defined
+   elsewhere is an invariant with no keeper. Nothing merges it, no test asserts it, and a diff-scoped reviewer
+   cannot see it falsified, because the stale sentence sits in a file the diff never touches. Three reviewers
+   at full strength missed exactly this in section 1: `docs/security-model.md` read `Seven paths carry the
+   memory tiers' content` over a table section 1 gave an eighth row. The repair is to delete the number, not
+   to increment it, because incrementing leaves the next section to falsify it again: section 2 adds a ninth
+   emission path and would have done exactly that. So when a section adds a member to a set some document
+   enumerates, grep the curated documents for that set's count words and make the prose count-free, pointing
+   at the enumeration as its source, unless a count can be pinned to something immutable such as a commit
+   hash. The sweep is structural rather than phrase-driven: match every number word and digit across the whole document, adjudicate each hit against the class (a count over a set the sentence does not itself enumerate and that lives in another artifact), and record what was swept and any residual left unswept rather than calling the silence clean. Then run the same sweep over the repair's own output before the section closes. Section 1's first repair swept only the phrases it already knew, wrote two fresh counts of its own and missed a third that was stale in both its numbers; the structural sweep over the same file found them.
+
 ## Sections of Work
 
 ### 1. The two authoring verbs print a neighbours block before the write. Model: opus
 
-`semanticChannel` already returns its hits and notes without printing, the printing living in `cmdFind`; call it from `cmdAddType` and `cmdAddOperator` on the creation path only, after every validation passes and before the lock, with the query `<name>: <description>`, no tag, an empty already-shown set and the archive withheld, and order the hits by raw similarity. The channel is async by design, so the two verbs become async and `main`'s dispatch of them gains the same `.catch` backstop it gives `find`, with their usage and exit-code paths unchanged. Print the block on stderr in the shape `memq: nearest neighbours of <name>` followed by up to three lines `  <name>  <score>  (<tier>:<store>)[  superseded][  likely overlap]`, the last label on any score at or above `NEIGHBOUR_FLOOR`, then a closing line where any hit carries the label: `memq: a likely overlap is a candidate for --supersedes, a repair, or a delete; the write proceeds`. Embedder absent or unusable: `memq: neighbours not checked (<cause>); remedy: <remedy>; the write proceeds`, the cause and remedy the search's own. Engine store signals set: `memq: neighbours not checked under the fleet store signals; the write proceeds`. A `--update` prints no block. A hit is never the record being written, which does not exist yet on the creation path, and never an archived one. The block is stderr only, so the success line on stdout is unchanged and every existing test of it stays green.
+`semanticChannel` already returns its hits and notes without printing, the printing living in `cmdFind`; call it from `cmdAddType` and `cmdAddOperator` on the creation path only, after every validation passes and before the lock, with the query `<name>: <description>`, no tag, an empty already-shown set and the archive withheld, and order the hits by raw similarity. The channel is async by design, so the two verbs become async and `main`'s dispatch of them gains the same `.catch` backstop it gives `find`, with their usage and exit-code paths unchanged. Print the block on stderr in the shape `memq: nearest neighbours of <name>` followed by up to three lines `  <name>  <score>  (<tier>:<store>)[  superseded][  machine:<scope>][  likely overlap]`, the last label on any score at or above `NEIGHBOUR_FLOOR`, then a closing line where any hit carries the label: `memq: a likely overlap is a candidate for --supersedes, a repair, or a delete; this check does not block the write`. Embedder absent or unusable: `memq: neighbours not checked (<cause>); remedy: <remedy>; this check does not block the write`, the cause and remedy the search's own. `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT` present at all: one line naming the variable that fired, ending `; this check does not block the write`, the pair's data gate deliberately not consulted so the child's stand-down is never narrower than the hook's grant condition. Where the search has not answered within `NEIGHBOUR_TIMEOUT_MS`, the not-checked shape prints with that as its cause. Above the heading, and only when the sweep behind the check was partial or could not persist the index, one line each says so in this tool's own words; after the hit lines, retired records matching at or above the floor are counted on one line and never listed; and the fence line prints over the hits wherever a hit line follows it. A `--update` prints no block. A hit is never the record being written, which does not exist yet on the creation path, and never an archived one. Every line of the block ends `; this check does not block the write` rather than promising the write proceeds, because refusals still sit between the block and the write: the `--supersedes` target is re-asserted after the block, and the tier lock can fail. The block is stderr only, so the success line on stdout is unchanged and every existing test of it stays green.
 
 Acceptance, each test watched red first on the fake embedder harness: an `add-type` whose description paraphrases an existing same-tier record prints that record as a neighbour with a score at or above the floor and the label, then writes the record and its index line; the same with the neighbour in another tier and in another project's store prints its provenance; an add with no neighbour the search admits prints the heading and no lines and writes; an `--update` of an existing record prints no block; with the embedder absent the not-checked line prints and the write lands; under `test/memq.test.js`'s own engine-signal fixture the skip line prints and the write lands, and `test/memq-grant.test.js`'s plain-form `add-type` grant pin stays green; and a loopback endpoint fixture configured for the judged block records no request during an add, which pins Decision 3.
 
-Files in scope: `plugins/claude-kit/scripts/memq.js`, `test/memq.test.js`, `test/memq-grant.test.js`, and `test/size-budget.json` for the two test files' caps.
+Files in scope: `plugins/claude-kit/scripts/memq.js`, `test/memq.test.js`, `test/memq-grant.test.js`, `test/size-budget.json` for the two test files' caps, and, folded in at the round-3 adjudication because this section's code falsified statements in them, `docs/security-model.md` and `plugins/claude-kit/hooks/memq-grant.js`.
 
 Tests: lock that the block is stderr only and the write is never gated; lock the fleet skip in both directions; lock no egress. The expensive failure is a check that quietly refuses or quietly posts.
 
@@ -68,9 +96,57 @@ Tests: lock the exclusion of pointed pairs and the cross-tier silence; lock that
 
 ### 3. The skill states both, and tells a project-tier author to search first. Model: sonnet
 
-In `plugins/claude-kit/skills/memory-system/SKILL.md`: the `add-type` and `add-operator` rows gain one sentence each on the neighbours block, its floor, its stderr-only shape, its embedder-absent line and its fleet skip; the `decay-scan` row gains the pairs block; the four-remedies paragraph gains the sentence that the scan nominates unlinked live pairs and that the remedy is the author's; the decay-lifecycle section's seeds-not-measurements sentence names `NEIGHBOUR_FLOOR` beside the thresholds it already covers; and the operator-tier and project-type-tier sections' authoring paragraphs gain the instruction to read the neighbours block before the write lands, with the project tier's own paragraph telling an author to run `memq find` in the words of the fact before a Write, since no verb sees that write. In `docs/security-model.md`, one sentence beside the relevance channel's account stating that the authoring verbs' neighbour check runs the local semantic channel only and posts nothing. The skill is a measured file under the size ratchet, so its cap is raised in this section's diff; `docs/` is not measured.
+In `plugins/claude-kit/skills/memory-system/SKILL.md`: the `add-type` and `add-operator` rows gain one sentence each on the neighbours block, its floor, its stderr-only shape, its embedder-absent line and its fleet skip; the `decay-scan` row gains the pairs block; the four-remedies paragraph gains the sentence that the scan nominates unlinked live pairs and that the remedy is the author's; the decay-lifecycle section's seeds-not-measurements sentence names `NEIGHBOUR_FLOOR` beside the thresholds it already covers; and the operator-tier and project-type-tier sections' authoring paragraphs gain the instruction to read the neighbours block before the write lands, with the project tier's own paragraph telling an author to run `memq find` in the words of the fact before a Write, since no verb sees that write. The skill is a measured file under the size ratchet, so its cap is raised in this section's diff; `docs/` is not measured.
 
-Files in scope: `plugins/claude-kit/skills/memory-system/SKILL.md`, `docs/security-model.md`, `test/size-budget.json`.
+Files in scope: `plugins/claude-kit/skills/memory-system/SKILL.md`, `test/size-budget.json`, and `docs/fleet-integration.md`, whose account of the prompt-free grant's rationale is absent rather than false on the point section 1 changed (the two authoring verbs now reach the embedder load the grant's reasoning once withheld to `find` alone, and stand down on bare `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT`), so amendment 1 lets it travel here and it would otherwise sit in no section's scope.
+
+### 4. The index honours the cancellation the neighbours check sends, and exports the composition it owns. Model: opus
+
+The neighbours check bounds its own wait at `NEIGHBOUR_TIMEOUT_MS` and aborts the ranking pass `memq.js` owns, and
+`plugins/claude-kit/scripts/memory-index.js` honours no signal, so on an expiry the embedder load and store sweep run
+on. `memq` sets `process.exitCode` and never calls `process.exit()`, and nothing in the path calls `unref()`, so that
+abandoned work holds the process open after the block has already said the check was skipped: the author reads the
+success line and the shell does not come back. Have `query`, `sweep` and `embedAll` accept `options.signal` and check
+it between embed batches and before the search, returning the typed cancelled status the caller already reads as an
+`off`. No new export is needed for that, `query` and `sweep` being exported already. Separately, export `embedText`
+from the same module and compose the neighbour query through it, which removes the hand-rolled `<name>: <description>`
+join in favour of the index's own name rewrite; the second component still differs by design, the index embedding a
+record's body where this caller holds only the description, so this narrows the gap rather than closing it.
+
+Acceptance, watched red first: an expired neighbours check leaves no embedder work running, read as the process
+exiting rather than as elapsed wall clock, with the signal check disabled as the control that the reading can speak;
+a cancellation landing between embed batches stops the remaining batches; a search that is never cancelled is
+unaffected in its hits, its notes and its persisted vectors; and the neighbour query composes byte-identically to
+what `embedText` produces for the same name.
+
+Files in scope: `plugins/claude-kit/scripts/memory-index.js`, `plugins/claude-kit/scripts/memq.js`,
+`test/memq.test.js`, `test/size-budget.json` for its cap.
+
+Tests: lock that a cancelled query stops rather than finishing, in a shape that fails if the signal is ignored; lock
+that an uncancelled query is unchanged. The expensive failure is a signal check placed where no realistic expiry
+reaches it, which tests green and leaves the hang exactly where it was.
+
+### 5. One emitter owns the cross-store hit line. Model: opus
+
+Three producers now hand-compose the same fenced channel's hit line: `find`'s semantic block, `find`'s model-judged
+block (`judgedHitLine`), and the authoring verbs' neighbours block, and they have already drifted in format, the
+judged line printing supersession inside the provenance parentheses where the other two print it as a separate token.
+A sanitizing guard is a property of the output channel rather than of the producer that first needed it, so the
+moment a channel gains a second producer the guard moves to a shared boundary as an exported helper, and this channel
+has three. Extract one hit-line composer that takes a hit and the field flags each producer needs (score, `superseded`,
+`machine:`, the overlap label, the retired label) and returns the line, with every charset reduction and cap inside
+it, and route all three producers through it. Format differences that are deliberate per surface stay as flags; the
+supersession placement is reconciled to the separate token, which two of three already print.
+
+Acceptance, watched red first: each producer's existing line tests stay green through the extraction; a byte-level
+pin holds the three producers' lines identical for the same hit and the same flags; and a hit whose name or machine
+value carries a character outside the store's identifier gate is reduced identically on all three surfaces, pinned
+by driving each surface rather than by calling the helper directly.
+
+Files in scope: `plugins/claude-kit/scripts/memq.js`, `test/memq.test.js`, `test/size-budget.json` for its cap.
+
+Tests: lock the three surfaces' lines byte-identical for one hit; lock the reduction on each surface. The expensive
+failure is a helper extracted and then bypassed by one producer, which tests green on the two that use it.
 
 ## Out of Scope
 
@@ -102,3 +178,341 @@ None.
 - The kaizen inbox note dated 2026-09-04 in `kaizen/notes-NEO-CLAUDE.md` on the absent write-time duplicate check, which this plan dispositions.
 
 ## Chapters
+
+### Interim board 1 - 2026-09-05
+
+Written at a closure drought rather than at a section close: two review-round adjudications have passed with
+section 1 still open, and the compaction gate was holding an offer. Section 1 is not complete and this entry
+carries no `Completed:` line.
+
+Stage, section 1 (the two authoring verbs print a neighbours block before the write): implemented and green on
+its targeted lane, three review rounds run, round 3 adjudicated. Not closed. Rounds 1 and 2 were the section's
+own review and its fix round; round 3 was a fix-delta round owed because the delta changed the guard deciding
+whether this CLI loads an embedder out of a directory the command line does not name, which is load-bearing for
+a prompt-free command grant. Round 3 returned CHANGES_REQUIRED, CHANGES_REQUIRED and BLOCK from the adversarial,
+blind and security lenses, all three resolving wholly to `claude-opus-5` at effort `max` with zero synthetic
+assistant lines: 1 Critical, 5 Majors and 10 Minors, every one of which this session verified at its cited
+source before recording it here.
+
+Live dispatches: none. Implementer `a9d73328b0515c6a9` (implementer-opus) returned DONE_WITH_CONCERNS on the fix
+round; workflow run `wf_27fa6754-7c1` returned all three lenses. Nothing is in flight, so this entry strands no
+agent.
+
+Gate baseline, with the moment each figure was measured. Targeted lane `node --test test/memq.test.js
+test/memq-grant.test.js test/size-ratchet.test.js` read 807 tests, 807 passing, 0 failing, 0 skipped at exit 0
+from the run's own marker file, measured 2026-09-05 at roughly 18:40Z by the dispatched implementer on the tree
+it delivered. That figure is reported from that dispatch rather than confirmed here: this session has not re-run
+the lane on the delivered tree, and doing so is the first step after the fixes below. The lane immediately before
+the implementer's last fix read exit 1 with 805 passing and 2 failing, both failures caused by that round and both
+fixed rather than suppressed, which is the delta the 807 stands against. The whole-gate baseline this plan will
+be read against is the one plan 2 closed on: 3128 tests, 3118 passing, 1 failing, 9 skipped at exit 1, measured
+2026-09-05, whose single failure is this box's standing red at `test/memory-session.test.js:993`.
+
+Rulings adopted since the last boundary, all four this session's own:
+
+1. The escalation ladder's comparison was run and the tier bump was deliberately not spent. Two rounds have ended
+   with a surviving Critical, which is the ladder's trigger. The two Criticals are different classes and round 1's
+   fixes held, but two finding classes do repeat: a dead finiteness guard this session's own round-1 brief asked
+   for by a loose analogy, and the class of a documented claim this section falsifies sitting in a file the section
+   does not own. The second is the dominant generator and no implementer tier can close it, the implementer having
+   been correctly told those files are section 3's and correctly leaving them alone, so a fable re-dispatch would
+   reproduce the finding rather than fix it. The ladder's own alternative is taken instead: a consult on the spec's
+   premise, that section 1 changes the code while section 3 documents it, under a commit model whose section close
+   pushes to main.
+2. Section 3 was amended mid-run to route two surfaces section 1's execution falsified, `memq-grant.js`'s two
+   comments about `find` being the one path loading code out of an unnamed directory, and a `docs/security-model.md`
+   fence row for the neighbours block's machine-wide emission. That edit sits above `## Chapters` and is therefore
+   approval drift, recorded here and named to the operator.
+3. Round 3's Critical is not eligible for that routing. A Critical is fixed before the section closes whatever its
+   scope, so `docs/security-model.md`'s grant-invariant sentence is repaired as part of section 1 rather than
+   deferred to section 3, and section 1's `Files in scope:` widens to name that file.
+4. This entry is not committed on its own. Under Commit-and-Push a doc commit to main would earn the whole gate
+   ahead of it, and spending a 462-second suite on an interim entry, then a second one at the section close,
+   buys nothing the worktree does not already give: a post-compaction session re-reads this plan doc from disk,
+   so the entry's recovery job is served uncommitted. The entry rides with section 1's close commit instead. What
+   that trades away is crash durability for this entry alone, which is named here rather than left implicit.
+
+Next action, section 1: convene the consult on the premise above; then fix the Critical and the five Majors and
+adjudicate the ten Minors; then re-run the targeted lane in this session rather than trusting the reported 807;
+then the whole gate, because the close pushes to main; then Chapter 1 and the close commit. Sections 2 and 3 are
+unstarted and blocked on nothing but section 1's close.
+
+### Interim board 2 - 2026-09-05
+
+Written on the compaction gate's own signal, which had held 13 offers over 74 minutes, at the point where the
+round-3 adjudication is complete and its rulings are landed. Section 1 is still open and this entry carries no
+`Completed:` line. What makes it protective rather than ceremonial: two of the adjudications below reversed a
+finding's rating on evidence read at source, and until they reached this doc they existed only in one session's
+context, where a compaction would have taken them and left Chapter 1 unable to record them.
+
+Stage, section 1: code delivered and green on its targeted lane, three review rounds run and adjudicated, the
+document half of the section fixed in the main thread, the code half dispatched. Not closed.
+
+Live dispatches: one. `implementer-opus`, dispatched 2026-09-05 at about 19:50Z, asked to fix the round-3 code
+findings in `plugins/claude-kit/scripts/memq.js`, `test/memq.test.js`, `test/memq-grant.test.js` and
+`test/size-budget.json`: cancel the orphaned embedder query after the neighbour check's timeout rather than only
+stopping the wait; route the hand-built child environment at `test/memq.test.js:27867` through the suite's
+`homeChildEnv` guard, which is the finding that could otherwise write into the operator's live store; add a test
+that fires `printNeighbourBlock`'s catch; delete the dead finiteness branch together with its comment; compute the
+retired-record count at `NEIGHBOUR_FLOOR` rather than at the 0.1 admission floor; make the block's
+`the write proceeds` promise match what the code guarantees where it prints; and align the neighbour query's
+composition with the index's own `embedText`. It was told explicitly not to touch `docs/security-model.md` or
+`plugins/claude-kit/hooks/memq-grant.js`, both already corrected here, and not to run the whole suite. The
+consult that produced ruling 1 below has completed and is not in flight.
+
+Gate baseline, with the moment each figure was measured. Targeted lane
+`node --test test/memq.test.js test/memq-grant.test.js test/size-ratchet.test.js`: 807 tests, 807 passing, 0
+failing, 0 skipped at exit 0, measured 2026-09-05 at about 18:40Z by the round-2 implementer on the tree it
+delivered, and still reported rather than confirmed, since this session has not re-run it; the round-3
+implementer was told to re-establish its own baseline and report the delta rather than inherit that number. The
+whole gate this section's close must pass, because the push lands on main: 3128 tests, 3118 passing, 1 failing, 9
+skipped at exit 1, measured 2026-09-05 at plan 2's close, whose single failure is this box's standing red,
+`a pinned directory too long to name faithfully stands the session down` at `test/memory-session.test.js:993`,
+which fails because this machine's temporary directory is too short to build the path the test needs. That gate
+now also owes a build-stamp regeneration ahead of it, since `plugins/claude-kit/hooks/memq-grant.js` is hashed in
+`plugins/claude-kit/.claude-plugin/build-info.json` and this section edits it.
+
+Rulings adopted since interim board 1, all five:
+
+1. The escalation ladder's consult was convened and its ruling adopted. It ran at `claude-fable-5-1`, 26 assistant
+   lines, zero synthetic, so it ran at full strength. It rejected the framing this session brought it, which had
+   been to fold all of section 3's documentation into section 1, and showed that move is the larger one: the
+   memory-system skill file carries no false sentence today, only absent ones, while `docs/security-model.md`
+   carried three false ones. The line it drew, adopted here: a statement a section's code falsifies travels with
+   that section, and a merely absent statement may travel with the documentation section, because a reader acts on
+   a false statement and only lacks guidance from a missing one. It found no operator fork and said so.
+2. On that ruling, section 1's `Files in scope:` widened to name `docs/security-model.md` and
+   `plugins/claude-kit/hooks/memq-grant.js`, and section 3's narrowed back to the skill file and its cap, which
+   reverts the amendment interim board 1 recorded as ruling 2. Section 3's body lost both its routing sentence and
+   an earlier clause committing a `docs/security-model.md` edit, a clause the ruling's own prescription did not
+   name and which would have left section 3 promising work in a file it no longer owns. Both edits sit above
+   `## Chapters`, so both are approval drift, recorded here and named to the operator on the relay thread at the
+   moment they landed.
+3. A falsified sentence no review round found. `docs/security-model.md` opened its emission-path account with
+   `Seven paths carry the memory tiers' content into a model's context` over a table section 1 gives an eighth
+   row. Three reviewers at opus and effort max missed it, because a diff-scoped lens cannot see a count falsified
+   in a file the diff never touches. The first repair here incremented the count and was itself wrong: the
+   operator-tier memory `a-restated-count-is-a-cross-file-invariant` holds that such a count is an invariant with
+   no keeper and that the repair is to delete the number rather than increment it, since the next section
+   falsifies it again, and section 2 adds a ninth path and would have. Three clauses are now count-free and point
+   at the table as their source. The memory is stamped applied. The `Standing Brief Amendments` block was written
+   before that correction and told section 2 to update the count, which would have institutionalized the defect;
+   amendment 2 now carries the delete-rather-than-increment rule instead.
+4. A Major was down-rated to a Minor on evidence read at source, and the downgrade is named here rather than left
+   quiet. A reviewer rated the neighbour check's skip predicate a Major on the argument that keying on the bare
+   presence of `KIT_EMBEDDER_ROOT` is wrong because that variable selects no code unless
+   `KIT_EMBEDDER_ROOT_ALLOW_CODE` is `1`. Reading `embedderRoot()` in `plugins/claude-kit/scripts/memory-index.js`
+   splits the cases: with `ALLOW_CODE=1` the override is honored and the embedder does load from an unnamed
+   directory, so the skip is correct there; without it the skip is broader than strictly needed but safe, and the
+   breadth is deliberate, since the skip runs in the child while the grant is decided in the hook, so keying on
+   presence is what keeps the child's stand-down no narrower than the hook's grant condition. The predicate stays;
+   the comment overstating it is the Minor. The finding took no out-of-scope route, so nothing was parked by it.
+5. A security Major was re-characterized, in the opposite direction from how this session first recorded it, and
+   dispositioned as documentation because no code closes it. The concern was recorded as the widened skip failing
+   to cover a dropped `KIT_MEMORY_ROOT_ALLOW_DATA`; the skip fires on bare `KIT_MEMORY_ROOT`, so that case is
+   covered. The real residual runs the other way: a shell that has unset the store root since the grant was
+   emitted leaves the hook granting from the harness environment while the child no longer stands down, and a
+   child cannot read the hook's environment, so no code fix reaches it. It is now stated in
+   `docs/security-model.md` as a residual of the same class that file already names for the interpreter pin, and
+   in the hook's own comments beside it.
+
+Not committed, deliberately, on the same reasoning interim board 1 recorded and for the same trade-off: under
+Commit-and-Push a doc commit to main earns the whole gate ahead of it, and spending that suite on an interim entry
+and again at the close buys nothing the worktree does not already give, since a post-compaction session re-reads
+this doc from disk. A second reason applies now that did not then: an implementer is in flight with unstaged work
+in the tree, so there is no clean commit to make. This entry rides with section 1's close commit. What that trades
+away is crash durability for the entry alone, named here rather than left implicit.
+
+Next action, section 1: await the implementer, take its first-turn reading at the first re-block past the
+first-turn window, then adjudicate its report against source rather than accepting it; run the fix-delta round if
+the delta earns one under the owed-round bar, which the abort work will likely trigger by touching the timeout
+path; re-run the targeted lane in this session rather than trusting any reported figure; regenerate the build
+stamp for the edited hook; run the whole gate with the contention lane beside it; then Chapter 1, recording the
+`Status` normalization, the harness-assumption correction from round 1, every item above, and the reversal of
+interim board 1's ruling 2; then commit, push, and open the checkpoint. Sections 2 and 3 are unstarted and blocked
+on nothing but section 1's close, and section 2 inherits both standing amendments.
+
+### Interim board 3 - 2026-09-05
+
+Written at the round-4 adjudication, on the compaction gate's signal (20 offers held over 30 minutes). Section 1
+is still open and this entry carries no `Completed:` line. It is protective rather than ceremonial for the same
+reason board 2 was, and more so: round 4 produced three lens verdicts and a cross-lens disagreement this session
+resolved on evidence, and none of that exists anywhere but here.
+
+Stage, section 1: code delivered and green on its own lane in this session, four review rounds run and
+adjudicated, the fix set for round 4 identified and not yet applied. Not closed.
+
+Live dispatches: none. Implementer `ae10b387b370da54a` (implementer-opus) returned DONE_WITH_CONCERNS on the
+round-3 fix set and its work is verified at source. Workflow run `wf_c0418195-028` returned all three round-4
+lenses and has completed. Nothing is in flight, so this entry strands no agent.
+
+Gate figures, each with the moment it was measured and by whom.
+
+- Targeted lane `node --test test/memq.test.js test/memq-grant.test.js test/size-ratchet.test.js`: 809 tests, 809
+  passing, 0 failing, 0 skipped at exit 0, duration 286s, measured 2026-09-05 at about 21:43Z by this session on
+  this tree, the exit code read from the run's own `$?` written to a marker file. This is confirmed here rather
+  than reported: it replaces the 807 that stood as a reported figure through boards 1 and 2, and the delta is +2
+  tests, both new in the round-3 fix, with zero failures either side.
+- Pin lane `node --test test/hook-canary.test.js test/doctrine-parity.test.js`: 121 tests, 121 passing, 0 failing,
+  0 skipped at exit 0, measured 2026-09-05 at about 21:52Z by this session. This lane was owed and unrun through
+  three boards. The targeted lane is derived from the section's file list, and section 1 only became a
+  hook-editing and `docs/`-editing section at the round-3 adjudication, so the two whole-tree pins whose subject
+  those files are were never in it: `hook-canary.test.js` pins every shipped hook's bytes against the build
+  manifest, and `doctrine-parity.test.js` asserts real content in `docs/security-model.md`.
+- Build stamp: `./build.ps1` run at 21:50Z, exit 0, 97 files. It was owed because
+  `plugins/claude-kit/hooks/memq-grant.js` is hashed into the untracked
+  `plugins/claude-kit/.claude-plugin/build-info.json`, and a stale manifest fails three `hook-canary` tests with
+  nothing in `git status` to say so. Verified byte-for-byte after the build: the manifest's recorded SHA-256 for
+  that hook and the file's live hash are both `26a8788b4606...`.
+- The whole gate this close must pass, because the push lands on main: the standing baseline is 3128 tests, 3118
+  passing, 1 failing, 9 skipped at exit 1, measured 2026-09-05 at plan 2's close, whose single failure is this
+  box's standing red at `test/memory-session.test.js:993`, which fails because this machine's temporary directory
+  is too short to build the path the test needs. Not yet re-run for this section.
+
+Round 4 was owed rather than optional: the fix delta touched a write outside the tree (the hand-built child
+environment that could otherwise have reached the operator's live store) and the store-root handling the
+prompt-free command grant turns on. It ran three lenses at `claude-opus-5` effort `max`, the capped row for an
+opus-tier section, all three with zero synthetic assistant lines, so it ran at full strength. Verdicts:
+CHANGES_REQUIRED (adversarial), CHANGES_REQUIRED (blind), BLOCK (security). No Critical surfaced, so the tier
+ladder is not triggered by this round.
+
+Rulings adopted at this adjudication:
+
+1. The blind lens's gravest finding was adjudicated down on the security lens's evidence, and the disagreement is
+   recorded rather than smoothed. Blind rated the hook-versus-child divergence a Major and called it arbitrary
+   code execution, the capability the verb list exists to withhold. The security lens read the predicates and
+   cleared it: the grant requires `KIT_MEMORY_ROOT` truthy and `KIT_MEMORY_ROOT_ALLOW_DATA` equal to `1`, the
+   child skips on truthy `KIT_MEMORY_ROOT` or truthy `KIT_EMBEDDER_ROOT`, both sides test the same truthiness so
+   the empty-string case agrees too, and an environment-assignment prefix cannot reach the grant at all because
+   the hook refuses any command whose first word is not `node`. The only divergence left is the persistent-shell
+   case round 3 already dispositioned, whose precondition is no cheaper than the interpreter-pin residual the
+   security document already accepts. The specialist lens is taken over the generalist here because it read the
+   predicates rather than the comments. This matters procedurally and not just for the record: a security finding
+   of Major weight may never be parked, so had it stood, this section could not have closed without either a code
+   fix or a leading BLOCKED to the operator.
+2. Amendment 2's own class recurred three times in one session, twice authored by the repair itself, so the
+   generator is fixed rather than the sentences. The count-free sweep this session ran matched the specific
+   phrases it already knew about (`Seven paths`, `Six of the seven`, `the seven above`) instead of the file's
+   number words structurally, and it never re-read the text the repair introduced. The consequences: the repair
+   wrote two fresh counts that section 2 falsifies, `exactly three entry points` in `docs/security-model.md` and
+   `Three memq paths` in the hook's comment, since section 2's pairs block makes `cmdDecayScan` a fourth reach;
+   and it missed `Those ten hops (the table's seven rows, plus ...)`, stale in both numbers, the table now
+   carrying eight rows and the hops numbering eleven. Amendment 2 now requires the sweep to be structural over
+   number words rather than over known phrases, and to re-run over the repair's own output before the section
+   closes.
+3. The round-4 fix set, adjudicated finding by finding against source rather than accepted from the reports.
+   Confirmed and to be fixed before this section closes: the bare-`KIT_MEMORY_ROOT` skip line claims `under the
+   fleet store signals`, a condition `storeSignalsPresent()` answers false for without the data gate, with a test
+   pinning the false wording and the sibling branch naming its own variable correctly; the hook's header contract
+   still says `find` is the only verb that loads an embedder, the one site of three this session's comment repair
+   missed and the first an auditor reads; the residual sentence this session wrote into
+   `docs/security-model.md` names the grant's store bound as what limits the two verbs, when in the very state it
+   describes the store root has been dropped and `memoryRoot()` falls back to a directory under the caller's own
+   home, so the named bound is precisely what is absent, and the sentence omits that the block would sweep and
+   print the operator's real store into an unattended worker's context; both environment-variable entries still
+   close `Set without its signal, it is ignored`, which this section's code falsifies on the authoring path; the
+   new fence-table row claims the store-text emission is confined to the hit loop, while the persist-failure line
+   prints a filesystem error carrying the index path at column zero above the heading and outside the fence,
+   reachable with zero admitted hits; and the two counts and the missed hop count from ruling 2.
+4. Three findings were routed out of section 1 rather than fixed in it, and none is a Critical or a security
+   Major, which may never take that route. The cancellation's remainder inside `memory-index.js` is section 4,
+   appended at the round-4 adjudication that preceded this entry and named to the operator on the relay thread at
+   the moment it landed; the blind lens sharpened why it is owed, since nothing cancels the embedder load and
+   `memq` sets `process.exitCode` rather than calling `process.exit()`, so an embedder that stalls leaves the
+   command printing its success line and then hanging until a harness timeout kills it and reports a failure for
+   a write that in fact landed. The hand-copied cross-store hit line is a third producer of one fenced channel,
+   the judged line at `memq.js:6198` predating this plan, and it has already drifted in format, `find` printing
+   supersession inside the provenance parentheses where the block prints it as a separate token; an extraction
+   serving all three is wider than this section and needs its own acceptance, so it becomes its own section
+   rather than folding. And `docs/fleet-integration.md`'s grant rationale is absent rather than false, which
+   amendment 1 lets travel with the documentation section, so section 3 gains it rather than letting it fall off
+   the plan.
+5. Minors accepted with their justifications rather than fixed. The expiry case costs about 22 seconds of serial
+   wall clock because the stub must outlast a bound the child cannot override; the cost is recorded here rather
+   than removed. Live neighbours are paged at three with no count of what was cut while retired ones above the
+   floor carry a count, which is a real asymmetry and a deliberate one: a retired record is withheld from the
+   block entirely, where a fourth live record is merely below the page the spec fixes at three lines. The label
+   is decided on the raw score while the figure prints at two decimals, so a score just under the floor prints as
+   the floor without the label; comparing the rounded value instead would move the predicate, so the display
+   stands and the reading is noted. And the sweep behind the check writes the derived index before the tier lock
+   and before the refusals that can still stop the command, which is a real ordering fact about a derived,
+   sync-excluded, self-healing sidecar rather than a defect in the store.
+
+Not committed, deliberately, on the reasoning boards 1 and 2 both recorded: under Commit-and-Push a doc commit to
+main earns the whole gate ahead of it, and spending that suite on an interim entry and again at the close buys
+nothing the worktree does not already give, since a post-compaction session re-reads this doc from disk. The
+entry rides with section 1's close commit. What that trades away is crash durability for the entry alone.
+
+Next action, section 1: apply the round-4 fix set, the `docs/` half in the main thread because the docs-write
+guard denies a subagent that write and the code half dispatched; strengthen amendment 2 per ruling 2 and re-run
+its sweep structurally over `docs/security-model.md` including the repair's own output; reconcile the spec's
+section-1 paragraph and Approach with what the code actually prints, which the round found drifted in five
+places; then the targeted lane and the pin lane again in this session; rebuild the stamp again if the hook is
+edited further; run the whole gate with the contention lane beside it, because the close pushes to main; then
+Chapter 1 and the close commit. Sections 2, 3 and 4 are unstarted and blocked on nothing but section 1's close;
+section 2 inherits both standing amendments, and section 3 has gained a file.
+
+### Chapter 1 - 2026-09-05
+
+Completed: 1. The two authoring verbs print a neighbours block before the write
+Commit Model: Commit-and-Push
+
+Shipped. `add-type` and `add-operator` call the semantic channel `find` already uses, on the creation path only,
+after every validation and before the tier lock, and print a neighbours block on stderr: a heading carrying the typed
+name, up to three hit lines (name, score, tier and store, `superseded` where the record points at a successor,
+`machine:<scope>` where an operator-tier record is scoped to one box, `likely overlap` at or above `NEIGHBOUR_FLOOR`),
+the shared fence line wherever a hit line follows, a retired-record count where retired records match at or above the
+floor, two sweep lines above the heading when the sweep behind the check was partial or could not persist the index,
+and a closing line where any hit carries the label. Every line ends `; this check does not block the write`, because
+the `--supersedes` re-assertion and the tier lock still sit between the block and the write. The wait is bounded by
+`NEIGHBOUR_TIMEOUT_MS` through an `AbortController` the ranking pass honours at its resumption; the embedder load and
+store sweep in `memory-index.js` honour no signal, which is section 4. Two stand-downs, each printing one line naming
+the variable that fired: bare `KIT_MEMORY_ROOT` and bare `KIT_EMBEDDER_ROOT`, keyed on presence rather than on the
+honored pair so the child's stand-down is never narrower than the hook's grant condition. Nothing an author types
+reaches the model-judged block. The files: `plugins/claude-kit/scripts/memq.js`, `plugins/claude-kit/hooks/memq-grant.js`
+(comments only), `docs/security-model.md`, `test/memq.test.js`, `test/memq-grant.test.js`, `test/size-budget.json`, and
+`kaizen/notes-SCOTT-CLAUDE.md` carrying two notes this session captured, both attributed to this session by sweeping the
+harness transcripts for their text. Delivered in this changeset.
+
+Rounds. Four: the section's review and fix round, then two fix-delta rounds. Round 3 (three lenses, opus, effort max)
+found the orphaned embedder query the timeout left running and a hand-built child environment in the tests that could
+have written into the operator's live store. Round 4 (same tiers) found the bare-store-root skip line claiming `the
+fleet store signals`, a condition `storeSignalsPresent()` answers false for without the data gate; the hook's header
+still calling `find` the only verb that loads an embedder; and in `docs/security-model.md` two `Set without its signal,
+it is ignored` clauses the stand-down falsifies, the new fence-table row's claim that store text is confined to the hit
+loop (the persist-failure line prints a filesystem error holding the index path at column zero, reachable with no
+admitted hit), a residual sentence naming the grant's store bound as the limit in the one state where the root has been
+dropped, the stale `ten hops, seven rows` tally, and the superlative the new row ties. All fixed here. A blind lens
+rated the hook-versus-child divergence arbitrary code execution; the security lens cleared it at the predicates (both
+sides test the same truthiness; `w[0] !== 'node'` refuses an environment-assignment prefix) and the specialist reading
+was taken, which is recorded because a standing security Major could not have been parked.
+
+Decisions and surprises. The plan's Approach and section-1 text drifted from the code in five places and were
+reconciled to what prints. Amendment 2's own class recurred three times, twice authored by the repair, so the
+amendment now requires a structural sweep over number words and a re-sweep of the repair's own output; the structural
+sweep over `docs/security-model.md` returned 179 candidates, 20 outward-referring, all adjudicated as enumerated inline
+or not a set, with one pre-existing count left and named (`:673`, `eleven surfaces ... ten of them`, enumerated beside
+it, predating this plan). The implementer's sweep of `memq-grant.js` found seven same-file counts over `GRANTED_VERBS`
+and the flag screen and left them, on the reasoning that amendment 2's defect is the cross-file case; adopted. Eleven
+curly apostrophes at `docs/security-model.md:710-716` predate this plan and are left. A Minor to attribute the 0.59
+figure was already satisfied at `memq.js:528-533`, which names it a seed rather than a measurement. Three findings
+routed out: the cancellation remainder (section 4), the shared cross-store hit-line emitter, three producers already
+drifted in format (new section 5), and `docs/fleet-integration.md`'s absent grant rationale (section 3's scope). The
+build stamp had to be rebuilt twice, since it hashes hook bytes and nothing in `git status` shows it stale. A peer
+session (AI-OS: Worker) asked after this session's heavy-process claim at twice its stated estimate; the estimate was
+refreshed on disk and the peer waited, and it reported that its own implementer had earlier read the unrefreshed claim
+as residue and returned rather than proceed, which the first kaizen note here already generalizes. This session's
+model tag read Opus 5 at the round-4 dispatch and Fable 5.1 by this close, a switch the second kaizen note is about.
+
+Gate. Targeted lane `node --test test/memq.test.js test/memq-grant.test.js test/size-ratchet.test.js`: 809 tests, 809
+passing, 0 failing, 0 skipped, exit 0 read from the run's own marker, duration 226s, baseline on the same lane
+809/809/0/0 at exit 0 before the round-4 fixes. Pin lane `node --test test/hook-canary.test.js
+test/doctrine-parity.test.js`: 121/121/0/0, exit 0, after `./build.ps1` (exit 0) with the hook's SHA-256 verified equal
+to the manifest's. Whole gate `node --test test/*.test.js`: 3147 tests, 3137 passing, 1 failing, 9 skipped, exit 1,
+duration 507s, against the recorded baseline 3128/3118/1/9 at exit 1; the one failure is this box's standing red,
+`a pinned directory too long to name faithfully stands the session down`, so the delta is +19 tests and the same
+single known failure. Contention lane beside it: the process list polled clean of runners and builds before the spawn
+and sampled mid-run, where every `node --test` child belonged to this gate.
+
+Next: 2. The decay scan nominates live pairs above the floor. Both standing amendments bind it, and amendment 2 is
+now the structural form. Sections 3, 4 and 5 follow in order.

@@ -41,8 +41,10 @@
 //     path, which is the one place memq reads a subcommand from, must be one
 //     of the verbs this grant is meant to cover, and every other word there
 //     withholds it. Left out of that list are delete-type and delete-operator,
-//     which remove a shared-tier record outright; find, which is the only
-//     verb that loads an embedder; anchor, which rewrites a project-tier
+//     which remove a shared-tier record outright; find, which loads an
+//     embedder out of a directory the command line does not name and can
+//     stand no part of that load down, the ranking being its whole output;
+//     anchor, which rewrites a project-tier
 //     record in place at a name the command line gives it, and with it the
 //     claim every drift surface reads about which files that memory is still
 //     true of; and triggers, which rewrites a record of any tier the same way
@@ -87,9 +89,11 @@
 //     whenever they are set at all: NODE_OPTIONS (carries --require/--import),
 //     NODE_PATH (steers module resolution), and NODE_REPL_EXTERNAL_MODULE (a
 //     preloaded module). All three are node's own. No variable naming an
-//     embedder directory is among them, because the one verb that loads an
-//     embedder is withheld from the grant outright, which bounds the
-//     directory question instead of screening for it.
+//     embedder directory is among them, for the reason PRELOAD_ENV states
+//     below: the verb whose whole output is that load is withheld from the
+//     grant, and the granted verbs that can reach the same require stand
+//     their own check down whenever such a variable is set at all, so the
+//     directory question is bounded rather than screened for.
 //   - The whole command line is free of shell metacharacters: ; & | < > ` $
 //     ( ) are refused anywhere, quoted spans included. The scan deliberately
 //     does not parse quoting to be lenient inside it; quote parity is
@@ -219,11 +223,18 @@ const ESCAPED_QUOTE = /\\["']/;
 // NODE_REPL_EXTERNAL_MODULE names a module node preloads. The child inherits
 // this hook's environment, so any of them being set at all refuses the grant.
 //
-// No variable of the kit's belongs here. The one memq path that loads code
-// out of a named directory is find, which requires scripts/memory-index.js,
-// which requires an embedder package out of KIT_EMBEDDER_ROOT and runs it in
-// process; find is withheld by the argument screen below, so no granted
-// command reaches that require. Screening the root would not have closed the
+// No variable of the kit's belongs here. The memq paths that load code out of a
+// named directory are find, and the authoring verbs add-type and add-operator,
+// whose write-time neighbours check reaches the same require; the set is pinned
+// whole, callers included, by the closure assertion in test/memq-grant.test.js,
+// which is where a new path shows up rather than in this sentence. Each reaches
+// it through scripts/memory-index.js, which requires an embedder package out of
+// KIT_EMBEDDER_ROOT and runs it in process. find is withheld by the argument
+// screen below. The authoring verbs are granted, and what keeps them off that
+// require is their own stand-down, which skips the check whenever
+// KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT is present. That is this same condition
+// read in the child rather than here, so it matches the divergence below rather
+// than closing it. Screening the root would not have closed the
 // class in any case, since embedderRoot() falls back to a directory under
 // os.homedir() and that reads HOME or USERPROFILE, which are always set: a
 // refusal on their presence would refuse every command there is. The other
@@ -534,12 +545,16 @@ function grantable(p) {
     //
     // The verb is judged against GRANTED_VERBS, so a word this hook has never
     // heard of withholds rather than passing through. find is the reason the
-    // list is shaped that way and is this hook's only lock on it: it is the
-    // one verb that loads code out of a directory named outside the command
-    // line, requiring scripts/memory-index.js and through it an embedder
-    // package under a root that falls back to one inside the caller's own
-    // HOME. No environment screen can bound that directory, since HOME is
-    // always set, so the verb is left off the list instead. The cost is
+    // list is shaped that way and is this hook's only lock on it: it loads code
+    // out of a directory named outside the command line, requiring
+    // scripts/memory-index.js and through it an embedder package under a root
+    // that falls back to one inside the caller's own HOME. No environment screen
+    // can bound that directory, since HOME is always set, so the verb is left off
+    // the list instead. It is not the only verb that can reach that require:
+    // add-type and add-operator are granted, and their write-time neighbours
+    // check reaches it too, stood down in the child on the presence of
+    // KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT rather than by anything this hook
+    // screens. The cost is
     // deliberate and worth naming: a fleet worker gets no semantic search at
     // all, not a prompt for one. It is affordable because recall is the
     // retrieval path an effort starts from by the memory skill's own design,

@@ -139,7 +139,7 @@ moment a channel gains a second producer the guard moves to a shared boundary as
 has three. Extract one hit-line composer that takes a hit and the field flags each producer needs (score, `superseded`,
 `machine:`, the overlap label, the retired label) and returns the line, with every charset reduction and cap inside
 it, and route all three producers through it. Format differences that are deliberate per surface stay as flags; the
-supersession placement is reconciled to the separate token, which two of three already print. The same channel's partial-sweep line has a third producer too: `find`'s semantic channel composes its own, and it still counts an unscannable directory as a record where the helper the authoring and decay blocks share now names directories and records apart; route it through that helper in this section.
+supersession placement is reconciled to the labels inside the provenance parentheses, which two of three already print (find's semantic and judged lines; the neighbours block alone printed a separate token), and the `retired` and `superseded` labels are properties of the hit rather than flags, printed wherever the hit carries them. The same channel's partial-sweep line has a third producer too: `find`'s semantic channel composes its own, and it still counts an unscannable directory as a record where the helper the authoring and decay blocks share now names directories and records apart; route it through that helper in this section.
 
 Acceptance, watched red first: each producer's existing line tests stay green through the extraction; a byte-level
 pin holds the three producers' lines identical for the same hit and the same flags; and a hit whose name or machine
@@ -763,4 +763,120 @@ claim had aged past its estimate, proceeding past it rather than writing beside 
 their own; the holder deleted its claim during the run. The process poll before the wait showed only the idle MSBuild
 node-reuse workers.
 Next: 5. One emitter owns the cross-store hit line. Then finishing-work.
+Commit Model: Commit-and-Push
+
+### Interim board 5 - 2026-09-06
+
+Written at section 5's round-1 adjudication, on the compaction gate's signal (1 offer held). Section 5 is open
+and this entry carries no `Completed:` line.
+
+Stage, section 5: implemented by implementer-opus (dispatch `ad338b4aa9f1954c5`, model override opus, first-turn
+reading 80 assistant lines all `claude-opus-5`, zero synthetic), returned DONE_WITH_CONCERNS; verified at source
+by this session (the composer `hitLine` read whole, the three producer sites read, byte-level CR and dash checks
+zero on all three files, the three new tests re-run here 3/3 exit 0). Review round 1 run and adjudicated; the fix
+set is dispatched and not yet verified. Not closed.
+
+Live dispatches: the same implementer, resumed via SendMessage on `.kit/verify/s5-fix1-brief.md` (three Majors,
+five Minors). Workflow run `wf_4af1eadc-8d0` (adversarial-reviewer, blind-reviewer and security-reviewer, all opus
+at effort max via the Workflow route; the two admitted lenses read 51 and 46 assistant lines all `claude-opus-5` at
+the first-turn window and the third was queued behind them on this four-core box, per the operator memory
+`a-queued-agent-looks-identical-to-one-that-never-started`) has completed.
+
+Gate figures, each with its moment. The implementer's full `node --test test/memq.test.js`: 700/700/0/0 exit 0,
+266.8 s (`.kit/verify/s5-memq.exit`), and `node --test test/size-ratchet.test.js test/doctrine-parity.test.js`
+149/149 exit 0 (`s5-lane.exit`), both measured on the main checkout at HEAD 62d242f with the section's three files
+dirty and nothing foreign; against the section-4 close's memq figure 697/697 exit 0 (three tests added). Whole gate:
+not yet run this section; the section-4 close baseline is 3174/3164/1/9 exit 1 at HEAD d496125, the one red the
+standing TEMP-path failure.
+
+Rulings adopted since Chapter 4. (1) At the approach read, against the code: the spec's premise that two of three
+producers print supersession as a separate token is inverted; find's semantic and judged lines both carry `retired`
+and `superseded` inside the provenance parentheses (14 test pins) and only the neighbours block printed the token
+(0 pins). Reconciled to the parenthesised form on the spec's own stated reason (the majority form), a route (b)
+assumption; the spec's section-5 sentence was amended to match at this adjudication (approval drift, deliberate),
+and all three lenses confirmed the resolution sound and fully applied. (2) The implementer's declared assumption
+that `retired` and `superseded` are properties of the hit rather than flags, printed wherever the hit carries them,
+is accepted with its reason (a dropped label reads as a live record) and recorded as a deviation from the spec's
+flag list. (3) The acceptance's name-reduction case is unreachable on every surface (`isMemoryFilename` and
+`mi.recordPath` gate every path a hit arrives by), and so is the implementer's machine-field substitute
+(`machineIdentityOrNull` is strictly narrower than the display cap): the reachable in-composer reduction is the
+store segment, which `isStoreSegment` admits to 260 characters and `tierProvenanceLabel` caps at 80, so the pin is
+rewritten over that field on all three surfaces (round-1 Major). (4) Find's persist-failure note routed through
+`sweepPersistLine` too, beyond the spec's partial-line instruction, inheriting the empty-sweep suppression;
+accepted as intended with a positive find pin owed. (5) The skill's add-type row (line 30) and
+`docs/security-model.md`'s neighbours row (line 58) enumerate the fields in the order the new line prints them and
+are not falsified; no edit. Round-1 Majors: the reduction pin green at HEAD (ruling 3); a test comment placing the
+identifier gate at display where it runs at admission; `sweepPartialLine`'s header miscounting its callers (the
+amendment-2 class). Minors: an `!== null` scope guard that would print `machine:undefined` for a hit shape lacking
+the field; the persist pin (ruling 4); a blocking `runHome` beside a live in-process server; one overstating test
+comment; the pairs block's pre-existing gate comment. All adopted. The implementer's one outward emission is
+recorded: while checking a newline count it ran `memq find` under its real HOME, which posted the query and ten
+candidate records' names, tiers and descriptions to the operator's configured model endpoint, the call an attended
+`find` makes; nothing to roll back, and the check was replaced by an in-suite assertion.
+
+Next action, section 5: verify the fix delta at source, decide whether it earns a round of its own (the delta is a
+test rewrite, comment repairs and one guard change; the store-segment pin exercises the composer directly), close
+gate on the ratchet lane plus the full memq file, whole gate before the push, Chapter 5, commit, push, checkpoint.
+Then finishing-work for this plan.
+
+### Chapter 5 - 2026-09-06
+
+Completed: 5. One emitter owns the cross-store hit line
+Implemented By: implementer-opus (dispatch `ad338b4aa9f1954c5`, model override opus, first-turn reading 80 assistant
+lines all `claude-opus-5`, zero synthetic; resumed once via SendMessage for the fix round)
+Metrics: review rounds 1 (adversarial, blind and security lenses, all opus at max via the Workflow route), plus an
+author re-read of the fix delta; NEEDS_CONTEXT 0; escalations 0; consults 0
+Decisions / Surprises: The spec's premise was inverted at the approach read: find's semantic and judged lines both
+carried `retired` and `superseded` inside the provenance parentheses (14 pins) and only the neighbours block printed
+the separate token (0 pins), so the reconciliation went to the parenthesised form on the spec's own stated reason,
+the majority form, and the section's sentence above `## Chapters` was amended to say so (approval drift, deliberate;
+all three lenses confirmed the resolution sound and fully applied). The composer is `hitLine(h, flags)` with
+`{ score, machine, overlap }` as flags and `retired`/`superseded` read off the hit; find's semantic line appends its
+applied tokens after it, the judged line its why clause, the neighbours block passes the overlap flag. The
+acceptance's name-reduction case is unreachable on every surface (`isMemoryFilename` and `mi.recordPath` gate every
+path a hit arrives by), and so was the implementer's first substitute, the machine field (`machineIdentityOrNull`
+is strictly narrower than the display cap); the reachable in-composer reduction is the store segment, admitted to 260
+characters by `isStoreSegment` and cut at 80 by `tierProvenanceLabel`, and the pin was rewritten over that field on
+all three surfaces with the cut read off the rendered line rather than mirrored from the cap. Find's persist-failure
+note went through `sweepPersistLine` beside the partial line the spec named, inheriting the empty-sweep suppression,
+accepted with a positive find pin. The size ratchet's cap rose to the tool's own reading. The implementer made one
+outward emission, recorded here because it cannot be recalled: while checking a newline count it ran `memq find`
+under its real HOME, which posted the query and ten candidate records' names, tiers and descriptions to the
+operator's configured model endpoint, the call an attended find makes; nothing to roll back locally, and the check
+was replaced by an in-suite assertion. Interim board 5 was written mid-section on the compaction gate's nudge and
+rides in this commit.
+Assumptions: (decided 2026-09-06, section 5) route (b): supersession reconciled to the parenthesised form, the spec
+amended. (decided 2026-09-06, section 5) `retired` and `superseded` are properties of the hit rather than flags,
+printed wherever the hit carries them, since a dropped label reads as a live record. (decided 2026-09-06, section 5)
+find's persist note routed through the shared helper with its suppression. (decided 2026-09-06, section 5) find's
+sweep subjects read `this search` and `these results`, in the register of the existing `this ranking` and `these
+neighbours`. (decided 2026-09-06, section 5) the security reviewer was dispatched at round 1 because the section
+touches the sanitizing boundary of an output channel.
+Review Findings: Round 1: the reduction pin green at HEAD and duplicating existing coverage (Major, adversarial);
+a test comment placing the identifier gate at display where it runs at admission (Major, all three); the
+`sweepPartialLine` header miscounting its callers after the change (Major, blind). Minors: an `!== null` scope guard
+that would print `machine:undefined` for a hit shape lacking the field; the persist routing untested in the positive
+direction; a blocking `runHome` beside a live in-process server; one overstating test comment; the pairs block's
+pre-existing gate comment. All adopted and applied; the memory-system skill's add-type row (line 30) and
+`docs/security-model.md`'s neighbours row (line 58) were adjudicated not falsified, no edit. The fix delta (two test
+rewrites each shown red, the store-segment one by bypass probe restored from a pre-probe copy and verified by diff
+and md5, the persist one by pointing the assertion at the old wording; comment repairs; one guard) was read by this
+session against the code rather than lensed again.
+blind: reviewed the three code and test files; docs/ paths withheld.
+Stamps: adjudicated 3, stamped 1 (`a-queued-agent-looks-identical-to-one-that-never-started`, operator tier: the
+third review lens was read as queued behind the two admitted ones rather than never started); skipped 2
+(`function-hooks-prototype-ships-behind-a-flag`, `forward-resource-arrangements-into-dispatch-briefs`, both read by
+nudge, neither steering).
+Gate: Targeted lane `node --test test/size-ratchet.test.js test/doctrine-parity.test.js`: 149 tests, 149 passing,
+0 failing, 0 skipped, exit 0 read from the run's own marker (`.kit/verify/lane-s5c.exit`); the
+implementer's own runs read 149/149 exit 0 after each round. Full `node --test test/memq.test.js`: 701 tests,
+701 passing, 0 failing, 0 skipped, exit 0, 256 s, against the section-4 close's 697/697
+exit 0 (four tests added net). Whole gate `node --test test/*.test.js`, run before the push because main is the
+install surface: 3178 tests, 3168 passing, 1 failing, 9 skipped, exit 1, 388 s,
+against the section-4 close baseline 3174/3164/1/9 at exit 1; the one failure is this box's standing red,
+`a pinned directory too long to name faithfully stands the session down`. Measured on the main checkout at HEAD 62d242f with 1 foreign dirty files (ocs/plans/claude-kit_write-time-neighbours_spec_v1.md) beside
+this section's four dirty files. Contention lane: the heavy-process claim read before the spawn and found empty, the
+process poll showed only the Discord relays, the kit sidecar daemon, a `dsh web` and `ccstatusline`, this session's
+claim written at 2026-09-06T11:27:16.487Z (estimate 1800 s) and released after the runs.
+Next: finishing-work for this plan.
 Commit Model: Commit-and-Push

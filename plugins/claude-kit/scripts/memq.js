@@ -5851,20 +5851,24 @@ async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
     // about to treat this ranking as the machine's answer: a record the
     // sweep could not read or embed is absent from the index, and absence
     // from a partial index is not evidence of absence from the store.
+    //
+    // Both lines are the shared helpers', which every surface that ranks on a
+    // sweep of its own says them through: a reader comparing a search's account
+    // of one sweep with an authoring block's meets one account, and the helper
+    // names an unscannable directory as a directory rather than counting it among
+    // the records the index is missing, which is what one count over both kinds
+    // of failed entry reports. What this caller supplies is what its own reading
+    // is called and what a partial one costs it.
+    //
+    // The helpers end their line in a newline, for the callers that write it
+    // straight to stderr. A note is printed with a newline of its own, so the
+    // helper's is dropped here.
     const swept = result.sweep;
-    const failedCount = swept && Array.isArray(swept.failed) ? swept.failed.length : 0;
-    const carriedCount = swept && typeof swept.carried === 'number' ? swept.carried : 0;
-    if (failedCount > 0 || carriedCount > 0) {
-        notes.push('memq: the semantic index is partial this run ('
-            + failedCount + ' record(s) unreadable or unembeddable and so missing, '
-            + carriedCount + ' served unverified from a directory that could not be scanned);'
-            + ' a semantic miss here proves nothing');
-    }
-    if (swept && swept.written === false && swept.writeError) {
-        notes.push('memq: could not persist the semantic index ('
-            + sanitize(swept.writeError, 200) + '); these results are complete,'
-            + ' and the next find sweeps again');
-    }
+    const facts = sweepFacts(swept);
+    const partial = sweepPartialLine(facts, 'this search', 'a semantic miss here proves nothing');
+    if (partial !== '') notes.push(partial.replace(/\n$/, ''));
+    const persist = sweepPersistLine(facts, 'these results');
+    if (persist !== '') notes.push(persist.replace(/\n$/, ''));
 
     // Admission and ranking, per the blend constants above.
     const tallies = new Map();
@@ -6025,32 +6029,64 @@ async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
         // same two facts in its own words. In the shared shape, so the caller
         // that says them reads one field set whichever door its sweep came
         // through.
-        sweep: sweepFacts(swept)
+        sweep: facts
     };
 }
 
-// One displayed line per semantic hit, indented under the channel's fence:
-// name, similarity, tier-and-store provenance, then the retirement, the
-// supersession, the foreign-machine, and the applied labels where they hold.
-// Deliberately no
-// description and no body. A name in this store is a fact-bearing phrase
-// (memories are named for what they teach, not numbered), so a name plus
-// provenance is already an answer, and holding the channel to names and
-// labels means the one emission path spanning stores this project never
-// opened carries no free prose at all: every fragment here is a
-// charset-closed identifier (the machine value re-validated against its
-// writer's gate at admission), a number, or this module's own words. A hit
-// in a tier this project resolves is fetched with `get`, whose read the
-// decay clock can see; a cross-store hit is outside `get`'s reach from
-// here, and its provenance label is the address for opening the file by
-// path.
-function semanticHitLine(h, now) {
+// One displayed line per hit of the fenced cross-store channel, indented under
+// that fence: the record's name, its similarity where the calling surface prints
+// one, the tier-and-store provenance carrying the retirement and supersession
+// labels the hit holds, the foreign-machine scope where the surface prints one,
+// and the overlap label where the caller judged one.
+//
+// Every block printing this channel prints its hits through here, because the
+// reductions on this line are properties of the output channel rather than of
+// any one producer: the name's charset reduction and cap, the provenance label's
+// own caps, and the machine value's cap all live here, so no producer restates a
+// guard and none can come to spell one differently.
+//
+// `flags` says which optional fields the calling surface prints, and each is a
+// deliberate difference between surfaces. A model-judged ranking carries no
+// similarity to print and no scope judgment to make of one, and the overlap
+// label is the authoring block's own reading of its own floor rather than
+// anything this function decides. The retirement and the supersession are
+// properties of the hit instead of flags: a retired or replaced record whose
+// label is dropped reads as a live one, and a reader acting on the top block of
+// a search and an author reading a neighbours block are acting on the same fact,
+// so both labels print wherever the hit carries them, inside the parentheses
+// they qualify. The scope guard tests the value rather than comparing it against
+// null, because a hit shape carrying no scope field at all is a hit with no
+// scope: a null comparison would print the absent field as the word `undefined`.
+//
+// Deliberately no description and no body. A name in this store is a
+// fact-bearing phrase (memories are named for what they teach, not numbered), so
+// a name plus provenance is already an answer, and holding the channel to names
+// and labels means the one emission path spanning stores this project never
+// opened carries no free prose at all: every fragment here is a charset-closed
+// identifier (the machine value re-validated against its writer's gate at
+// admission), a number, or this module's own words. A hit in a tier this project
+// resolves is fetched with `get`, whose read the decay clock can see; a
+// cross-store hit is outside `get`'s reach from here, and its provenance label
+// is the address for opening the file by path. A suffix a surface appends after
+// this line is held to that same rule by the surface that appends it.
+function hitLine(h, flags) {
+    const f = flags || {};
     let label = tierProvenanceLabel(h.tier, h.store);
     if (h.archived) label += ', retired';
     if (h.superseded) label += ', superseded';
-    let line = '  ' + sanitize(h.name, NAME_CAP) + '  ' + h.score.toFixed(2)
-        + '  (' + label + ')';
-    if (h.machine !== null) line += '  machine:' + sanitize(h.machine, MACHINE_CAP);
+    let line = '  ' + sanitize(h.name, NAME_CAP);
+    if (f.score) line += '  ' + h.score.toFixed(2);
+    line += '  (' + label + ')';
+    if (f.machine && h.machine) line += '  machine:' + sanitize(h.machine, MACHINE_CAP);
+    if (f.overlap) line += '  likely overlap';
+    return line;
+}
+
+// find's semantic block's hit line: the channel's shared line with the
+// similarity and the foreign-machine scope, then the applied tally and recency
+// this block alone prints.
+function semanticHitLine(h, now) {
+    let line = hitLine(h, { score: true, machine: true });
     // A tally and a recency are two different facts, and folding them into
     // one number ("applied 4d") reads as an age even though it counts
     // distinct days used, not days since. Splitting them into `applied x<n>`
@@ -6066,9 +6102,9 @@ function semanticHitLine(h, now) {
 }
 
 // The address of the tier a hit sits in: which tier, and which instance of it.
-// Single-sourced because two blocks print it now, the semantic one and the
-// model-judged one, and a reader comparing the two rankings line by line is
-// comparing these labels; two spellings of one tier would read as two places.
+// Single-sourced because every block printing this channel's hit line prints it,
+// and a reader comparing two of those rankings line by line is comparing these
+// labels; two spellings of one tier would read as two places.
 // The operator tier needs no instance name because there is one of it, and the
 // pending tier is the display's own label for records that have no index
 // identity at all.
@@ -6249,13 +6285,15 @@ function judgedClause(endpointIsLocal) {
 // It is sanitized to short printable ASCII and capped, because it reaches a
 // terminal and anything quoting it.
 //
-// The retirement and supersession tokens ride here exactly as they do on a
-// semantic hit line, and for a sharper reason: under `--archived` a retired
-// record can be ranked first by the model, and a top line indistinguishable
-// from a live one is how a reader acts on a record the store retired. A cut
-// clause is marked, because this module's own failureText marks its cut for the
-// same reason: a sentence that ends where it means to and one the renderer
-// stopped mid-phrase are two different facts about the answer.
+// The name, the provenance and the retirement and supersession labels are the
+// shared composer's, and the reason those two labels print here is sharper than
+// on any other surface: under `--archived` a retired record can be ranked first
+// by the model, and a top line indistinguishable from a live one is how a reader
+// acts on a record the store retired. The similarity and the machine scope are
+// withheld, this ranking carrying no number of its own and making no scope
+// judgment. A cut clause is marked, because this module's own failureText marks
+// its cut for the same reason: a sentence that ends where it means to and one
+// the renderer stopped mid-phrase are two different facts about the answer.
 // The clause budget arrives as an argument rather than being read from the
 // prompt module here. Reading it here puts a require on a render loop that runs
 // outside judgedChannel's try/catch, which survives only because a non-empty
@@ -6264,10 +6302,7 @@ function judgedClause(endpointIsLocal) {
 // defect class this channel's own comment claims to prevent, so the caller
 // resolves the cap once inside the guard and passes it here.
 function judgedHitLine(h, reasonCap) {
-    let label = tierProvenanceLabel(h.tier, h.store);
-    if (h.archived) label += ', retired';
-    if (h.superseded) label += ', superseded';
-    const line = '  ' + sanitize(h.name, NAME_CAP) + '  (' + label + ')';
+    const line = hitLine(h, {});
     const cap = reasonCap;
     const why = sanitize(h.why, cap + 1);
     if (why === '') return line;
@@ -11660,10 +11695,10 @@ function sweepFacts(swept) {
 }
 
 // The two lines a block says about the sweep behind it, before any reading of
-// that sweep prints. Both surfaces that rank on a sweep of their own say them, so
-// the counts and their nouns live here: a reader comparing a find's line with a
-// scan's must meet one account of one sweep, and the two lines went to two
-// callers by being hand-copied once already.
+// that sweep prints. Every surface that ranks on a sweep of its own says them
+// through here, so the counts and their nouns live here: a reader comparing a
+// find's line with a scan's must meet one account of one sweep, and a count each
+// surface spelled for itself is a count that drifts.
 //
 // What each caller supplies is what the reading is called and what a partial one
 // costs it, because those differ. A missed neighbour costs an author a duplicate
@@ -11855,9 +11890,9 @@ function printTierPairs(mi, t, vectors) {
     }
     // A record's `machine:` scope, which decides whether a pair is one fact at
     // all, stated where the block's exclusions are. The field is read through the
-    // gate the authoring block's hit line reads it through, so the two surfaces
-    // cannot come to disagree about what counts as a machine name, and every
-    // answer short of an admitted identity is no scope, which is the safe
+    // admission gate the authoring block's own channel reads it through, so the
+    // two surfaces cannot come to disagree about what counts as a machine name,
+    // and every answer short of an admitted identity is no scope, which is the safe
     // direction here: an unread field withholds no pair. The read is lazy and
     // cached, the pin's rule on this same line, because only a pair at or above
     // the floor asks the question and a tier's pairs grow with the square of its
@@ -14680,20 +14715,17 @@ async function neighbourBlock(name, description) {
     for (const h of channel.hits) {
         const near = h.score >= NEIGHBOUR_FLOOR;
         if (near) overlap = true;
-        // A name, a number and provenance, held to the emission rules the
-        // semantic hit line is held to: this is that same cross-store channel,
-        // so the name takes that line's sanitize, the tier takes its shared
-        // label rather than a second spelling of one, and the machine scope
-        // takes its cap. The scope is carried because this block adds a judgment
-        // that depends on it: an operator-tier record scoped to another box is
-        // not a fact about this machine, and a line that omitted the scope would
-        // put `likely overlap` on a record the author has no overlap with.
-        process.stderr.write('  ' + sanitize(h.name, NAME_CAP) + '  '
-            + h.score.toFixed(2)
-            + '  (' + tierProvenanceLabel(h.tier, h.store) + ')'
-            + (h.superseded ? '  superseded' : '')
-            + (h.machine !== null ? '  machine:' + sanitize(h.machine, MACHINE_CAP) : '')
-            + (near ? '  likely overlap' : '') + '\n');
+        // A name, a number and provenance, through the composer every block of
+        // this cross-store channel prints its hits through, so the name's
+        // reduction, the tier's label and the machine scope's cap are one
+        // spelling here and in a find rather than two that have to be kept in
+        // step. The scope is asked for because this block adds a judgment that
+        // depends on it: an operator-tier record scoped to another box is not a
+        // fact about this machine, and a line that omitted the scope would put
+        // `likely overlap` on a record the author has no overlap with. The
+        // overlap label is this block's own reading of its own floor, which is
+        // why it arrives as a flag rather than being decided inside the line.
+        process.stderr.write(hitLine(h, { score: true, machine: true, overlap: near }) + '\n');
     }
     // A retired near-duplicate is withheld from the lines above, and the count
     // is said rather than left out: a bare heading over no lines is this
@@ -17175,6 +17207,7 @@ module.exports = {
     recallDigest,
     recentDigest,
     withheldLine,
+    hitLine,
     judgedClause,
     judgedHitLine,
     judgedCandidates,

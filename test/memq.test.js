@@ -15588,11 +15588,81 @@ test('a partly failed sweep is said out loud and the surviving hits still serve'
         const res = run(store, ['find', 'zebra quantum'], withEmbedder(emb));
         assert.strictEqual(res.status, 0, 'a partial sweep never fails the find: ' + res.stderr);
         assert.match(res.stderr,
-            /semantic index is partial this run \(1 record\(s\) unreadable or unembeddable/);
+            /this search is partial \(1 record\(s\) unreadable or unembeddable\)/);
         const hits = semanticBlockLines(res.stdout);
         assert.ok(hits !== null, res.stdout);
         assert.ok(hits.some((l) => l.includes('  healthy-note  ')), JSON.stringify(hits));
         assert.ok(!res.stdout.includes('poison-note'), 'the failed record is absent, and said to be');
+    } finally {
+        rmFakeEmbedder(emb);
+        rmStore(store);
+    }
+});
+
+test('a directory the sweep could not scan is counted as a directory in a find\'s partial line,'
+    + ' not as a record the index is missing', () => {
+    const store = makeStore();
+    const emb = makeFakeEmbedder();
+    try {
+        // A plain file where the projects root's directory goes: the root is
+        // there and cannot be enumerated, so the sweep reports one entry that
+        // names no record at all. A count taken over both kinds of entry reports
+        // that refused directory as a memory the index is missing, which sends a
+        // reader looking for a record the sweep never claimed to have lost.
+        plantAt(store, ['memory-operator'], 'healthy-note', 'zebra quantum healthy body\n');
+        fs.writeFileSync(path.join(store.root, 'projects'), 'not a directory\n', 'utf8');
+
+        const res = run(store, ['find', 'zebra quantum'], withEmbedder(emb));
+        assert.strictEqual(res.status, 0, 'a partial sweep never fails the find: ' + res.stderr);
+        const partial = res.stderr.split('\n')
+            .find((l) => l.startsWith('memq: this search is partial'));
+        assert.ok(partial !== undefined, 'the partial line printed: ' + res.stderr);
+        assert.strictEqual(partial, 'memq: this search is partial (1 directory(ies) that could'
+            + ' not be scanned); a semantic miss here proves nothing');
+        // The line the helper returns ends in a newline and the notes printer adds
+        // one, so the count is pinned: a blank line above the results reads as a
+        // block that went missing between them.
+        assert.ok(res.stderr.includes(partial + '\n') && !res.stderr.includes(partial + '\n\n'),
+            'exactly one newline closes it: ' + JSON.stringify(res.stderr));
+        assert.ok(!res.stderr.includes('record(s) unreadable or unembeddable'),
+            'and no record is claimed missing: ' + res.stderr);
+        const hits = semanticBlockLines(res.stdout);
+        assert.ok(hits !== null && hits.some((l) => l.includes('  healthy-note  ')),
+            'the records the walk did reach still serve: ' + res.stdout);
+    } finally {
+        rmFakeEmbedder(emb);
+        rmStore(store);
+    }
+});
+
+test('an index a find\'s sweep cannot persist is reported in the find\'s own terms', () => {
+    const store = makeStore();
+    const emb = makeFakeEmbedder();
+    try {
+        // A directory where the index file goes: the sweep answers and the persist
+        // fails, which is the state the note exists for. The store holds a record
+        // because the line is said only where there were records to persist: an
+        // index write over an empty store fails for the same reason there was
+        // nothing to index, and every surface sharing this line withholds it there.
+        plantAt(store, ['memory-operator'], 'healthy-note', 'zebra quantum healthy body\n');
+        fs.mkdirSync(path.join(store.root, 'memory-index.jsonl'), { recursive: true });
+
+        const res = run(store, ['find', 'zebra quantum'], withEmbedder(emb));
+        assert.strictEqual(res.status, 0, 'a failed persist never fails the find: ' + res.stderr);
+        const note = res.stderr.split('\n')
+            .find((l) => l.startsWith('memq: could not persist the semantic index'));
+        assert.ok(note !== undefined, 'the failure is reported: ' + res.stderr);
+        // The positive instance of this caller's own tail, which is what gives the
+        // authoring and scan cases' assertions that they carry no find wording
+        // something to discriminate against.
+        assert.ok(note.endsWith('these results are complete, and the next command that needs'
+            + ' the index sweeps again'), 'in this caller\'s terms: ' + note);
+        assert.ok(!note.includes('these neighbours are complete')
+            && !note.includes('these pairs are complete'),
+            'and not in another caller\'s: ' + note);
+        const hits = semanticBlockLines(res.stdout);
+        assert.ok(hits !== null && hits.some((l) => l.includes('  healthy-note  ')),
+            'and the ranking the sweep did produce still serves: ' + res.stdout);
     } finally {
         rmFakeEmbedder(emb);
         rmStore(store);
@@ -27641,8 +27711,9 @@ test('a superseded neighbour carries the search\'s own supersession label', (t) 
         assert.ok(block !== null, res.stderr);
         const line = block.hits.find((l) => l.includes('  unsigned-artifacts-are-refused  '));
         assert.ok(line !== undefined, JSON.stringify(block.hits));
-        assert.match(line, / {2}\(operator\) {2}superseded {2}likely overlap$/,
-            'the label sits between the provenance and the overlap: ' + line);
+        assert.match(line, / {2}\(operator, superseded\) {2}likely overlap$/,
+            'the label qualifies the provenance it sits inside, the spelling every'
+                + ' surface of this channel prints: ' + line);
     } finally {
         rmHomeStore(store);
     }
@@ -28173,7 +28244,7 @@ test('an index the sweep cannot persist is reported in this caller\'s terms, and
         assert.ok(note !== undefined, 'the failure is reported: ' + res.stderr);
         assert.ok(note.endsWith('these neighbours are complete, and the next command that needs'
             + ' the index sweeps again'), 'in this caller\'s terms: ' + note);
-        assert.ok(!note.includes('the next find sweeps again'),
+        assert.ok(!note.includes('these results are complete'),
             'not in a find\'s: ' + note);
 
         // The same failure with nothing swept says nothing: a store with no
@@ -28334,6 +28405,201 @@ test('an add sends nothing to the model endpoint, on a store where a find does',
         assert.strictEqual(found.status, 0, found.stderr);
         assert.ok(server.requests.length > 0,
             'the endpoint is reachable from this fixture: ' + found.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+// --------------------------- one composer for this channel's hit line -------
+//
+// find's semantic block, find's model-judged block and the authoring verbs'
+// neighbours block all print the fenced cross-store channel's hit line, and one
+// composer owns it: the name's charset reduction and cap, the provenance label,
+// the retirement and supersession labels, the machine scope's cap and the
+// similarity's format are its, and each surface says through flags which of
+// the optional fields it prints. Every case here drives the surfaces end to end,
+// because the failure worth catching is one producer composing its own line
+// again: a case calling the composer directly would go green while a surface
+// printed something else.
+
+// The parenthesised provenance clause of a hit line, with the two spaces that
+// introduce it: the tier, the store instance, and the labels the hit carries.
+// Read out of the rendered line, so a case compares what a reader sees rather
+// than what a helper returns.
+function hitProvenance(line) {
+    const m = / {2}\([^)]*\)/.exec(line);
+    assert.ok(m !== null, 'the line carries a provenance clause: ' + line);
+    return m[0];
+}
+
+// A hit line up to and including that clause: everything before any
+// surface-specific suffix, which is the stretch one composer has to spell
+// identically for two surfaces asking it for the same fields.
+function hitLineHead(line) {
+    const m = / {2}\([^)]*\)/.exec(line);
+    assert.ok(m !== null, 'the line carries a provenance clause: ' + line);
+    return line.slice(0, m.index + m[0].length);
+}
+
+test('one composed line reaches find\'s semantic block, find\'s judged block and an authoring'
+    + ' verb\'s neighbours block unchanged', async (t) => {
+        const store = makeHomeStore();
+        try {
+            if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+            installHomeEmbedder(store);
+            // One hit every surface reaches, carrying a label the store decides
+            // rather than the surface: a live operator-tier record that a second
+            // live record of its own tier replaces. A reader acting on the top
+            // block of a find and an author reading the neighbours block are
+            // reading the same fact about the same record, so the two may not
+            // spell it differently.
+            plantAt(store, ['memory-operator'], 'unsigned-artifacts-are-refused',
+                '# unsigned-artifacts-are-refused\n\nthe deploy pipeline refuses an unsigned'
+                + ' artifact\n');
+            plantAt(store, ['memory-operator'], 'newer-answer',
+                '---\nsupersedes: unsigned-artifacts-are-refused\n---\n# newer-answer\n\n'
+                + 'bananas are yellow fruit\n');
+            const name = 'unsigned-artifact-refusal';
+            const description = 'the deploy pipeline refuses an unsigned artifact';
+            // The find runs on the very text the neighbours check embeds for the
+            // record added below, composed through the index's own rewrite, so
+            // both surfaces score this hit against one query vector and a
+            // similarity that differed between them would be a real difference
+            // rather than an artifact of two fixtures.
+            const query = mi.embedText(name, description);
+            const server = await rankingEndpoint(t, (body) => rankedAnswer([[
+                candidateNumberOf(body.prompt, 'unsigned-artifacts-are-refused'),
+                'unsigned-artifacts-are-refused', 'the refusal itself'
+            ]]));
+            fs.mkdirSync(store.root, { recursive: true });
+            fs.writeFileSync(path.join(store.root, 'kit-endpoint.json'),
+                JSON.stringify({ url: server.url, model: 'test-model' }), 'utf8');
+
+            const found = await runHomeServed(store, ['find', query], HOME_EMBEDDER);
+            assert.strictEqual(found.status, 0, found.stderr);
+            const semantic = (semanticBlockLines(found.stdout) || [])
+                .find((l) => l.includes('  unsigned-artifacts-are-refused  '));
+            const judged = (judgedBlockLines(found.stdout) || [])
+                .find((l) => l.includes('  unsigned-artifacts-are-refused  '));
+            assert.ok(semantic !== undefined, 'the semantic block ranked it: ' + found.stdout);
+            assert.ok(judged !== undefined, 'the judged block ranked it: ' + found.stdout);
+
+            // The served runner, not the blocking one: the endpoint above answers
+            // on this process's own loop for the whole case, and spawnSync blocks
+            // the loop it answers on.
+            const added = await runHomeServed(store, ['add-operator', name, description],
+                HOME_EMBEDDER);
+            assert.strictEqual(added.status, 0, added.stderr);
+            const block = neighbourBlock(added.stderr);
+            assert.ok(block !== null, added.stderr);
+            const neighbour = block.hits
+                .find((l) => l.includes('  unsigned-artifacts-are-refused  '));
+            assert.ok(neighbour !== undefined, JSON.stringify(block.hits));
+
+            // The provenance clause is what every surface prints for this hit
+            // whatever its flags, the supersession label inside the parentheses
+            // it qualifies. One spelling on every surface below.
+            assert.strictEqual(hitProvenance(judged), '  (operator, superseded)', judged);
+            assert.strictEqual(hitProvenance(semantic), hitProvenance(judged),
+                'find\'s own blocks agree: ' + semantic + ' against ' + judged);
+            assert.strictEqual(hitProvenance(neighbour), hitProvenance(judged),
+                'and the neighbours block does not spell it its own way: '
+                    + neighbour + ' against ' + judged);
+            // The surfaces asking for the same fields print the whole line
+            // through that clause identically, byte for byte, name and
+            // similarity included.
+            assert.strictEqual(hitLineHead(neighbour), hitLineHead(semantic),
+                'one composer, one line: ' + neighbour + ' against ' + semantic);
+            // And the judged surface's own flags are the deliberate difference,
+            // pinned so a drift into printing a similarity there fails here: its
+            // ranking carries no number to print.
+            assert.strictEqual(hitLineHead(judged),
+                '  unsigned-artifacts-are-refused  (operator, superseded)', judged);
+
+            // The composer itself, over the hit the surfaces above just printed
+            // and each surface's own flags: one hit and one flag set yield one
+            // string, and each surface printed that string. The identity fields
+            // are the planted record's own literals and the similarity is read off
+            // the rendered line, the embedder's number being the fixture's
+            // business rather than this case's.
+            const hit = {
+                name: 'unsigned-artifacts-are-refused',
+                tier: 'operator',
+                store: memq.OPERATOR_LABEL,
+                score: neighbourScore(neighbour),
+                archived: false,
+                superseded: true,
+                machine: null
+            };
+            assert.strictEqual(memq.hitLine(hit, { score: true, machine: true }),
+                hitLineHead(semantic), 'the semantic surface prints the composer\'s line');
+            assert.strictEqual(memq.hitLine(hit, { score: true, machine: true, overlap: true }),
+                neighbour, 'and the neighbours surface prints it with its own label');
+            assert.strictEqual(memq.hitLine(hit, {}), hitLineHead(judged),
+                'and the judged surface prints it with neither optional field');
+        } finally {
+            rmHomeStore(store);
+        }
+    });
+
+test('a store segment past the display cap is cut identically by every surface that prints the'
+    + ' provenance clause', async (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The store's own identity gate admits a segment far longer than the
+        // display cap, and a project segment is a flattened absolute path, so a
+        // deep checkout produces one: this is the reduction on this line a hit
+        // actually carries. The cut happens inside the shared composer, so every
+        // surface has to make it at the same character, which is the whole reason
+        // the label is single-sourced: two spellings of one store read as two
+        // places to a reader comparing rankings line by line.
+        const segment = 'D--Temp-a-very-deeply-nested-checkout-whose-flattened-segment-runs'
+            + '-well-past-the-display-cap-here';
+        plantAt(store, ['projects', segment, 'memory'], 'deep-store-twin',
+            '# deep-store-twin\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const name = 'unsigned-artifact-refusal';
+        const description = 'the deploy pipeline refuses an unsigned artifact';
+        const query = mi.embedText(name, description);
+        const server = await rankingEndpoint(t, (body) => rankedAnswer([[
+            candidateNumberOf(body.prompt, 'deep-store-twin'), 'deep-store-twin', 'the refusal'
+        ]]));
+        fs.mkdirSync(store.root, { recursive: true });
+        fs.writeFileSync(path.join(store.root, 'kit-endpoint.json'),
+            JSON.stringify({ url: server.url, model: 'test-model' }), 'utf8');
+
+        const found = await runHomeServed(store, ['find', query], HOME_EMBEDDER);
+        assert.strictEqual(found.status, 0, found.stderr);
+        const semantic = (semanticBlockLines(found.stdout) || [])
+            .find((l) => l.includes('  deep-store-twin  '));
+        const judged = (judgedBlockLines(found.stdout) || [])
+            .find((l) => l.includes('  deep-store-twin  '));
+        const added = await runHomeServed(store, ['add-operator', name, description],
+            HOME_EMBEDDER);
+        assert.strictEqual(added.status, 0, added.stderr);
+        const block = neighbourBlock(added.stderr);
+        assert.ok(block !== null, added.stderr);
+        const neighbour = block.hits.find((l) => l.includes('  deep-store-twin  '));
+        assert.ok(semantic !== undefined && judged !== undefined && neighbour !== undefined,
+            'every surface ranked the record: ' + found.stdout + added.stderr);
+
+        // The cut is read off a rendered line rather than mirrored from the cap,
+        // so this case cannot go green against a cap it spelled for itself: what
+        // prints is a leading stretch of the planted segment and is shorter than
+        // it, and the uncut segment reaches no surface at all.
+        const clause = hitProvenance(semantic);
+        assert.match(clause, /^ {2}\(project:[\w.-]+\)$/, clause);
+        const shown = clause.slice('  (project:'.length, -1);
+        assert.ok(segment.startsWith(shown) && shown.length < segment.length,
+            'the clause carries a leading cut of the segment: ' + shown);
+        for (const [surface, line] of [['find semantic', semantic], ['find judged', judged],
+            ['add-operator neighbours', neighbour]]) {
+            assert.strictEqual(hitProvenance(line), clause,
+                surface + ' cuts the segment where the others do: ' + line);
+            assert.ok(!line.includes(segment),
+                surface + ' prints no uncut segment: ' + line);
+        }
     } finally {
         rmHomeStore(store);
     }
@@ -28812,7 +29078,7 @@ test('an index the sweep cannot persist is reported in the scan\'s own terms, ab
             + ' the index sweeps again'), 'in this caller\'s terms: ' + note);
         assert.ok(!note.includes('these neighbours are complete'),
             'not in the authoring block\'s: ' + note);
-        assert.ok(!note.includes('the next find sweeps again'), 'and not in a find\'s: ' + note);
+        assert.ok(!note.includes('these results are complete'), 'and not in a find\'s: ' + note);
         // Above the heading, at column zero, with no pair beneath it: what the
         // line reports is the sweep behind the reading, not the reading.
         assert.deepStrictEqual(tierPairs(res.stderr, 'project'),

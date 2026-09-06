@@ -224,23 +224,25 @@ const ESCAPED_QUOTE = /\\["']/;
 // this hook's environment, so any of them being set at all refuses the grant.
 //
 // No variable of the kit's belongs here. The memq paths that load code out of a
-// named directory are find, and the authoring verbs add-type and add-operator,
-// whose write-time neighbours check reaches the same require; the set is pinned
-// whole, callers included, by the closure assertion in test/memq-grant.test.js,
-// which is where a new path shows up rather than in this sentence. Each reaches
-// it through scripts/memory-index.js, which requires an embedder package out of
-// KIT_EMBEDDER_ROOT and runs it in process. find is withheld by the argument
-// screen below. The authoring verbs are granted, and what keeps them off that
-// require is their own stand-down, which skips the check whenever
-// KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT is present. That is this same condition
-// read in the child rather than here, so it matches the divergence below rather
-// than closing it. Screening the root would not have closed the
-// class in any case, since embedderRoot() falls back to a directory under
-// os.homedir() and that reads HOME or USERPROFILE, which are always set: a
-// refusal on their presence would refuse every command there is. The other
-// root this repo gates the same way, KIT_PLUGINS_ROOT, selects which memq a
-// shim resolves; it is absent for its own reason, that the grant names this
-// script by absolute path and the child loads no shim.
+// named directory are find, the authoring verbs add-type and add-operator, whose
+// write-time neighbours check reaches the same require, and decay-scan, whose
+// neighbour-pairs block reaches it after the drift block and, like find's own
+// channel, sweeps the derived vector index and persists it in process; the set
+// is pinned whole, callers included, by the closure assertion in
+// test/memq-grant.test.js, which is where a new path shows up rather than in this
+// sentence. Each reaches it through scripts/memory-index.js, which requires an
+// embedder package out of KIT_EMBEDDER_ROOT and runs it in process. find is
+// withheld by the argument screen below. The authoring verbs and the scan are
+// granted, and what keeps them off that require is one stand-down they share,
+// which skips the check whenever KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT is
+// present. That is this same condition read in the child rather than here, so it
+// matches the divergence below rather than closing it. Screening the root would
+// not have closed the class in any case, since embedderRoot() falls back to a
+// directory under os.homedir() and that reads HOME or USERPROFILE, which are
+// always set: a refusal on their presence would refuse every command there is.
+// The other root this repo gates the same way, KIT_PLUGINS_ROOT, selects which
+// memq a shim resolves; it is absent for its own reason, that the grant names
+// this script by absolute path and the child loads no shim.
 const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 
 // The verbs a prompt-free allow covers, which is memq's own subcommand list
@@ -551,10 +553,12 @@ function grantable(p) {
     // that falls back to one inside the caller's own HOME. No environment screen
     // can bound that directory, since HOME is always set, so the verb is left off
     // the list instead. It is not the only verb that can reach that require:
-    // add-type and add-operator are granted, and their write-time neighbours
-    // check reaches it too, stood down in the child on the presence of
-    // KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT rather than by anything this hook
-    // screens. The cost is
+    // add-type and add-operator are granted and their write-time neighbours check
+    // reaches it, and decay-scan is granted and its neighbour-pairs block reaches
+    // it after the drift block, sweeping the derived vector index and persisting
+    // it in process as find's own channel does, each stood down in the child on
+    // the presence of KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT rather than by
+    // anything this hook screens. The cost is
     // deliberate and worth naming: a fleet worker gets no semantic search at
     // all, not a prompt for one. It is affordable because recall is the
     // retrieval path an effort starts from by the memory skill's own design,

@@ -217,6 +217,18 @@ const REMINDER_TYPE_OP = REMINDER
 // it.
 const NO_DRIFT = 'memq: no anchor drift (project tier)\n';
 
+// The scan's neighbour-pairs block as this suite's ordinary children print it.
+// They all carry KIT_MEMORY_ROOT, whose bare presence stands the check down, so
+// every exact-stderr case below carries one heading per tier the scan reached,
+// each naming the variable that fired rather than the honored pair. Spelled once
+// here because those cases carry it wherever their store reaches a tier; the
+// cases that run the check take the home-redirected harness at the end of this
+// file, where neither store signal is set.
+function pairsStoodDown(tiers) {
+    return tiers.map((t) => 'memq: neighbour pairs (' + t
+        + '): not checked (a pinned store root (KIT_MEMORY_ROOT))\n').join('');
+}
+
 // What a recall coverage line says about a tier whose anchors that digest
 // never resolves: the shared tiers, which have no root here, and the pending
 // tier, which the digest's one check does not span. Neither may read like a
@@ -1377,8 +1389,10 @@ test('decay-scan flags a memory idle past each threshold and not one with a rece
 
         const res = run(store, ['decay-scan']);
         assert.strictEqual(res.status, 0, res.stderr);
-        assert.strictEqual(res.stderr, 'memq: usage evidence: 1 stamp across 1 file\n' + NO_DRIFT,
-            'the standing evidence line and the clean drift answer are the only notes a clean store gets');
+        assert.strictEqual(res.stderr, 'memq: usage evidence: 1 stamp across 1 file\n' + NO_DRIFT
+            + pairsStoodDown(['project']),
+        'the standing evidence line, the clean drift answer and the stood-down pairs heading'
+            + ' are the only notes a clean store gets');
         // Exact lines: each candidate carries the evidence dates that justify
         // it, and the class-then-name order is a total order, so the output
         // is byte-stable for identical store state.
@@ -1689,7 +1703,8 @@ test('each distinct applied day extends both thresholds by 30 idle days, inclusi
 
         const res = run(store, ['decay-scan']);
         assert.strictEqual(res.status, 0, res.stderr);
-        assert.strictEqual(res.stderr, 'memq: usage evidence: 24 stamps across 4 files\n' + NO_DRIFT);
+        assert.strictEqual(res.stderr, 'memq: usage evidence: 24 stamps across 4 files\n' + NO_DRIFT
+            + pairsStoodDown(['project']));
         // Both directions at both boundaries: 210 summarizes and 209 does
         // not, 240 archives and 239 is still only a summarize candidate. The
         // tally rides in the applied column, so the judgment reading the line
@@ -1734,7 +1749,8 @@ test('the extension caps at 365 idle days, so a larger tally moves no boundary',
 
         const res = run(store, ['decay-scan']);
         assert.strictEqual(res.status, 0, res.stderr);
-        assert.strictEqual(res.stderr, 'memq: usage evidence: 120 stamps across 5 files\n' + NO_DRIFT);
+        assert.strictEqual(res.stderr, 'memq: usage evidence: 120 stamps across 5 files\n' + NO_DRIFT
+            + pairsStoodDown(['project']));
         // Both boundaries in both directions under the cap: summarize at 395
         // and not 394, archive at 425 and not 424.
         assert.strictEqual(res.stdout,
@@ -1772,7 +1788,8 @@ test('a pinned memory is listed and counted on stderr and never a candidate; del
             'the pinned memory is on no candidate list a prune could act on');
         assert.strictEqual(res.stderr, evidence
             + 'memq: pinned: 1 memory exempt from decay\n'
-            + 'memq: pinned  pinned-old' + oldLine + NO_DRIFT);
+            + 'memq: pinned  pinned-old' + oldLine + NO_DRIFT
+            + pairsStoodDown(['project']));
 
         // Revocation is deleting the field: the same memory, same age, back
         // on the archive list and out of the pinned count.
@@ -1782,7 +1799,8 @@ test('a pinned memory is listed and counted on stderr and never a candidate; del
         assert.strictEqual(revoked.status, 0, revoked.stderr);
         assert.strictEqual(revoked.stdout,
             'archive  loud-old' + oldLine + 'archive  pinned-old' + oldLine);
-        assert.strictEqual(revoked.stderr, evidence + NO_DRIFT, 'nothing is pinned, so no block prints');
+        assert.strictEqual(revoked.stderr, evidence + NO_DRIFT + pairsStoodDown(['project']),
+            'nothing is pinned, so no block prints');
     } finally {
         rmStore(store);
     }
@@ -1815,7 +1833,8 @@ test('the pin is the field\'s presence: an unparseable date, an empty value, and
             + 'memq: pinned: 3 memories exempt from decay\n'
             + 'memq: pinned  dated' + oldLine
             + 'memq: pinned  empty' + oldLine
-            + 'memq: pinned  garbled' + oldLine + NO_DRIFT);
+            + 'memq: pinned  garbled' + oldLine + NO_DRIFT
+            + pairsStoodDown(['project']));
     } finally {
         rmStore(store);
     }
@@ -1855,6 +1874,7 @@ test('a future-dated applied stamp reads as zero idle days, never a negative cou
             + 'memq: pinned  skewed  idle 0d  applied ' + dateOf(ahead)
             + ' (1d distinct)  edited ' + dateOf(d400) + '  read never\n'
             + NO_DRIFT
+            + pairsStoodDown(['project'])
             + 'memq: no decay candidates\n');
         assert.doesNotMatch(res.stderr, /idle -\d+d/, 'the idle clock never runs negative');
     } finally {
@@ -1943,8 +1963,9 @@ test('the frontmatter grammar decides the pin: top level pins, indented is repor
             + 'memq: pinned  top-level' + oldLine
             + 'memq: anchor drift (project tier): 2 records whose anchors could not be read\n'
             + 'memq: drift  faraway  not checked (this record\'s frontmatter could not be read)\n'
-            + 'memq: drift  unterminated  not checked (this record\'s frontmatter could not be read)\n',
-            'a record no reader can read is named as unchecked rather than counted clean');
+            + 'memq: drift  unterminated  not checked (this record\'s frontmatter could not be read)\n'
+            + pairsStoodDown(['project']),
+        'a record no reader can read is named as unchecked rather than counted clean');
     } finally {
         rmStore(store);
     }
@@ -2898,6 +2919,7 @@ test('decay-scan names every drifted record, pinned included, and says so when t
             + 'memq: drift  drifted  changed: src/a.js  missing: src/gone.js\n'
             + 'memq: drift  pinned-drift  changed: src/a.js\n'
             + 'memq: drift  unexaminable  unreadable: lib\n'
+            + pairsStoodDown(['project'])
             + 'memq: no decay candidates\n');
         // Drift nominates and never retires: stdout is the list a prune acts
         // on, and no flag of decay-prune's acts on a drift line.
@@ -3414,7 +3436,11 @@ test("decay-scan's drift block names the pin cause for a pinned session whether 
 // not-checked clause (or its absence).
 //
 //   unpinned + local     ordinary: a fresh anchor earns the clean answer,
-//                        NO_DRIFT, no not-checked clause at all
+//                        NO_DRIFT, and the drift block carries no
+//                        not-checked clause at all (the pairs block's own
+//                        heading carries one under this suite's children,
+//                        which is a different block's account of a different
+//                        condition)
 //   unpinned + network   the hoist ahead of readMemDirOrNote: exit 0,
 //                        stderr names the network share, nothing else
 //                        written
@@ -3441,8 +3467,9 @@ test("decay-scan's four cwd/pin cells: exit code and first not-checked line",
         assert.strictEqual(unpinnedLocal.status, 0, unpinnedLocal.stderr);
         assert.ok(unpinnedLocal.stderr.includes(NO_DRIFT),
             'unpinned+local: the clean answer among decay-scan\'s other lines:\n' + unpinnedLocal.stderr);
-        assert.ok(!unpinnedLocal.stderr.includes('not checked'),
-            'no not-checked clause on the ordinary case:\n' + unpinnedLocal.stderr);
+        assert.ok(!unpinnedLocal.stderr.includes('anchor drift (project tier): not checked'),
+            'no not-checked clause from the drift block on the ordinary case:\n'
+                + unpinnedLocal.stderr);
 
         const unpinnedNetwork = runFrom(store, localUncPath(store.proj), ['decay-scan'], {});
         assert.strictEqual(unpinnedNetwork.status, 0, unpinnedNetwork.stderr);
@@ -4511,8 +4538,9 @@ test('a pinned field the harness moved under metadata pins, silently', () => {
             + ' write it at the frontmatter block\'s top level, where it pins whether or not'
             + ' the harness then moves it under metadata:\n'
             + 'memq: pinned: 1 memory exempt from decay\n'
-            + 'memq: pinned  nested-pin' + oldLine + NO_DRIFT,
-            'the metadata-nested pin is an ordinary pin, reported as nothing else');
+            + 'memq: pinned  nested-pin' + oldLine + NO_DRIFT
+            + pairsStoodDown(['project']),
+        'the metadata-nested pin is an ordinary pin, reported as nothing else');
     } finally {
         rmStore(store);
     }
@@ -4765,6 +4793,7 @@ test('the harness variant that names the record reads exactly as the empty-name 
             + 'memq: pinned  empty-name' + oldLine
             + 'memq: pinned  named-variant' + oldLine
             + NO_DRIFT
+            + pairsStoodDown(['project'])
             + 'memq: no decay candidates\n');
     } finally {
         rmStore(store);
@@ -4878,6 +4907,7 @@ test('the frontmatter budget is 34 author lines past the harness\'s five, and a 
             + 'memq: pinned  at-budget' + oldLine
             + 'memq: anchor drift (project tier): 1 record whose anchors could not be read\n'
             + 'memq: drift  over-budget  not checked (this record\'s frontmatter could not be read)\n'
+            + pairsStoodDown(['project'])
             + 'memq: no decay candidates\n',
             'the last line inside the budget pins, and the overflow is read as a block that'
             + ' never closes at both the pin door and the anchors one');
@@ -5051,6 +5081,7 @@ test('a file time no arithmetic can trust skips an unpinned memory and still lis
             + 'memq: pinned: 1 memory exempt from decay\n'
             + 'memq: pinned  pinned-clock  idle unknown  applied never  edited unknown  read never\n'
             + NO_DRIFT
+            + pairsStoodDown(['project'])
             + 'memq: no decay candidates\n');
     } finally {
         rmStore(store);
@@ -5073,13 +5104,15 @@ test('the pinned listing tails off after 10 with a counted remainder, and the co
         assert.strictEqual(lines[0], 'memq: usage evidence: none (no usage.jsonl)');
         assert.strictEqual(lines[1], 'memq: pinned: 12 memories exempt from decay',
             'the count is the whole population, whatever the listing shows');
-        assert.strictEqual(lines.length, 15,
-            'one evidence line, the count, ten pins, the remainder, the drift answer, the note');
+        assert.strictEqual(lines.length, 16,
+            'one evidence line, the count, ten pins, the remainder, the drift answer, the pairs'
+                + ' heading, the note');
         assert.match(lines[2], /^memq: pinned  pin-00  /);
         assert.match(lines[11], /^memq: pinned  pin-09  /);
         assert.strictEqual(lines[12], 'memq: pinned  ... and 2 more');
         assert.strictEqual(lines[13], 'memq: no anchor drift (project tier)');
-        assert.strictEqual(lines[14], 'memq: no decay candidates');
+        assert.strictEqual(lines[14], pairsStoodDown(['project']).trimEnd());
+        assert.strictEqual(lines[15], 'memq: no decay candidates');
     } finally {
         rmStore(store);
     }
@@ -6003,6 +6036,7 @@ test('the standing evidence line distinguishes an absent sidecar from an unreada
         assert.strictEqual(absent.status, 0);
         assert.strictEqual(absent.stderr,
             'memq: usage evidence: none (no usage.jsonl)\n' + NO_DRIFT
+            + pairsStoodDown(['project'])
             + 'memq: no decay candidates\n');
 
         // Present but unreadable: the case that silently zeroes applied
@@ -6446,7 +6480,8 @@ test('decay-scan covers the declared type tier with labeled candidates and honor
         // decay-prune labels its report lines.
         assert.strictEqual(res.stderr,
             'memq: usage evidence: none (no usage.jsonl)\n'
-            + 'memq: usage evidence: 1 stamp across 1 file  (type:webapp)\n' + NO_DRIFT);
+            + 'memq: usage evidence: 1 stamp across 1 file  (type:webapp)\n' + NO_DRIFT
+            + pairsStoodDown(['project', 'type:webapp']));
     } finally {
         rmStore(store);
     }
@@ -6478,6 +6513,7 @@ test('the pinned count spans both tiers and a type-tier pin carries its tier lab
             + 'memq: pinned  local-pin' + oldLine
             + 'memq: pinned  webapp/shared-pin' + oldLine
             + NO_DRIFT
+            + pairsStoodDown(['project', 'type:webapp'])
             + 'memq: no decay candidates\n');
 
         // The type tier's pin is enforced where its name would be acted on:
@@ -14204,7 +14240,8 @@ test('decay-scan covers the operator tier with labeled candidates and its own ev
         assert.strictEqual(res.stderr,
             'memq: usage evidence: none (no usage.jsonl)\n'
             + 'memq: usage evidence: none (no usage.jsonl)  (type:webapp)\n'
-            + 'memq: usage evidence: 1 stamp across 1 file  (operator)\n' + NO_DRIFT);
+            + 'memq: usage evidence: 1 stamp across 1 file  (operator)\n' + NO_DRIFT
+            + pairsStoodDown(['project', 'type:webapp', 'operator']));
     } finally {
         rmStore(store);
     }
@@ -14226,6 +14263,7 @@ test('an operator-tier pin is listed with its tier label and refuses the retirem
             + 'memq: pinned  operator/op-pin  idle 400d  applied never  edited '
             + dateOf(d400) + '  read never\n'
             + NO_DRIFT
+            + pairsStoodDown(['project', 'operator'])
             + 'memq: no decay candidates\n');
 
         const refused = run(store, ['decay-prune', '--archive-operator', 'op-pin', '--confirm-shared']);
@@ -20019,8 +20057,9 @@ test('the supersedes grammar decides the pointer: top level points, indented doe
         assert.strictEqual(res.status, 0, res.stderr);
         assert.strictEqual(res.stdout, 'archive  top-target  idle 5d  applied never  edited '
             + dateOf(d5) + '  read never  superseded by top-level\n');
-        assert.strictEqual(res.stderr, 'memq: usage evidence: none (no usage.jsonl)\n' + NO_DRIFT,
-            'a pointer that reads as absence is silent, as a tags: under another key is');
+        assert.strictEqual(res.stderr, 'memq: usage evidence: none (no usage.jsonl)\n' + NO_DRIFT
+            + pairsStoodDown(['project']),
+        'a pointer that reads as absence is silent, as a tags: under another key is');
     } finally {
         rmStore(store);
     }
@@ -20054,8 +20093,9 @@ test('a supersedes pointer the harness moved under metadata labels its target', 
         assert.strictEqual(res.status, 0, res.stderr);
         assert.strictEqual(res.stdout, 'archive  meta-target  idle 5d  applied never  edited '
             + dateOf(d5) + '  read never  superseded by meta-successor\n');
-        assert.strictEqual(res.stderr, 'memq: usage evidence: none (no usage.jsonl)\n' + NO_DRIFT,
-            'a pointer read where the harness put it is an ordinary pointer, reported as nothing else');
+        assert.strictEqual(res.stderr, 'memq: usage evidence: none (no usage.jsonl)\n' + NO_DRIFT
+            + pairsStoodDown(['project']),
+        'a pointer read where the harness put it is an ordinary pointer, reported as nothing else');
     } finally {
         rmStore(store);
     }
@@ -20092,8 +20132,9 @@ test('decay-scan nominates a superseded record whatever its idle clock, and a pi
         // reviewer.
         assert.strictEqual(res.stderr, 'memq: usage evidence: none (no usage.jsonl)\n'
             + 'memq: pinned: 1 memory exempt from decay\n'
-            + 'memq: pinned  pinned-target' + columns + '  superseded by pinned-successor\n' + NO_DRIFT,
-            'the pinned record is listed as pinned, nominated by nothing, and labeled');
+            + 'memq: pinned  pinned-target' + columns + '  superseded by pinned-successor\n'
+            + NO_DRIFT + pairsStoodDown(['project']),
+        'the pinned record is listed as pinned, nominated by nothing, and labeled');
     } finally {
         rmStore(store);
     }
@@ -28135,6 +28176,985 @@ test('an add sends nothing to the model endpoint, on a store where a find does',
         assert.strictEqual(found.status, 0, found.stderr);
         assert.ok(server.requests.length > 0,
             'the endpoint is reachable from this fixture: ' + found.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+// ------------------------------- the decay scan's neighbour-pairs block -----
+//
+// After its drift block the scan reports, per tier it reached, the live pairs
+// whose records read as one fact at or above NEIGHBOUR_FLOOR. It nominates and
+// never moves, so every case here asserts the tier is exactly as it was
+// afterwards, and the pairs ride stderr, so every case asserts stdout as well:
+// the candidate list is what a pass parses and no byte of it belongs to this
+// block.
+//
+// The harness is the neighbours block's, for its reason: the check stands down
+// on the bare presence of KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT, which the
+// suite's ordinary children both carry, so a case built on `run` would pin a
+// heading saying the check never ran. Every case that needs it to run takes the
+// home-redirected store with the fake embedder installed where a child with
+// nothing pinning it resolves one. The stand-down itself is pinned from the
+// other side, by the case that sets each variable on purpose.
+
+// The pairs block of one tier, read out of stderr: the heading, and the pair
+// lines under it. null where that tier printed no heading at all.
+function tierPairs(stderr, label) {
+    const lines = stderr.split('\n');
+    const at = lines.findIndex((l) => l === 'memq: neighbour pairs (' + label + ')'
+        || l.startsWith('memq: neighbour pairs (' + label + '): ')
+        || l === 'memq: no neighbour pairs (' + label + ')');
+    if (at === -1) return null;
+    const pairs = [];
+    for (let i = at + 1; i < lines.length && lines[i].startsWith('memq: pair  '); i++) {
+        pairs.push(lines[i]);
+    }
+    return { heading: lines[at], pairs };
+}
+
+// The similarity a pair line prints, as a number, so a case can hold a fixture
+// against the module's own floor rather than against a mirrored literal.
+function pairScore(line) {
+    const m = / {2}(\d\.\d\d)(?: {2}pinned:| {2}machine:|$)/.exec(line);
+    assert.ok(m !== null, 'the line carries a similarity: ' + line);
+    return Number(m[1]);
+}
+
+// A record written straight into a directory of a home-redirected store, which
+// is how these cases plant a tier: the pairs block reads bodies out of the
+// store rather than index lines, and the tiers under test include ones no verb
+// writes without a lock.
+function plantRecord(dir, name, body) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name + '.md'), body, 'utf8');
+}
+
+// Two bodies that say one thing in different words, and one that says something
+// else, so a case's fixtures state their own intent.
+const TIMEOUT_FACT = 'the web session times out after thirty idle minutes\n';
+const UNRELATED_FACT = 'tuesday parsnips oxide lantern quorum bicycle\n';
+
+// The whole tier as bytes, so a case can say the scan moved nothing rather than
+// only that the records it printed are still there.
+function tierSnapshot(dir) {
+    const out = {};
+    for (const name of fs.readdirSync(dir).sort()) {
+        const file = path.join(dir, name);
+        out[name] = fs.statSync(file).isFile() ? fs.readFileSync(file, 'utf8') : '<dir>';
+    }
+    return out;
+}
+
+test('the scan prints a live same-tier pair with its score, and moves nothing', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'unrelated-fact', '# unrelated-fact\n\n' + UNRELATED_FACT);
+        const before = tierSnapshot(memDir);
+
+        const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = tierPairs(res.stderr, 'project');
+        assert.ok(block !== null, 'the tier printed a heading: ' + res.stderr);
+        assert.strictEqual(block.heading, 'memq: neighbour pairs (project): 1 pair',
+            'a tier read whole leads with its pair count and carries no other clause: '
+            + res.stderr);
+        assert.strictEqual(block.pairs.length, 1, JSON.stringify(block.pairs));
+        assert.strictEqual(block.pairs[0],
+            'memq: pair  idle-session-timeout  session-times-out-after-thirty-idle-minutes  '
+            + pairScore(block.pairs[0]).toFixed(2),
+            'two names and a score, in name order: ' + block.pairs[0]);
+        assert.ok(pairScore(block.pairs[0]) >= memq.NEIGHBOUR_FLOOR,
+            'the fixture pairs at or above the floor: ' + block.pairs[0]);
+        // The third record is in no pair, which is what makes the one pair above
+        // a reading of the tier rather than of every combination in it.
+        assert.ok(!block.pairs[0].includes('unrelated-fact'), block.pairs[0]);
+
+        // The block follows the drift block and precedes the candidate answer,
+        // which is the order a reader reads the pass in.
+        const lines = res.stderr.split('\n');
+        assert.ok(lines.indexOf(NO_DRIFT.trimEnd()) !== -1, res.stderr);
+        assert.ok(lines.indexOf(NO_DRIFT.trimEnd())
+            < lines.indexOf(block.heading),
+        'the pairs block follows the drift block: ' + res.stderr);
+        assert.ok(lines.indexOf(block.heading)
+            < lines.indexOf('memq: no decay candidates'),
+        'and precedes the candidate answer: ' + res.stderr);
+
+        // Nominates and never moves: the tier is byte-for-byte what it was, no
+        // archive was created, and no pair text reached the stream a pass parses.
+        assert.deepStrictEqual(tierSnapshot(memDir), before, 'the scan moved nothing');
+        assert.ok(!fs.existsSync(path.join(memDir, 'archive')), 'and archived nothing');
+        assert.strictEqual(res.stdout, '', 'stdout carries no part of this block');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a pair the store already answered with a supersedes: pointer prints nothing, in either'
+    + ' direction', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        // The control this exclusion is read against, run first: the same two
+        // bodies with no pointer between them, which is what says the predicate
+        // can speak on this fixture.
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        const unpointed = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(unpointed.status, 0, unpointed.stderr);
+        assert.strictEqual(tierPairs(unpointed.stderr, 'project').pairs.length, 1,
+            'the control pairs: ' + unpointed.stderr);
+
+        // The successor points at the older record, which is the store's own
+        // answer to the question this block asks, so the pair goes unlisted and
+        // the tier reads as one checked whole with none.
+        plantRecord(memDir, 'idle-session-timeout',
+            '---\nsupersedes: session-times-out-after-thirty-idle-minutes\n---\n'
+            + '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        const pointed = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(pointed.status, 0, pointed.stderr);
+        assert.deepStrictEqual(tierPairs(pointed.stderr, 'project'),
+            { heading: 'memq: no neighbour pairs (project)', pairs: [] },
+            'a pointed pair is not nominated: ' + pointed.stderr);
+
+        // The other direction: the pointer on the older record instead, which is
+        // not how the store writes one and is still a pointer standing between
+        // these two files.
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '---\nsupersedes: idle-session-timeout\n---\n'
+            + '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        const reversed = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(reversed.status, 0, reversed.stderr);
+        assert.deepStrictEqual(tierPairs(reversed.stderr, 'project'),
+            { heading: 'memq: no neighbour pairs (project)', pairs: [] },
+            'either direction excludes the pair: ' + reversed.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a pinned member of a pair prints with its mark', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        // A pin exempts a record from retirement, not from being one of two
+        // records that say one thing: the pair is listed and the exemption is
+        // named on it, which is what a reviewer of the pinned population needs.
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '---\npinned: 2026-07-01\n---\n'
+            + '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+
+        const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = tierPairs(res.stderr, 'project');
+        assert.strictEqual(block.pairs.length, 1, JSON.stringify(block.pairs));
+        assert.ok(block.pairs[0].endsWith(
+            '  pinned: session-times-out-after-thirty-idle-minutes'),
+        'the mark names the pinned member: ' + block.pairs[0]);
+        assert.ok(pairScore(block.pairs[0]) >= memq.NEIGHBOUR_FLOOR, block.pairs[0]);
+        // The unpinned member carries no mark, so the token is a fact about a
+        // record rather than a decoration on the line.
+        assert.ok(!block.pairs[0].includes('pinned: idle-session-timeout'), block.pairs[0]);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('two records scoped to different boxes are two facts, and a pair carrying a scope says so',
+    (t) => {
+        const store = makeHomeStore();
+        try {
+            if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+            installHomeEmbedder(store);
+            const operatorDir = path.join(store.root, 'memory-operator');
+            const older = 'session-times-out-after-thirty-idle-minutes';
+            const newer = 'idle-session-timeout';
+            const scoped = (name, field) => plantRecord(operatorDir, name,
+                (field === null ? '' : '---\n' + field + '\n---\n')
+                + '# ' + name + '\n\n' + TIMEOUT_FACT);
+
+            // One box, both records: the store's one-record-per-box family lives
+            // in this tier, and two records of one box that read as one fact are
+            // the duplication this block exists to nominate. The scope rides the
+            // line, because the remedy is a scoped one.
+            scoped(older, 'machine: workstation-a');
+            scoped(newer, 'machine: workstation-a');
+            const same = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(same.status, 0, same.stderr);
+            const sameBox = tierPairs(same.stderr, 'operator');
+            assert.strictEqual(sameBox.pairs.length, 1, JSON.stringify(sameBox.pairs));
+            assert.strictEqual(sameBox.pairs[0], 'memq: pair  ' + newer + '  ' + older + '  '
+                + pairScore(sameBox.pairs[0]).toFixed(2) + '  machine:workstation-a',
+            'the scope rides the pair line in the neighbours block\'s own segment shape: '
+                + sameBox.pairs[0]);
+            assert.ok(pairScore(sameBox.pairs[0]) >= memq.NEIGHBOUR_FLOOR, sameBox.pairs[0]);
+
+            // Two boxes: the same two bodies scoped apart are two facts, and a
+            // nomination over them would route a reviewer to a supersede, a
+            // repair or a delete that destroys one box's record. Case decides
+            // nothing, the NetBIOS and DNS rule the local comparison follows.
+            scoped(newer, 'machine: WORKSTATION-B');
+            const split = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(split.status, 0, split.stderr);
+            assert.deepStrictEqual(tierPairs(split.stderr, 'operator'),
+                { heading: 'memq: no neighbour pairs (operator)', pairs: [] },
+                'records of two boxes are no duplication: ' + split.stderr);
+            assert.ok(!split.stderr.includes('memq: pair  '), split.stderr);
+
+            // The control the silence above is read against, withheld from it:
+            // the same two bodies carrying the same two differing values under a
+            // field no reader of this store reads. The pair prints, so what
+            // withheld it above is the scope rule and not two frontmatter blocks
+            // too different to score.
+            scoped(older, 'note: workstation-a');
+            scoped(newer, 'note: WORKSTATION-B');
+            const unread = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(unread.status, 0, unread.stderr);
+            const unscoped = tierPairs(unread.stderr, 'operator');
+            assert.strictEqual(unscoped.pairs.length, 1,
+                'differing values under an unread field pair: ' + unread.stderr);
+            assert.ok(!unscoped.pairs[0].includes('machine:'),
+                'and carry no scope, since neither record has one: ' + unscoped.pairs[0]);
+
+            // One scoped record and one that is not: a record with no scope is a
+            // fact of no particular box, which no scoped record contradicts, so
+            // the pair stands and carries the one scope it has.
+            scoped(older, 'machine: workstation-a');
+            scoped(newer, null);
+            const half = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(half.status, 0, half.stderr);
+            const oneSide = tierPairs(half.stderr, 'operator');
+            assert.strictEqual(oneSide.pairs.length, 1, JSON.stringify(oneSide.pairs));
+            assert.strictEqual(oneSide.pairs[0], 'memq: pair  ' + newer + '  ' + older + '  '
+                + pairScore(oneSide.pairs[0]).toFixed(2) + '  machine:workstation-a',
+            'the one scope prints: ' + oneSide.pairs[0]);
+        } finally {
+            rmHomeStore(store);
+        }
+    });
+
+test('a cross-tier pair prints under neither tier, and the same two records pair inside one',
+    (t) => {
+        const store = makeHomeStore();
+        try {
+            if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+            installHomeEmbedder(store);
+            const memDir = homeMemDir(store);
+            const operatorDir = path.join(store.root, 'memory-operator');
+            // A `supersedes:` pointer resolves inside one tier's directory, so a
+            // pair spanning two tiers has no remedy to land and is reported
+            // nowhere. Both tiers are checked whole, which is what says the
+            // silence is a judgment about the pair rather than a tier nothing
+            // read.
+            plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+                '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+            plantRecord(operatorDir, 'idle-session-timeout',
+                '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+
+            const split = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(split.status, 0, split.stderr);
+            for (const label of ['project', 'operator']) {
+                assert.deepStrictEqual(tierPairs(split.stderr, label),
+                    { heading: 'memq: no neighbour pairs (' + label + ')', pairs: [] },
+                    label + ' reports no pair: ' + split.stderr);
+            }
+            assert.ok(!split.stderr.includes('memq: pair  '), split.stderr);
+
+            // The control, withheld from the run above: the same two records
+            // inside one tier do pair, so the silence is the tier boundary and
+            // not a fixture too weak to score.
+            plantRecord(memDir, 'idle-session-timeout',
+                '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+            const together = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(together.status, 0, together.stderr);
+            assert.strictEqual(tierPairs(together.stderr, 'project').pairs.length, 1,
+                'inside one tier the pair is nominated: ' + together.stderr);
+            assert.deepStrictEqual(tierPairs(together.stderr, 'operator'),
+                { heading: 'memq: no neighbour pairs (operator)', pairs: [] },
+                'and the tier holding one of them still reports none: ' + together.stderr);
+        } finally {
+            rmHomeStore(store);
+        }
+    });
+
+test('with no embedder the heading names the cause, and the scan answers as it always did',
+    (t) => {
+        const absent = makeHomeStore();
+        const unusable = makeHomeStore();
+        try {
+            if (!homeRedirected(absent)) return t.skip(HOME_REDIRECT_SKIP);
+            // Absent: nothing installed where a child with no override resolves
+            // one. Unusable: the package installed with an empty model cache, the
+            // interrupted install. Both wordings are the search's own, so a
+            // heading here and a find's line cannot come to describe one machine
+            // two ways.
+            makeFakeEmbedder({ at: path.join(unusable.root, mi.EMBEDDER_DIR), modelless: true });
+            for (const [store, cause] of [[absent, 'the local embedding stack is not installed'],
+                [unusable, 'the local embedding stack is installed but unusable']]) {
+                const memDir = homeMemDir(store);
+                plantRecord(memDir, 'idle-session-timeout',
+                    '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+                plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+                    '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+                const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+                assert.strictEqual(res.status, 0, res.stderr);
+                assert.deepStrictEqual(tierPairs(res.stderr, 'project'), {
+                    heading: 'memq: neighbour pairs (project): not checked (' + cause + ')',
+                    pairs: []
+                }, 'the heading names the cause: ' + res.stderr);
+                // The rest of the pass is untouched by a missing embedder: the
+                // drift block still answers and the candidate answer still prints.
+                assert.ok(res.stderr.includes(NO_DRIFT), res.stderr);
+                assert.ok(res.stderr.includes('memq: no decay candidates'), res.stderr);
+            }
+        } finally {
+            rmHomeStore(absent);
+            rmHomeStore(unusable);
+        }
+    });
+
+test('a record the sweep cannot embed is counted on its tier heading, beside the pairs that'
+    + ' were checked', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        // The stub refuses this text, so the record reaches the index with no
+        // vector: absence from a partly-read tier is not evidence of no overlap,
+        // and the count is what keeps it from reading as one.
+        plantRecord(memDir, 'refused-record', '# refused-record\n\nEMBEDFAIL ' + TIMEOUT_FACT);
+
+        const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const block = tierPairs(res.stderr, 'project');
+        assert.strictEqual(block.heading, 'memq: neighbour pairs (project): 1 pair,'
+            + ' 1 of 3 records not checked',
+        'the heading counts the pairs it found and the records it could not check against the'
+            + ' tier\'s own total, each under its own noun and in one wording whatever the pair'
+            + ' count is: ' + res.stderr);
+        assert.strictEqual(block.pairs.length, 1, JSON.stringify(block.pairs));
+        assert.ok(!block.pairs[0].includes('refused-record'),
+            'and no pair claims the record it could not read: ' + block.pairs[0]);
+        // The sweep's own count of what it could not embed, said above every
+        // heading rather than on one: the record is missing from this reading and
+        // the tier it sits in is not the whole of what the count covers. Only the
+        // count that fired is named, and the carried clause is absent because
+        // nothing was carried: a zero of one kind beside a real count of another
+        // reads as one account of one degrade.
+        assert.ok(res.stderr.includes('memq: this pairing is partial (1 record(s) unreadable'
+            + ' or unembeddable); no pair here proves there is none\n'),
+        'the sweep\'s partial reading is said before any pair: ' + res.stderr);
+        assert.ok(!res.stderr.includes('directory(ies) that could not be scanned'),
+            'no directory failed, so no directory is counted: ' + res.stderr);
+        assert.ok(!res.stderr.includes('carried forward'),
+            'and nothing was carried, so nothing is said about a carried vector: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+// The partial-sweep line comes out of a function shared with the authoring
+// neighbours block, and each caller supplies only what its reading is called and
+// what a partial one costs it. So this pin drives that block and this one over
+// one degraded store and holds their lines against each other: the counts
+// and their wording are the shared function's and must read identically, and
+// what differs is exactly the subject and the closing clause each caller passes.
+// Without it the authoring caller's line has no gate of its own, and a change
+// made for this block would ship a changed line on a surface nothing reads.
+test('the partial-sweep line reads the same on both callers, differing only in the subject and'
+    + ' the closing each supplies', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const operatorDir = path.join(store.root, 'memory-operator');
+        // One record the stub refuses, which is what degrades the sweep both
+        // surfaces rank on, and one it embeds, so each surface has a reading to
+        // report as partial rather than nothing at all.
+        plantRecord(operatorDir, 'refused-record',
+            '# refused-record\n\nEMBEDFAIL ' + TIMEOUT_FACT);
+        plantRecord(operatorDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+
+        const authored = runHome(store, ['add-operator', 'idle-session-timeout',
+            'the web session times out after thirty idle minutes'], HOME_EMBEDDER);
+        assert.strictEqual(authored.status, 0, authored.stderr);
+        assert.ok(authored.stderr.includes('memq: this ranking is partial (1 record(s) unreadable'
+            + ' or unembeddable); no neighbour here proves there is none\n'),
+        'the authoring block reports the same sweep in its own terms: ' + authored.stderr);
+
+        const scanned = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(scanned.status, 0, scanned.stderr);
+        const partial = (stderr) => {
+            const line = stderr.split('\n').find((l) => l.includes(' is partial ('));
+            assert.ok(line !== undefined, 'a partial line printed: ' + stderr);
+            const m = /^memq: (.+) is partial \((.+)\); (.+)$/.exec(line);
+            assert.ok(m !== null, 'in the shared line\'s shape: ' + line);
+            return { subject: m[1], counts: m[2], closing: m[3] };
+        };
+        const one = partial(authored.stderr);
+        const two = partial(scanned.stderr);
+        assert.strictEqual(one.counts, two.counts,
+            'the counts and their wording come from the one function: '
+                + JSON.stringify([one, two]));
+        assert.deepStrictEqual([one.subject, two.subject], ['this ranking', 'this pairing'],
+            'each caller names its own reading: ' + JSON.stringify([one, two]));
+        assert.deepStrictEqual([one.closing, two.closing],
+            ['no neighbour here proves there is none', 'no pair here proves there is none'],
+            'and what a partial one costs it: ' + JSON.stringify([one, two]));
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('an index the sweep cannot persist is reported in the scan\'s own terms, above a block'
+    + ' that listed no pair, and not at all where there was nothing to persist', (t) => {
+    const withRecords = makeHomeStore();
+    const empty = makeHomeStore();
+    try {
+        if (!homeRedirected(withRecords)) return t.skip(HOME_REDIRECT_SKIP);
+        for (const store of [withRecords, empty]) {
+            installHomeEmbedder(store);
+            // A directory where the index file goes: the sweep answers and the
+            // persist fails, which is the state the note exists for.
+            fs.mkdirSync(path.join(store.root, 'memory-index.jsonl'), { recursive: true });
+        }
+        // Two records that say different things: the tier is read whole, no pair
+        // is listed, and the persist still failed over the records that were
+        // swept, which is the reading this line has to survive.
+        const memDir = homeMemDir(withRecords);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'unrelated-fact', '# unrelated-fact\n\n' + UNRELATED_FACT);
+        fs.mkdirSync(homeMemDir(empty), { recursive: true });
+
+        const res = runHome(withRecords, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const lines = res.stderr.split('\n');
+        const note = lines.find((l) => l.startsWith('memq: could not persist the semantic index'));
+        assert.ok(note !== undefined, 'the failure is reported: ' + res.stderr);
+        assert.ok(note.endsWith('these pairs are complete, and the next command that needs'
+            + ' the index sweeps again'), 'in this caller\'s terms: ' + note);
+        assert.ok(!note.includes('these neighbours are complete'),
+            'not in the authoring block\'s: ' + note);
+        assert.ok(!note.includes('the next find sweeps again'), 'and not in a find\'s: ' + note);
+        // Above the heading, at column zero, with no pair beneath it: what the
+        // line reports is the sweep behind the reading, not the reading.
+        assert.deepStrictEqual(tierPairs(res.stderr, 'project'),
+            { heading: 'memq: no neighbour pairs (project)', pairs: [] },
+            'the block answered for the tier: ' + res.stderr);
+        assert.ok(lines.indexOf(note) < lines.indexOf('memq: no neighbour pairs (project)'),
+            'the line stands above the block it is about: ' + res.stderr);
+
+        // The same failure with nothing swept says nothing: an index write over
+        // an empty store fails for the same reason there was nothing to index,
+        // and an error above a wholly healthy pass is noise.
+        const first = runHome(empty, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(first.status, 0, first.stderr);
+        assert.ok(!first.stderr.includes('could not persist'),
+            'nothing to persist, nothing said: ' + first.stderr);
+        assert.ok(first.stderr.includes('memq: no neighbour pairs (project)'),
+            'and the block itself still answered: ' + first.stderr);
+    } finally {
+        rmHomeStore(withRecords);
+        rmHomeStore(empty);
+    }
+});
+
+test('a tier whose records the check could not read reports the count and no clean answer',
+    (t) => {
+        const store = makeHomeStore();
+        try {
+            if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+            installHomeEmbedder(store);
+            const memDir = homeMemDir(store);
+            // Every record refused, so there is no pair to print and the tier was
+            // not read whole: the counted heading stands in for the clean answer,
+            // which would otherwise say this tier holds no overlap.
+            plantRecord(memDir, 'refused-one', '# refused-one\n\nEMBEDFAIL ' + TIMEOUT_FACT);
+            plantRecord(memDir, 'refused-two', '# refused-two\n\nEMBEDFAIL ' + TIMEOUT_FACT);
+
+            const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(res.status, 0, res.stderr);
+            assert.deepStrictEqual(tierPairs(res.stderr, 'project'),
+                { heading: 'memq: neighbour pairs (project): 0 pairs, 2 of 2 records'
+                    + ' not checked', pairs: [] },
+                'the count answers for the whole tier, against the tier\'s own total: '
+                    + res.stderr);
+            assert.ok(!res.stderr.includes('memq: no neighbour pairs (project)'),
+                'and the clean answer is never printed for a tier partly read: ' + res.stderr);
+
+            // The same heading over a tier where records were checked: the
+            // denominator is what tells a reader that two of three records went
+            // unread from a tier where nothing at all was read, which are two
+            // states with opposite remedies and one numerator.
+            plantRecord(memDir, 'unrelated-fact', '# unrelated-fact\n\n' + UNRELATED_FACT);
+            const partly = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(partly.status, 0, partly.stderr);
+            assert.deepStrictEqual(tierPairs(partly.stderr, 'project'),
+                { heading: 'memq: neighbour pairs (project): 0 pairs, 2 of 3 records'
+                    + ' not checked', pairs: [] },
+                'the checked record counts toward the total and against no pair: '
+                    + partly.stderr);
+        } finally {
+            rmHomeStore(store);
+        }
+    });
+
+test('the scan stands the check down under a pinned store root and under a pinned embedder'
+    + ' root, naming the variable that fired', (t) => {
+    const store = makeHomeStore();
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-pairskip-'));
+    const emb = makeFakeEmbedder();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+
+        // The grant is decided in the hook's process and this check runs in the
+        // child, so the child stands down on the bare variable rather than on the
+        // honored pair: a store root with no data gate beside it moves no store
+        // and skips all the same, because the hook cannot see which pair the
+        // child will hold. The signal is set on the built environment rather than
+        // handed through extra, which the builder refuses for its own reason.
+        const env = homeChildEnv(store, HOME_EMBEDDER);
+        env.KIT_MEMORY_ROOT = path.join(fakeHome, 'named-but-ungated');
+        const pinnedStore = spawnSync(process.execPath, [MEMQ, 'decay-scan'],
+            { cwd: store.proj, encoding: 'utf8', env });
+        assert.strictEqual(pinnedStore.status, 0, pinnedStore.stderr);
+        assert.deepStrictEqual(tierPairs(pinnedStore.stderr, 'project'), {
+            heading: 'memq: neighbour pairs (project): not checked'
+                + ' (a pinned store root (KIT_MEMORY_ROOT))',
+            pairs: []
+        }, 'the heading names the variable, never the honored pair: ' + pinnedStore.stderr);
+
+        const pinnedEmbedder = runHome(store, ['decay-scan'], withEmbedder(emb));
+        assert.strictEqual(pinnedEmbedder.status, 0, pinnedEmbedder.stderr);
+        assert.deepStrictEqual(tierPairs(pinnedEmbedder.stderr, 'project'), {
+            heading: 'memq: neighbour pairs (project): not checked'
+                + ' (a pinned embedder root (KIT_EMBEDDER_ROOT))',
+            pairs: []
+        }, 'and the other variable on its own: ' + pinnedEmbedder.stderr);
+
+        // The other direction, so neither heading is a skip that fires
+        // everywhere: with neither variable set the same store is checked.
+        const checked = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(checked.status, 0, checked.stderr);
+        assert.strictEqual(tierPairs(checked.stderr, 'project').pairs.length, 1,
+            'with neither variable the check runs: ' + checked.stderr);
+    } finally {
+        rmFakeEmbedder(emb);
+        rmHome(fakeHome);
+        rmHomeStore(store);
+    }
+});
+
+test('the pairs block changes no byte of the scan\'s stdout or its exit code', (t) => {
+    const store = makeHomeStore();
+    const emb = makeFakeEmbedder();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        // A store that nominates: two paraphrasing records idle well past the
+        // archive threshold, so the candidate list is non-empty and the block has
+        // something to print about the same two records. A scan whose stdout were
+        // empty either way would prove nothing here.
+        for (const name of ['session-times-out-after-thirty-idle-minutes',
+            'idle-session-timeout']) {
+            plantRecord(memDir, name, '# ' + name + '\n\n' + TIMEOUT_FACT);
+            fs.utimesSync(path.join(memDir, name + '.md'), daysAgo(400), daysAgo(400));
+        }
+
+        // The same command twice on the same store, once with the block running
+        // and once with it stood down by a pinned embedder root. stdout is the
+        // contract a pass parses, so the two runs are compared byte for byte, and
+        // the checked run's own pair line is what says its block really ran.
+        const checked = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        const stoodDown = runHome(store, ['decay-scan'], withEmbedder(emb));
+        assert.strictEqual(checked.status, 0, checked.stderr);
+        assert.strictEqual(stoodDown.status, checked.status, 'the exit code is the same');
+        assert.strictEqual(stoodDown.stdout, checked.stdout,
+            'and so is every byte of stdout: ' + JSON.stringify([checked.stdout,
+                stoodDown.stdout]));
+        assert.match(checked.stdout, /^archive {2}idle-session-timeout {2}idle \d+d/m,
+            'the candidate list is what stdout carries: ' + JSON.stringify(checked.stdout));
+        assert.ok(!checked.stdout.includes('pair'), checked.stdout);
+        assert.strictEqual(tierPairs(checked.stderr, 'project').pairs.length, 1,
+            'the checked run really printed a pair: ' + checked.stderr);
+
+        // And the stderr the pass already printed is unchanged: the evidence line
+        // and the drift block read the same in both runs, so the new block was
+        // added beside them rather than in place of any of them.
+        const withoutPairs = (stderr) => stderr.split('\n')
+            .filter((l) => !l.startsWith('memq: neighbour pairs (')
+                && !l.startsWith('memq: no neighbour pairs (')
+                && !l.startsWith('memq: pair  ')).join('\n');
+        assert.strictEqual(withoutPairs(checked.stderr), withoutPairs(stoodDown.stderr),
+            'every other block reads the same: ' + checked.stderr);
+        assert.ok(withoutPairs(checked.stderr).includes(NO_DRIFT.trimEnd()), checked.stderr);
+    } finally {
+        rmFakeEmbedder(emb);
+        rmHomeStore(store);
+    }
+});
+
+// Make the block throw where nothing else can reach it: a tier heading write,
+// which sits after the sweep has answered and inside the printing the guard
+// exists for. `nth` is which heading throws, so a case can put the failure on a
+// tier that follows one which already printed a reading. Injected in the child
+// because the block's printing has no seam a fixture can reach from outside, the
+// neighbours block's own reason. The patch fires once, so the guard's line
+// reaches the real stream.
+const PAIRS_WRITE_FAILURE = 'the fixture refuses this write';
+
+function throwOnPairsHeadingPreload(dir, nth) {
+    const shim = path.join(dir, 'throw-on-pairs-heading-' + nth + '.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        'const realWrite = process.stderr.write;',
+        'let seen = 0;',
+        'let fired = false;',
+        'process.stderr.write = function (chunk) {',
+        '    if (!fired && typeof chunk === \'string\''
+            + ' && chunk.startsWith(\'memq: neighbour pairs (\')) {',
+        '        seen += 1;',
+        '        if (seen === ' + nth + ') {',
+        '            fired = true;',
+        '            throw new Error(' + JSON.stringify(PAIRS_WRITE_FAILURE) + ');',
+        '        }',
+        '    }',
+        '    return realWrite.apply(process.stderr, arguments);',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+// The same fault on a pair line rather than on a heading, which is the write a
+// tier's heading has already been decided by: it matches on the pair text
+// anywhere in the chunk, because a tier's lines reach the stream as one write and
+// the pair text sits inside that chunk rather than at its start. The patch fires
+// once, so the guard's line reaches the real stream.
+function throwOnPairLinePreload(dir) {
+    const shim = path.join(dir, 'throw-on-pair-line.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        'const realWrite = process.stderr.write;',
+        'let fired = false;',
+        'process.stderr.write = function (chunk) {',
+        '    if (!fired && typeof chunk === \'string\''
+            + ' && chunk.includes(\'memq: pair  \')) {',
+        '        fired = true;',
+        '        throw new Error(' + JSON.stringify(PAIRS_WRITE_FAILURE) + ');',
+        '    }',
+        '    return realWrite.apply(process.stderr, arguments);',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+test('a pairs block that throws while printing costs the reader that tier and not the scan,'
+    + ' and the line names the tier it fell on', (t) => {
+    const store = makeHomeStore();
+    const twoTier = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        for (const name of ['session-times-out-after-thirty-idle-minutes',
+            'idle-session-timeout']) {
+            plantRecord(memDir, name, '# ' + name + '\n\n' + TIMEOUT_FACT);
+            fs.utimesSync(path.join(memDir, name + '.md'), daysAgo(400), daysAgo(400));
+        }
+
+        const res = runHome(store, ['decay-scan'],
+            { ...HOME_EMBEDDER, NODE_OPTIONS: throwOnPairsHeadingPreload(store.home, 1) });
+        assert.strictEqual(res.status, 0, res.stderr);
+        const failed = 'not checked (the check failed: ' + PAIRS_WRITE_FAILURE + ')';
+        assert.deepStrictEqual(tierPairs(res.stderr, 'project'),
+            { heading: 'memq: neighbour pairs (project): ' + failed, pairs: [] },
+            'the failure is said in the tier\'s own heading, with no pair under it: '
+                + res.stderr);
+        // The candidate list, which is the whole point of the guard: a
+        // reading that failed never costs the pass its product.
+        assert.match(res.stdout, /^archive {2}idle-session-timeout {2}idle \d+d/m,
+            'the scan answered: ' + JSON.stringify(res.stdout));
+
+        // A failure on the second tier leaves the first tier's reading standing,
+        // which is why the line carries a tier at all: one line saying the check
+        // failed, with no tier on it, reads as an answer about every tier in the
+        // pass, including the one whose pair is printed right above it.
+        installHomeEmbedder(twoTier);
+        const projectDir = homeMemDir(twoTier);
+        fs.mkdirSync(projectDir, { recursive: true });
+        fs.writeFileSync(path.join(projectDir, 'MEMORY.md'), 'Project-Type: webapp\n', 'utf8');
+        const typeDir = path.join(twoTier.root, 'memory-types', 'webapp');
+        for (const dir of [projectDir, typeDir]) {
+            plantRecord(dir, 'session-times-out-after-thirty-idle-minutes',
+                '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+            plantRecord(dir, 'idle-session-timeout',
+                '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        }
+
+        const second = runHome(twoTier, ['decay-scan'],
+            { ...HOME_EMBEDDER, NODE_OPTIONS: throwOnPairsHeadingPreload(twoTier.home, 2) });
+        assert.strictEqual(second.status, 0, second.stderr);
+        assert.strictEqual(tierPairs(second.stderr, 'project').heading,
+            'memq: neighbour pairs (project): 1 pair',
+            'the tier that printed first is read whole: ' + second.stderr);
+        assert.strictEqual(tierPairs(second.stderr, 'project').pairs.length, 1,
+            'and its pair stands: ' + second.stderr);
+        assert.deepStrictEqual(tierPairs(second.stderr, 'type:webapp'),
+            { heading: 'memq: neighbour pairs (type:webapp): ' + failed, pairs: [] },
+            'the failure names the tier it fell on: ' + second.stderr);
+        assert.ok(!second.stderr.includes('memq: neighbour pairs not checked ('),
+            'and no tierless line answers for a tier that printed a reading: '
+                + second.stderr);
+
+        // The fault moved past the heading, onto a pair line: a tier's lines are
+        // composed and written once, so a throw there costs the whole tier and the
+        // guard's heading is the only one the tier gets. A tier that had already
+        // written a heading would carry two, a reading and a denial of it, and a
+        // reader has no way to tell which of them describes the tier.
+        const onPair = runHome(store, ['decay-scan'],
+            { ...HOME_EMBEDDER, NODE_OPTIONS: throwOnPairLinePreload(store.home) });
+        assert.strictEqual(onPair.status, 0, onPair.stderr);
+        const headings = onPair.stderr.split('\n').filter((l) =>
+            l.startsWith('memq: neighbour pairs (project)')
+            || l === 'memq: no neighbour pairs (project)');
+        assert.deepStrictEqual(headings, ['memq: neighbour pairs (project): ' + failed],
+            'the tier gets one heading, and it is the guard\'s: ' + onPair.stderr);
+        assert.ok(!onPair.stderr.includes('memq: pair  '),
+            'and no pair line survived the throw that fell on one: ' + onPair.stderr);
+        assert.match(onPair.stdout, /^archive {2}idle-session-timeout {2}idle \d+d/m,
+            'the scan answered: ' + JSON.stringify(onPair.stdout));
+    } finally {
+        rmHomeStore(store);
+        rmHomeStore(twoTier);
+    }
+});
+
+test('the declared type tier gets its own pairs block under its own label', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The tier a project reaches through its Project-Type line, whose records
+        // live outside the project store entirely. The heading names the tier the
+        // way every other line about it does, and the pair proves the block met
+        // the same directory the candidate walk did: a tier the block resolved
+        // elsewhere would print a count of records it could not check instead,
+        // which is the quiet way this could be wrong.
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(memDir, { recursive: true });
+        fs.writeFileSync(path.join(memDir, 'MEMORY.md'), 'Project-Type: webapp\n', 'utf8');
+        const typeDir = path.join(store.root, 'memory-types', 'webapp');
+        plantRecord(typeDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(typeDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        // A record of the project tier saying the same thing, which the type
+        // tier's block may not claim: the two tiers are read apart.
+        plantRecord(memDir, 'project-side-twin', '# project-side-twin\n\n' + TIMEOUT_FACT);
+
+        const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        const typed = tierPairs(res.stderr, 'type:webapp');
+        assert.ok(typed !== null, 'the type tier printed a heading: ' + res.stderr);
+        assert.strictEqual(typed.heading, 'memq: neighbour pairs (type:webapp): 1 pair',
+            'read whole, so the pair count and no other clause: ' + res.stderr);
+        assert.deepStrictEqual(typed.pairs, [
+            'memq: pair  idle-session-timeout  session-times-out-after-thirty-idle-minutes  '
+            + pairScore(typed.pairs[0]).toFixed(2)
+        ], 'the tier\'s own pair, and no record of another tier: ' + JSON.stringify(typed.pairs));
+        assert.ok(pairScore(typed.pairs[0]) >= memq.NEIGHBOUR_FLOOR, typed.pairs[0]);
+        assert.deepStrictEqual(tierPairs(res.stderr, 'project'),
+            { heading: 'memq: no neighbour pairs (project)', pairs: [] },
+            'and the project tier reports its own single record as no pair: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a tier that is there and cannot be listed reads as not checked, never as the clean'
+    + ' answer', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        plantRecord(memDir, 'session-times-out-after-thirty-idle-minutes',
+            '# session-times-out-after-thirty-idle-minutes\n\n' + TIMEOUT_FACT);
+        plantRecord(memDir, 'idle-session-timeout', '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+
+        // The control first, which also leaves an index behind: the same store
+        // reads as a tier with a pair when its directory can be enumerated, so the
+        // answer below is the refused listing rather than the fixture.
+        const control = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(control.status, 0, control.stderr);
+        assert.strictEqual(tierPairs(control.stderr, 'project').pairs.length, 1,
+            'the readable tier pairs: ' + control.stderr);
+
+        // A tier nobody could enumerate holds an unknown number of records, which
+        // the listing this block is handed reads exactly like an empty tier: the
+        // clean answer there would tell a reader the tier holds no overlap. The
+        // cause is the drift block's own wording over the same directory, so one
+        // pass cannot report one unreadable tier two ways.
+        const blind = runHome(store, ['decay-scan'],
+            { ...HOME_EMBEDDER,
+                NODE_OPTIONS: refuseDirListPreload(store.home, path.sep + 'memory') });
+        assert.strictEqual(blind.status, 0, 'an unlistable tier never fails the scan');
+        assert.deepStrictEqual(tierPairs(blind.stderr, 'project'), {
+            heading: 'memq: neighbour pairs (project): not checked'
+                + ' (this tier could not be examined)',
+            pairs: []
+        }, 'the tier is named as the cause: ' + blind.stderr);
+        assert.ok(!blind.stderr.includes('memq: no neighbour pairs (project)'),
+            'not checked is never the clean answer: ' + blind.stderr);
+        // The drift block, over the same directory in the same run, says the same
+        // thing: the two blocks of one pass agree about which tier could not be
+        // read and why.
+        assert.ok(blind.stderr.includes('memq: anchor drift (project tier): not checked'
+            + ' (this tier could not be examined)'),
+        'and the drift block says it in the same words: ' + blind.stderr);
+        // The sweep could not walk that directory either, so what it holds for the
+        // tier is what the control's run left in the index: carried forward,
+        // scored on vectors nothing re-read this pass, and counted rather than
+        // presented as a tier read whole. The refused directory is one entry in the
+        // sweep's own failed list beside them, which is how memory-index reports a
+        // walk that could not enumerate: a directory of its own, never a record,
+        // and never the same number as the records it holds.
+        assert.ok(blind.stderr.includes('memq: this pairing is partial (1 directory(ies) that'
+            + ' could not be scanned, 2 record(s) served unverified); no pair here proves'
+            + ' there is none, and a record carried forward is scored on the vector the'
+            + ' index already held for it\n'),
+        'the refused directory and the records carried out of it are counted apart: '
+            + blind.stderr);
+        assert.ok(!blind.stderr.includes('record(s) unreadable or unembeddable'),
+            'and no record is reported unreadable: every record here was carried, and the'
+                + ' one thing that could not be read is a directory: ' + blind.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('an absent tier directory is an empty tier, and reads as the clean answer', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // The operator tier is what keeps the scan going with no project store,
+        // and the project directory is never created: an absent tier holds no
+        // records, which is a fact rather than a failure, so the clean answer is
+        // true of it where the not-checked heading would not be.
+        plantRecord(path.join(store.root, 'memory-operator'), 'idle-session-timeout',
+            '# idle-session-timeout\n\n' + TIMEOUT_FACT);
+        assert.ok(!fs.existsSync(homeMemDir(store)), 'the project tier is not there');
+
+        const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.deepStrictEqual(tierPairs(res.stderr, 'project'),
+            { heading: 'memq: no neighbour pairs (project)', pairs: [] },
+            'an absent directory reads as an empty tier: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('a tier with more pairs than the block lists prints the cap and counts the remainder',
+    (t) => {
+        const store = makeHomeStore();
+        try {
+            if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+            installHomeEmbedder(store);
+            const memDir = homeMemDir(store);
+            // Records that all say one thing, so every combination of them pairs
+            // above the floor: a tier's pairs grow with the square of its records,
+            // which is what the cap is for. The fixture's pair count is computed
+            // from the names rather than written down, and the cap is read from the
+            // module, so neither is a literal that can drift from what it describes.
+            const names = ['alpha-timeout', 'bravo-timeout', 'charlie-timeout',
+                'delta-timeout', 'echo-timeout', 'foxtrot-timeout'];
+            for (const name of names) {
+                plantRecord(memDir, name, '# ' + name + '\n\n' + TIMEOUT_FACT);
+            }
+            const total = names.length * (names.length - 1) / 2;
+            assert.ok(total > memq.PAIRS_SHOWN, 'the fixture exceeds the cap: ' + total);
+
+            const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+            assert.strictEqual(res.status, 0, res.stderr);
+            const block = tierPairs(res.stderr, 'project');
+            assert.strictEqual(block.heading,
+                'memq: neighbour pairs (project): ' + total + ' pairs',
+                'the heading leads with the whole count: ' + res.stderr);
+            const listed = block.pairs.filter((l) => !l.includes('... and '));
+            assert.strictEqual(listed.length, memq.PAIRS_SHOWN,
+                'the listing stops at the cap: ' + JSON.stringify(block.pairs));
+            assert.strictEqual(block.pairs[block.pairs.length - 1],
+                'memq: pair  ... and ' + (total - memq.PAIRS_SHOWN) + ' more',
+                'and the remainder is counted in the pinned block\'s shape: '
+                + JSON.stringify(block.pairs));
+            // Strongest first, so what the cap withholds is the weakest of a list
+            // whose length the heading already gave.
+            const scores = listed.map(pairScore);
+            assert.deepStrictEqual(scores, scores.slice().sort((a, b) => b - a),
+                'the listed pairs are the highest-scoring, in order: '
+                + JSON.stringify(scores));
+        } finally {
+            rmHomeStore(store);
+        }
+    });
+
+test('a sweep that does not answer inside its budget leaves every tier not checked, and the'
+    + ' scan still answers', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        // The stub hangs on any text carrying the marker, and the sweep behind this
+        // block embeds every record of the store, so one such record holds the
+        // whole sweep. What the bound buys is the candidate list: a pass's own
+        // product may not wait on a stalled embedder, and without the bound this
+        // scan prints nothing until the stack answers. This case is deliberately as
+        // slow as the bound, since what it pins is the bound.
+        for (const name of ['session-times-out-after-thirty-idle-minutes',
+            'idle-session-timeout']) {
+            plantRecord(memDir, name, '# ' + name + '\n\n' + TIMEOUT_FACT);
+            fs.utimesSync(path.join(memDir, name + '.md'), daysAgo(400), daysAgo(400));
+        }
+        plantRecord(memDir, 'slow-record', '# slow-record\n\nHANGVEC ' + TIMEOUT_FACT);
+
+        const res = runHome(store, ['decay-scan'], HOME_EMBEDDER);
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.deepStrictEqual(tierPairs(res.stderr, 'project'), {
+            heading: 'memq: neighbour pairs (project): not checked (the search did not answer'
+                + ' within ' + memq.NEIGHBOUR_TIMEOUT_MS + 'ms)',
+            pairs: []
+        }, 'the heading names the bound: ' + res.stderr);
+        // The product the bound exists for, and the rest of the pass with it.
+        assert.match(res.stdout, /^archive {2}idle-session-timeout {2}idle \d+d/m,
+            'the scan answered: ' + JSON.stringify(res.stdout));
+        assert.ok(res.stderr.includes(NO_DRIFT), res.stderr);
     } finally {
         rmHomeStore(store);
     }

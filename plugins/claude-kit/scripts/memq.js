@@ -91,7 +91,8 @@
 // them under the project's decay.lock).
 //
 // The decay lifecycle splits into judgment and mechanics. `decay-scan`
-// reports the store's decay candidates and writes nothing: a memory 30 idle
+// reports the store's decay candidates and writes no memory file and no
+// store sidecar: a memory 30 idle
 // days past its last sign of life is a summarize candidate and 60 an archive
 // candidate, both thresholds extended in proportion to how many distinct days
 // the memory was applied and waived entirely by a `pinned:` frontmatter
@@ -100,7 +101,11 @@
 // classes it reports anchor drift over the project tier's live records: a
 // memory whose anchored file has changed or gone is unverified rather than
 // wrong, so that block nominates a re-read and no `decay-prune` flag acts on
-// it. Which candidates to
+// it; and it reports the live pairs of each tier it reaches whose records read
+// as one fact, which no `decay-prune` flag acts on either. That pairs block
+// sweeps the derived vector index at the store root through memory-index.js
+// exactly as `find` does, so the index is the one file the scan writes.
+// Which candidates to
 // act on is a judgment made in-session, never automated here. `decay-prune`
 // then performs exactly the mechanical rewrites its arguments call for
 // (`--rollup` for the journal rollup and the usage prunes, `--archive`,
@@ -160,12 +165,15 @@
 // SAFETY: reads never destroy data. A malformed journal or usage line is
 // skipped with a stderr note and reading continues; a journal or registry
 // that exists but cannot be read is noted on stderr rather than silently
-// reading as empty. `decay-scan` and `recall` write nothing at all: neither
+// reading as empty. `decay-scan` and `recall` write no memory file and no
+// store sidecar: neither
 // ever moves, edits, or deletes a memory, and `recall` does not even stamp
 // reads, because it serves summaries rather than bodies. `find` writes no
 // memory file and no store sidecar either: the one file its semantic channel
 // maintains is the derived vector index at the store root, which
-// memory-index.js owns and can rebuild from the store at any time. The only rewriting
+// memory-index.js owns and can rebuild from the store at any time, and that
+// same index is the one file `decay-scan` writes, swept by its neighbour-pairs
+// block through the same module. The only rewriting
 // paths in the store are
 // `decay-prune`, the `add-type` and `add-operator` writes (a body repair
 // among them), and the `delete-type` and `delete-operator` removals, all
@@ -346,6 +354,15 @@ const DECAY_LOCK_FILE = 'decay.lock';
 const DECLARERS_SHOWN = 10;   // declaring-project names listed before the remainder is counted
 const PINNED_SHOWN = 10;      // pinned memories listed by decay-scan before the remainder is counted
 const DRIFT_SHOWN = 10;       // drifted memories listed by decay-scan before the remainder is counted
+// Pairs listed per tier by decay-scan before the remainder is counted. At the
+// block enumerations' value because it answers the same question they do, and it
+// is load-bearing here in a way it is not for them: a tier's pair count is
+// quadratic in its live records, so a tier holding a few hundred of them has
+// tens of thousands of candidate pairs, and an uncapped listing would put all of
+// them on a stream a model reads. The strongest scores are what the cap keeps,
+// since the block is read to pick a remedy and the remainder is counted so the
+// size of what went unlisted is still visible.
+const PAIRS_SHOWN = 10;
 // Anchor paths named on one drift line before the remainder is counted. Lower
 // than the block enumerations above for SUPERSEDED_SHOWN's reason: these ride
 // inside a line that already carries a name and a second path list, and a
@@ -519,11 +536,22 @@ const SEMANTIC_BOOST_CAP_DAYS = 10;    // days the boost counts, so no tally can
 const SEMANTIC_ARCHIVE_DEMOTION = 0.1; // rank subtracted from a retired record
 const SEMANTIC_SUPERSEDED_DEMOTION = 0.1; // rank subtracted from a superseded record
 
-// The similarity at or above which the authoring verbs call a neighbour a
-// likely overlap, on the block they print before a shared-tier record is
-// written. It labels and never gates: the block prints its lines whatever the
-// scores and the write proceeds either way, so a floor set too low costs a
-// word on a line the author already sees rather than a refused write.
+// The similarity at or above which two records read as one fact. Its two
+// readers use it differently, and a value moved for one of them moves the
+// other's answer too.
+//
+// On the authoring verbs' neighbours block it labels and never gates: the block
+// prints its lines whatever the scores and the write proceeds either way, so a
+// floor set too low costs a word on a line the author already sees rather than a
+// refused write.
+//
+// On the decay scan's pairs block it gates, because a pair is nominated only at
+// or above it, and the sensitivities there run in both directions: too low buries
+// the tier's real overlaps under pairs that share a vocabulary rather than a
+// fact, and too high prints nothing for a store that holds one, which reads
+// exactly like a tier with no overlap in it. Neither miss is visible in the
+// block, which is why the value is tuned against a store's own distribution
+// rather than adjusted for whichever reader last disappointed someone.
 //
 // A seed rather than a measurement, and clear of both readings it sits
 // between: the semantic module's own known-answer control scores a paraphrase
@@ -3392,7 +3420,10 @@ function machineIdentityOrNull(value) {
 // compare case-insensitively, the NetBIOS and DNS rule, on every platform, and
 // the local name is resolved at runtime so no machine's build hard-codes
 // another's answer. A null identity is never foreign: nothing was read that
-// could support the assertion.
+// could support the assertion. The decay scan's pairs block also calls this
+// with a second record's scope in place of the local name, guarding the null
+// case at its call site, since a null second argument would compare against
+// the string 'null' and read every unscoped record as foreign.
 function foreignMachine(name, localName) {
     return name !== null && name.toLowerCase() !== String(localName).toLowerCase();
 }
@@ -4409,6 +4440,30 @@ function anchorStates(file, root) {
     }
 }
 
+// The record names a tier directory actually holds, or null when the directory
+// is there and could not be enumerated. Absent reads as empty, because an absent
+// tier holds no records, which is a fact rather than a failure and is the state
+// every tier reader in this file already treats as an empty tier.
+//
+// This exists because `listMemories` cannot answer the question: it returns the
+// same empty array for a tier that is not there, a tier that is empty, and a tier
+// whose listing threw, and it drops a record it could not stat. So every block
+// that reports on a whole tier establishes the directory through this rather than
+// inferring it from a listing, and they all report one unreadable tier one way.
+// The names are kept rather than counted, because the difference between the
+// listing and the directory is a record the listing lost and each caller answers
+// for it in its own words.
+function tierRecordNames(dir) {
+    try {
+        return fs.readdirSync(dir)
+            .filter((f) => isMemoryFilename(f))
+            .map((f) => f.slice(0, -3));
+    } catch (err) {
+        const code = err !== null && typeof err === 'object' ? err.code : null;
+        return code === 'ENOENT' ? [] : null;
+    }
+}
+
 // One tier directory's records judged against their anchors, or null when
 // nothing in it could be checked at all.
 //
@@ -4529,28 +4584,22 @@ function tierAnchorDrift(dir, memories, root, limits) {
     const unchecked = [];
     let unexamined = 0;
     try {
-        // The directory is established here rather than inferred from the
-        // listing, for the reason the doc block above states, and its own
-        // names are kept rather than thrown away: a record whose file the
-        // caller's listing could not stat is absent from that listing while
-        // its file sits right there, and a pass that walked only the listing
-        // would report the tier as one that never held it.
-        let present = null;
-        try {
-            present = fs.readdirSync(dir)
-                .filter((f) => isMemoryFilename(f))
-                .map((f) => f.slice(0, -3));
-        } catch (err) {
-            const code = err !== null && typeof err === 'object' ? err.code : null;
-            if (code !== 'ENOENT') return null;
-        }
+        // The directory established rather than inferred from the listing, for
+        // the reason the doc block above states, and its own names kept rather
+        // than thrown away: a record whose file the caller's listing could not
+        // stat is absent from that listing while its file sits right there, and a
+        // pass that walked only the listing would report the tier as one that
+        // never held it. A tier nobody could enumerate is the whole-tier
+        // not-checked answer this block's caller resolves a cause for.
+        const present = tierRecordNames(dir);
+        if (present === null) return null;
         const recordCap = limits !== undefined && limits !== null
             ? capOrNone(limits.records) : Infinity;
         const meter = meterFor(limits);
         // Listing mode: the tier's own names are the record set, in name
         // order because a directory's enumeration order is not one.
         const records = memories === null
-            ? (present === null ? [] : present.slice().sort().map((name) => ({ name })))
+            ? present.slice().sort().map((name) => ({ name }))
             : memories;
         const listed = new Set();
         let examined = 0;
@@ -4606,7 +4655,7 @@ function tierAnchorDrift(dir, memories, root, limits) {
         // in name order because a directory's enumeration order is not one.
         // Listing mode has no second list to disagree with, so nothing here
         // applies to it.
-        if (memories !== null && present !== null) {
+        if (memories !== null) {
             const lost = present.filter((name) => !listed.has(name)).sort();
             for (const name of lost) unchecked.push({ name, cause: 'file' });
         }
@@ -5751,9 +5800,7 @@ async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
         // The one loud line for a missing channel: the condition, the
         // degradation, and the remedy, which is memory-index's shared remedy
         // string so this line and the doctor cannot drift.
-        const reason = result.status === 'absent'
-            ? 'the local embedding stack is not installed'
-            : 'the local embedding stack is installed but unusable';
+        const reason = embedderOffReason(result.status);
         const remedy = sanitize(result.embedder && result.embedder.remedy
             ? result.embedder.remedy : mi.INSTALL_REMEDY, 200);
         return {
@@ -5952,14 +5999,10 @@ async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
         // The sweep behind this ranking, in parts, for the same reason `off` is
         // in parts: the notes above are worded for a find, and a caller that
         // serves no lexical results and never runs a second find has to say the
-        // same two facts in its own words.
-        sweep: {
-            failed: failedCount,
-            carried: carriedCount,
-            records: swept && Array.isArray(swept.records) ? swept.records.length : 0,
-            writeError: swept && swept.written === false && swept.writeError
-                ? sanitize(swept.writeError, 200) : null
-        }
+        // same two facts in its own words. In the shared shape, so the caller
+        // that says them reads one field set whichever door its sweep came
+        // through.
+        sweep: sweepFacts(swept)
     };
 }
 
@@ -11035,7 +11078,9 @@ function noTriggerNote(name, tierFlag) {
 }
 
 // memq decay-scan: report the store's decay candidates, one deterministic
-// line each, and write nothing. Line shapes:
+// line each, moving no memory and rewriting no sidecar; the derived vector
+// index its neighbour-pairs block sweeps is the one file it writes. Line
+// shapes:
 //
 //   summarize  <name>  idle <n>d  applied <date (<n>d distinct)|never>  [created <date>]  edited <date>  read <date|never>
 //   archive    <name>  idle <n>d  (same evidence fields)
@@ -11507,7 +11552,598 @@ function driftBlock(drift, notCheckedCause) {
                 + ' more not checked\n' : '');
 }
 
-function cmdDecayScan(argv) {
+// Whether a pinned store root or a pinned embedder root stands a semantic
+// check down, as the clause the line naming it prints, or null where neither
+// variable is set. Both surfaces that load the embedder outside `find` read
+// their skip from here, so the two cannot come to disagree about the condition
+// or about which variable it names.
+//
+// Both conditions are wider than the honored pair every other caller in this
+// file asks storeSignalsPresent about. That is deliberate, because the question
+// here is not the one storeSignalsPresent answers.
+//
+// What each variable does on its own is not the same in the two cases, and
+// neither case reduces to the other. KIT_EMBEDDER_ROOT selects which code runs
+// only with KIT_EMBEDDER_ROOT_ALLOW_CODE=1 beside it: with the pair the embedder
+// really is required out of a directory the command line does not name, and
+// without it memory-index ignores the variable with a note and loads from the
+// install location instead. KIT_MEMORY_ROOT moves the store only with
+// KIT_MEMORY_ROOT_ALLOW_DATA=1 beside it, and moves nothing on its own. So each
+// bare variable is a skip that was not strictly necessary.
+//
+// The breadth is the point all the same, and the reason is where the two parties
+// stand: the grant that lets an unattended worker run these verbs with no prompt
+// is decided in the hook's process, over the hook's own environment, while the
+// checks run in the child. The Bash tool's shell persists across calls, so a
+// variable an earlier call exported is in the child's environment and not in the
+// hook's, and the hook cannot see which pair the child will hold. Keying on the
+// presence of either variable is what makes the child's stand-down no narrower
+// than the hook's grant condition. The cost is a skipped convenience in a shell
+// carrying a stray variable, and each caller's line says which condition
+// skipped it.
+//
+// Callers read this before the call that loads the embedder, which is the
+// ordering test/memq-grant.test.js pins for each of them: a check that ran after
+// the load would print the same line while loading exactly the code the grant's
+// reasoning says a granted verb does not.
+function pinnedRootStandDown() {
+    if (process.env.KIT_MEMORY_ROOT) return 'a pinned store root (KIT_MEMORY_ROOT)';
+    if (process.env.KIT_EMBEDDER_ROOT) return 'a pinned embedder root (KIT_EMBEDDER_ROOT)';
+    return null;
+}
+
+// The embedder's own two unavailable conditions, in one wording, so the sentence
+// a find prints and the cause a scan's heading names cannot drift into two
+// accounts of one machine. The probe reports exactly these two when the stack
+// cannot serve, 'absent' for no install and 'unusable' for one it could not run,
+// and a sweep that did not answer 'ok' carries one of them. The query path's own
+// further failure statuses are not these, and the caller that reads those
+// statuses words them itself.
+//
+// So every caller narrows to the two before asking, rather than treating this as
+// a total function over a status field: the second branch is an assertion that
+// the stack is installed and unusable, and a caller handing a status this does
+// not cover would have it say that about a machine it is not true of.
+function embedderOffReason(status) {
+    return status === 'absent'
+        ? 'the local embedding stack is not installed'
+        : 'the local embedding stack is installed but unusable';
+}
+
+// The facts a sweep carries into a block built on its vectors, in one shape
+// whatever door the sweep came through. `find`'s channel normalizes them for a
+// caller that words the facts itself and the decay scan's pairs block calls the
+// sweep directly, so one reader of the raw shape is what keeps the two from
+// disagreeing about what a field is: `failed` is a list there and two counts
+// here, and `writeError` is raw text there and sanitized here.
+//
+// The list is split because it holds two kinds of entry. An entry naming a
+// record is a memory the sweep could not read or could not embed; an entry
+// whose name is null is a whole directory the walk could not enumerate, whose
+// records are not in that count at all and are counted in `carried` instead.
+// One number over both would report a refused tier directory as a missing
+// record while its records were also counted as carried.
+function sweepFacts(swept) {
+    const failed = swept && Array.isArray(swept.failed) ? swept.failed : [];
+    const named = (f) => f !== null && typeof f === 'object' && typeof f.name === 'string';
+    return {
+        failedRecords: failed.filter(named).length,
+        failedDirs: failed.filter((f) => !named(f)).length,
+        carried: swept && typeof swept.carried === 'number' ? swept.carried : 0,
+        records: swept && Array.isArray(swept.records) ? swept.records.length : 0,
+        writeError: swept && swept.written === false && swept.writeError
+            ? sanitize(swept.writeError, 200) : null
+    };
+}
+
+// The two lines a block says about the sweep behind it, before any reading of
+// that sweep prints. Both surfaces that rank on a sweep of their own say them, so
+// the counts and their nouns live here: a reader comparing a find's line with a
+// scan's must meet one account of one sweep, and the two lines went to two
+// callers by being hand-copied once already.
+//
+// What each caller supplies is what the reading is called and what a partial one
+// costs it, because those differ. A missed neighbour costs an author a duplicate
+// record, and a missed pair costs a reviewer a nomination the store will not
+// offer again until the next pass.
+//
+// The empty string for a healthy sweep rather than a boolean the caller tests:
+// the condition is this function's to know, and a caller deciding for itself
+// whether to print is a caller that can decide differently. Each count is named
+// only where it is not zero, for the same reason: a clause is a fact about the
+// sweep, and a zero of one kind beside a real count of another reads as one
+// account of one degrade.
+//
+// A record the sweep could not read keeps whatever vector the index held for it
+// and one it could not embed has none, so the count says what the sweep could
+// not do rather than claiming every such record is absent from the reading. What
+// makes a carried record unverified is the closing clause's business rather than
+// the count's, which is why that clause is this function's own and rides on the
+// carried count: what it says is true of any reading built on a sweep that
+// carried records forward and of no other.
+function sweepPartialLine(facts, subject, closing) {
+    const parts = [];
+    if (facts.failedRecords > 0) {
+        parts.push(facts.failedRecords + ' record(s) unreadable or unembeddable');
+    }
+    if (facts.failedDirs > 0) {
+        parts.push(facts.failedDirs + ' directory(ies) that could not be scanned');
+    }
+    if (facts.carried > 0) parts.push(facts.carried + ' record(s) served unverified');
+    if (parts.length === 0) return '';
+    return 'memq: ' + subject + ' is partial (' + parts.join(', ') + '); ' + closing
+        + (facts.carried > 0
+            ? ', and a record carried forward is scored on the vector the index'
+                + ' already held for it' : '')
+        + '\n';
+}
+
+// The persist failure, said only where the sweep had records to persist. A store
+// whose root does not exist yet is the ordinary state of a first shared-tier
+// write, and there the index write fails for the same reason there was nothing to
+// index; a line about a failed persist over an empty sweep would put an error
+// above the heading of a wholly healthy command. Where there were records, the
+// failure means the next command that needs the index sweeps again, which is a
+// real cost and is what the line names.
+function sweepPersistLine(facts, subject) {
+    if (facts.writeError === null || facts.records === 0) return '';
+    return 'memq: could not persist the semantic index (' + facts.writeError + '); '
+        + subject + ' are complete, and the next command that needs the index'
+        + ' sweeps again\n';
+}
+
+// The bound both semantic blocks outside `find` put on their own wait, and the
+// cancellation that rides with it, in one place because they are one rule: a
+// command whose product is not a search result may not be held indefinitely by
+// the embedder load and whole-store sweep behind its first similarity. An author
+// waits on a record that does not exist yet, and a decay pass waits on the
+// candidate list its own stdout carries, so in both cases the wait sits in front
+// of something the caller came for and the bound is what buys it.
+//
+// The sentinel is a local object rather than a value the work could return, so a
+// result can never be mistaken for an expiry, and it is answered as a field
+// rather than handed back, so no caller has to hold an identity this function
+// owns. The timer is cleared on the fast path, since a pending timer holds the
+// process open for the rest of its budget after a product that has already been
+// reported.
+//
+// The expiry cancels as well as ending the wait, kit-endpoint-lib's shape at its
+// own timeouts: a controller owned here, aborted by the timer, and the signal
+// handed to the work so it stops rather than finishing for a reader that has
+// gone. Both halves matter in both directions. Clearing the timer in the finally
+// is what keeps a completion from being followed by an abort it has already
+// outrun, so the fast path never cancels work whose answer the caller is about to
+// print. And an abort landing in the same tick as a completion changes nothing,
+// because the race is already settled and its winner alone decides what prints.
+// How far the signal reaches is the work's own business: memory-index's load and
+// sweep take no cancellation today, so the wait is bounded here and that part of
+// the work is not.
+async function raceNeighbourTimeout(work) {
+    const EXPIRED = {};
+    const controller = new AbortController();
+    let timer = null;
+    let outcome;
+    try {
+        outcome = await Promise.race([
+            work(controller.signal),
+            new Promise((resolve) => {
+                timer = setTimeout(() => {
+                    controller.abort();
+                    resolve(EXPIRED);
+                }, NEIGHBOUR_TIMEOUT_MS);
+            })
+        ]);
+    } finally {
+        if (timer !== null) clearTimeout(timer);
+    }
+    return outcome === EXPIRED
+        ? { expired: true, value: null }
+        : { expired: false, value: outcome };
+}
+
+// The cause both blocks name for an expiry, so one bound is described one way.
+function neighbourTimeoutCause() {
+    return 'the search did not answer within ' + NEIGHBOUR_TIMEOUT_MS + 'ms';
+}
+
+// One tier's pairs heading. `note` is the clause after the tier, null for the
+// plain heading over pair lines.
+function neighbourPairsHeading(label, note) {
+    return 'memq: neighbour pairs (' + label + ')' + (note === null ? '' : ': ' + note) + '\n';
+}
+
+// Strongest first, then the two names. The order is total over the pairs of one
+// tier, since no two of them carry the same two names, which is what lets the
+// listing below keep the strongest PAIRS_SHOWN as it goes and print the same
+// lines a sorted whole list would have sliced.
+function pairOrder(x, y) {
+    return y.score - x.score
+        || (x.a.name < y.a.name ? -1 : x.a.name > y.a.name ? 1 : 0)
+        || (x.b.name < y.b.name ? -1 : x.b.name > y.b.name ? 1 : 0);
+}
+
+// One tier's reading: its heading, the pair lines under it, and the counted
+// remainder. `mi` is the index module the caller loaded and `vectors` the live
+// vectors of the sweep by directory key, so nothing here loads or sweeps
+// anything of its own.
+//
+// Only the strongest PAIRS_SHOWN pairs are held, with a running count of every
+// pair above the floor beside them. The cap is what a reader sees either way,
+// and the tier is the one place in this pass where the candidate set grows with
+// the square of the records: holding every qualifying pair to sort it would
+// allocate tens of thousands of objects for a tier of a few hundred records, to
+// print the PAIRS_SHOWN of them a reader gets.
+//
+// `t.memories` is the caller's listing, taken before the sweep, and the
+// directory is read here, after it. So the not-checked count covers a listing
+// that may have moved: a record written or removed between the two reads is
+// counted rather than silently changing what the tier is claimed to hold.
+function printTierPairs(mi, t, vectors) {
+    // The directory established here rather than inferred from the listing,
+    // tierAnchorDrift's rule over the same tiers and for its reason: a
+    // listing comes back empty both for a tier that is not there and for one
+    // that is there and could not be enumerated, and the clean answer is true
+    // of only the first. An absent directory is an empty tier, which every
+    // other project-tier reader in this pass also treats as one, so it takes
+    // the clean answer honestly; a listing that failed is a tier holding an
+    // unknown number of records, which is said as not checked in the drift
+    // block's own words, so the two blocks of one pass cannot report one
+    // unreadable tier two ways.
+    const present = tierRecordNames(t.dir);
+    if (present === null) {
+        process.stderr.write(neighbourPairsHeading(t.label,
+            'not checked (' + ANCHOR_TIER_UNEXAMINED + ')'));
+        return;
+    }
+    const inTier = vectors.get(fsKey(t.dir)) || new Map();
+    const held = [];
+    // A file the directory holds under a memory name that the listing does
+    // not account for, counted here for tierAnchorDrift's reason: the listing
+    // drops a record it could not stat, so this is where such a record is
+    // answered for rather than being absent from a tier reported as read
+    // whole.
+    const listed = new Set(t.memories.map((mem) => mem.name));
+    let unchecked = present.filter((name) => !listed.has(name)).length;
+    for (const mem of t.memories) {
+        const key = memoryFileKey(mem.name + '.md');
+        const vector = inTier.get(key);
+        if (vector === undefined) {
+            unchecked += 1;
+            continue;
+        }
+        held.push({
+            name: mem.name,
+            key,
+            vector,
+            points: mem.supersedes === null ? null : memoryFileKey(mem.supersedes + '.md')
+        });
+    }
+    // A record's `machine:` scope, which decides whether a pair is one fact at
+    // all, stated where the block's exclusions are. The field is read through the
+    // gate the authoring block's hit line reads it through, so the two surfaces
+    // cannot come to disagree about what counts as a machine name, and every
+    // answer short of an admitted identity is no scope, which is the safe
+    // direction here: an unread field withholds no pair. The read is lazy and
+    // cached, the pin's rule on this same line, because only a pair at or above
+    // the floor asks the question and a tier's pairs grow with the square of its
+    // records.
+    const scopes = new Map();
+    const scopeOf = (name) => {
+        let scope = scopes.get(name);
+        if (scope === undefined) {
+            scope = machineIdentityOrNull(
+                frontmatterField(path.join(t.dir, name + '.md'), 'machine'));
+            scopes.set(name, scope);
+        }
+        return scope;
+    };
+    const top = [];
+    let found = 0;
+    for (let i = 0; i < held.length; i++) {
+        for (let j = i + 1; j < held.length; j++) {
+            const a = held[i];
+            const b = held[j];
+            if (a.points === b.key || b.points === a.key) continue;
+            const score = mi.cosine(a.vector, b.vector);
+            // Finiteness before the floor, semanticChannel's care with the
+            // same comparison: NaN compares false against the floor, so a
+            // bare compare would drop a broken score silently where this
+            // says nothing about the pair either way.
+            if (!Number.isFinite(score) || score < NEIGHBOUR_FLOOR) continue;
+            const scopeA = scopeOf(a.name);
+            const scopeB = scopeOf(b.name);
+            // Whether the two scopes name two boxes, asked through the same
+            // helper the hit line's own foreign judgment goes through, so one
+            // rule decides when two machine names are one box: they compare
+            // case-insensitively, the NetBIOS and DNS rule. The null guard is
+            // this caller's own, since that helper answers about the local box,
+            // where a null identity is nothing to assert on, and here a null is a
+            // record scoped to no box, which contradicts no scoped record.
+            if (scopeB !== null && foreignMachine(scopeA, scopeB)) continue;
+            found += 1;
+            const pair = { a, b, score, scope: scopeA === null ? scopeB : scopeA };
+            if (top.length === PAIRS_SHOWN && pairOrder(pair, top[PAIRS_SHOWN - 1]) >= 0) continue;
+            let at = top.length;
+            while (at > 0 && pairOrder(pair, top[at - 1]) < 0) at -= 1;
+            top.splice(at, 0, pair);
+            if (top.length > PAIRS_SHOWN) top.pop();
+        }
+    }
+    const records = held.length + unchecked;
+    // The unchecked count with the tier's own total behind it, in one wording
+    // whatever the pair count is: a count with no total cannot be told from a
+    // tier where nothing at all was checked, which is the reading with the
+    // opposite remedy, and one clause spelled two ways on one surface reads as
+    // two different facts about the tier.
+    const notChecked = unchecked + ' of ' + records
+        + (records === 1 ? ' record' : ' records') + ' not checked';
+    if (found === 0) {
+        // A tier read whole with no pair says so, the drift block's rule:
+        // silence here cannot be told apart from a tier nothing checked,
+        // which is the one reading this surface exists to prevent. A tier
+        // some of whose records went unchecked was not read whole, so it
+        // takes the counted heading instead and never the clean answer, with
+        // the tier's own record count beside the unchecked one: a count with
+        // no total behind it cannot be told from a tier where nothing at all
+        // was checked, which is the reading with the opposite remedy.
+        process.stderr.write(unchecked > 0
+            ? neighbourPairsHeading(t.label, '0 pairs, ' + notChecked)
+            : 'memq: no neighbour pairs (' + t.label + ')\n');
+        return;
+    }
+    // The count leads, and covers the tier rather than the listing: what
+    // follows is capped and a reader who cannot tell a handful of pairs from
+    // thousands of them has no way to know which they are reading. Each count
+    // carries its own noun, because pairs and records are two populations and a
+    // heading that named only the first would be read as counting it twice.
+    //
+    // The tier's lines are composed here and written once below, because the
+    // caller answers a throw with a heading of its own: a tier that had already
+    // written a reading would then carry two headings, a reading and a denial of
+    // it, with nothing on the stream to say which describes the tier. Composed,
+    // the write either lands whole or does not land, so what a throw costs is the
+    // tier and never the tier's account of itself.
+    let out = neighbourPairsHeading(t.label,
+        found + ' pair' + (found === 1 ? '' : 's')
+        + (unchecked > 0 ? ', ' + notChecked : ''));
+    // The pin is read per printed name and cached, so a record in several
+    // pairs costs one read: the listing above carries no pin field, and the
+    // whole tier's pins are already read by the walk that classifies its
+    // candidates. Only a pin marks; the answers that are neither pinned nor
+    // unpinned (a file that could not be read, a frontmatter block that does
+    // not close, a field nested under another key) are what that walk
+    // reports in its own words, and restating them on a pair line would put
+    // two accounts of one record in one block.
+    const pinned = new Map();
+    const marks = (name) => {
+        let is = pinned.get(name);
+        if (is === undefined) {
+            is = pinState(path.join(t.dir, name + '.md')) === 'pinned';
+            pinned.set(name, is);
+        }
+        return is;
+    };
+    for (const p of top) {
+        const marked = [p.a.name, p.b.name].filter(marks);
+        // The scope in the neighbours block's own segment shape and under its
+        // cap, that block's rule for the same field: a name a reader's model
+        // sees is held to one spelling wherever this store prints one.
+        out += 'memq: pair  ' + sanitize(p.a.name, NAME_CAP)
+            + '  ' + sanitize(p.b.name, NAME_CAP)
+            + '  ' + p.score.toFixed(2)
+            + (marked.length > 0
+                ? '  pinned: ' + marked.map((n) => sanitize(n, NAME_CAP)).join(', ') : '')
+            + (p.scope !== null ? '  machine:' + sanitize(p.scope, MACHINE_CAP) : '')
+            + '\n';
+    }
+    // The remainder counted in the pinned and drift blocks' shape, the tail
+    // every enumeration on this stream ends in: the strongest scores are above
+    // and what a reader loses is the weakest of a list they already know the
+    // length of.
+    if (found > top.length) {
+        out += 'memq: pair  ... and ' + (found - top.length) + ' more\n';
+    }
+    process.stderr.write(out);
+}
+
+// The decay scan's neighbour-pairs block: the live pairs of one tier whose
+// records read as one fact, so a pass that already reviews idle records and
+// pointed ones also sees the overlaps the store never noticed. Its shape is the
+// drift block's: it nominates and never moves, no `decay-prune` flag acts on a
+// pair, and the remedies are the author's, a fresh record carrying
+// `--supersedes`, a repair, or a delete.
+//
+// Vectors come from the index `memory-index.js` keeps, brought up to date by the
+// same sweep a find runs, which is what embedding a record the index lacks
+// amounts to here: that sweep reads the record's own bytes and embeds them the
+// way every search on this machine has them embedded. A record the sweep leaves
+// without a vector, its text refused by the embedder or its file unreadable with
+// no prior vector held for it, is counted on the tier's heading rather than
+// dropped, because a block over a partly-read tier that said
+// nothing would read as a tier holding no overlaps. So is a record whose file the
+// tier listing could not stat, which the directory established below is what
+// notices: the listing drops such a record while its file sits right there, and a
+// block reading only the listing would report a tier that never held it.
+//
+// The sweep's own two degrades are not that, and are said above the whole block
+// rather than on a tier: a record whose file the sweep could not read this pass
+// keeps whatever vector the index already held for it, and a tier the sweep could
+// not walk carries its prior records forward, so both are scored here on vectors
+// that may no longer describe the file on disk. Neither is a record this block
+// can name, since the sweep reports them by count, and a tier heading that
+// claimed to be read whole over them would be claiming more than the sweep
+// delivered.
+//
+// A `supersedes:` pointer in either direction is why a pair goes unlisted: it is
+// the store's own answer to the question this block asks, and a nomination the
+// store has already answered teaches a reader to skim the block. The field is
+// read off the tier listing rather than through supersededSuccessors, because
+// the question is whether a pointer stands between these two files, not whether
+// it yields a label: a mutual pair, each record pointing at the other, yields no
+// label and is joined all the same.
+//
+// A record whose frontmatter block never closes reads as pointing at nothing, so
+// its pairs are nominated rather than excluded. That is the safe direction and
+// it costs nothing a reader is not already being told: the candidate walk above
+// refuses to classify exactly that record and says so in its own words, naming
+// the repair, so a nomination beside that note asks for the same repair from the
+// other side. The reverse, treating an unreadable pointer field as a pointer,
+// would withhold a pair on the strength of a field nobody read.
+//
+// A `machine:` scope on both records, naming two boxes, is the other reason a
+// pair goes unlisted, and it is the same reason: two records scoped apart are two
+// facts however alike they read, and this is the tier that holds the store's
+// one-record-per-box families. Every remedy the block routes a reviewer to, a
+// supersede, a repair or a delete, would destroy one box's record. Names compare
+// case-insensitively, and a record with no admitted scope is scoped to no box, so
+// it contradicts no scoped record and its pairs stand. A pair that does stand
+// with a scope on either side carries that scope on its line, in the authoring
+// block's own segment shape, because it says which box the remedy lands on; two
+// differing scopes never reach a line, so the scope printed is single.
+//
+// A pair never crosses a tier. A pointer is resolved inside one tier's own
+// directory, so a cross-tier pair has no remedy to land, and a nomination whose
+// remedy the store cannot express is one a reader learns to ignore.
+//
+// The pending tier the scan reaches gets no heading at all, for that same reason
+// carried one step further: the semantic index excludes that tier, and a pending
+// record awaits an adjudication verdict rather than a supersession, so there is
+// no remedy of this block's kind to nominate and no vector to nominate one on.
+// The scan says what it does say about that tier where it counts it, above.
+//
+// Pinned records are listed and marked, the drift block's rule over the same
+// population: a pin exempts a record from retirement, not from being one of two
+// records that say one thing, and an exemption standing over a duplicated fact
+// is what a reviewer of that population most needs to see.
+//
+// The lines ride stderr at column zero in memq's own voice, beside the scan's
+// other self-description: stdout is the candidate list a pass parses and no flag
+// acts on a pair. They carry no provenance fence, the pinned block's answer for
+// the same tiers' names, because a fence frames indented content as data and
+// these are this tool's own lines about tiers it walked, with every name held to
+// the same cap the pinned and drift lines hold theirs to.
+//
+// The heading leads with the pair count and the listing tails off after
+// PAIRS_SHOWN with a counted remainder, the rule every other enumeration on this
+// stream follows. It matters more here than anywhere else in the pass, because a
+// tier's pairs grow with the square of its live records rather than with the
+// records themselves: an operator tier of a few hundred records offers tens of
+// thousands of candidate pairs, and the count on the heading is what tells a
+// reader which of those two magnitudes the block they are reading came from.
+//
+// That same growth is outside what NEIGHBOUR_TIMEOUT_MS bounds. The bound covers
+// the embedder load and the sweep, which is where a stalled stack holds a pass;
+// the pairwise cosine pass over each tier runs after it, unbounded, and grows
+// with the square of the tier. It is milliseconds at the store sizes this kit
+// carries and nothing on the heading reports it, so a tier large enough for that
+// pass to cost real time would spend it with no line saying where it went.
+async function neighbourPairsBlock(tiers) {
+    const standDown = pinnedRootStandDown();
+    if (standDown !== null) {
+        for (const t of tiers) {
+            process.stderr.write(neighbourPairsHeading(t.label, 'not checked (' + standDown + ')'));
+        }
+        return;
+    }
+    // The require is lazy and rides after an await, semanticChannel's two
+    // reasons: memory-index requires this module back for the store's shape and
+    // this file assigns module.exports at its bottom, so the await is what puts
+    // the require past this file's own evaluation; and lazy keeps the load off
+    // every scan that stands down above.
+    await null;
+    const mi = require('./memory-index.js');
+    // The same bound the authoring block puts on the same work, through the same
+    // helper: the embedder load and the whole-store sweep sit between this scan
+    // and its own candidate list, which is a product a stalled stack may not
+    // withhold. At expiry every tier reads as not checked with the bound as its
+    // cause, and the pass carries on to the answer it was run for.
+    const raced = await raceNeighbourTimeout((signal) => mi.sweep({ signal }));
+    if (raced.expired) {
+        for (const t of tiers) {
+            process.stderr.write(neighbourPairsHeading(t.label,
+                'not checked (' + neighbourTimeoutCause() + ')'));
+        }
+        return;
+    }
+    const swept = raced.value;
+    // Narrowed to the two conditions embedderOffReason speaks for, the channel's
+    // own care with the same helper: those are the statuses the sweep answers
+    // with when the stack cannot serve, and a status of any other spelling is an
+    // impossible state this block words nothing for, so it reaches the reading
+    // below and the guard around this block answers for whatever it throws.
+    if (swept.status === 'absent' || swept.status === 'unusable') {
+        const cause = embedderOffReason(swept.status);
+        for (const t of tiers) {
+            process.stderr.write(neighbourPairsHeading(t.label, 'not checked (' + cause + ')'));
+        }
+        return;
+    }
+    // The sweep's own degrades, said once above every tier's heading rather
+    // than per tier, through the helpers the authoring block says them through:
+    // each is a whole-store count the sweep reports without naming a tier, so a
+    // copy of one on a tier heading would attribute to that tier a count it
+    // may have no part in.
+    const facts = sweepFacts(swept);
+    process.stderr.write(sweepPartialLine(facts, 'this pairing',
+        'no pair here proves there is none'));
+    process.stderr.write(sweepPersistLine(facts, 'these pairs'));
+    // The vectors by the directory a record's identity resolves to. Matching on
+    // the resolved directory rather than on the store segment is what lets a
+    // tier this scan walked meet the records the index holds under any store
+    // resolution: both sides resolve through the same root, so a pinned project
+    // segment or a redirected store cannot make the two disagree about which
+    // directory a record sits in. Archived tiers are dropped: a retired record
+    // is not a fact the store answers with, so it is no half of a pair.
+    const vectors = new Map();
+    for (const r of swept.records) {
+        if (mi.isArchivedTier(r.tier)) continue;
+        const file = mi.recordPath(r.store, r.tier, r.name);
+        if (file === null) continue;
+        const dirKey = fsKey(path.dirname(file));
+        let inTier = vectors.get(dirKey);
+        if (inTier === undefined) {
+            inTier = new Map();
+            vectors.set(dirKey, inTier);
+        }
+        inTier.set(memoryFileKey(r.name + '.md'), r.vector);
+    }
+    for (const t of tiers) {
+        // A tier's own failure names that tier. The printing below runs once per
+        // tier, so a throw on the second tier of a pass leaves the first tier's
+        // heading and pair lines standing: a line saying the check failed with no
+        // tier on it would read as an answer about all of them, including the one
+        // that just printed a reading. The guard around the whole block stays for
+        // the shared work above, which falls on no single tier.
+        try {
+            printTierPairs(mi, t, vectors);
+        } catch (err) {
+            process.stderr.write(neighbourPairsHeading(t.label,
+                'not checked (the check failed: ' + failureText(err) + ')'));
+        }
+    }
+}
+
+// The block, guarded whole. The sweep answers every expected embedder condition
+// as a status and the formatting below can still throw, and a throw anywhere in
+// here would cost the scan its candidate list for the sake of a reading that had
+// already failed. So a broken block costs the reader the block and never the
+// scan: the exit code and stdout are what a pass parses.
+//
+// What reaches this guard is the work that falls on no one tier: the stand-down,
+// the index load, the sweep and the vectors built from it. A throw inside one
+// tier's own printing is caught there and named with that tier, so a line here
+// is an answer about the block rather than about a tier that already printed a
+// reading.
+async function printNeighbourPairsBlock(tiers) {
+    try {
+        await neighbourPairsBlock(tiers);
+    } catch (err) {
+        process.stderr.write('memq: neighbour pairs not checked (the check failed: '
+            + failureText(err) + ')\n');
+    }
+}
+
+async function cmdDecayScan(argv) {
     if (argv.length > 0) return usage('decay-scan takes no arguments');
     // This hoist sits ahead of readMemDirOrNote(): that call's own first
     // statement, projectMemoryDir(process.cwd()), reaches
@@ -11549,19 +12185,35 @@ function cmdDecayScan(argv) {
     usageEvidenceLine(projectUsage, '');
     tierDecayCandidates(memDir, '', now, projectUsage, summarize, archive, pinned,
         projectMemories, false);
+    // The tiers this scan reached, each with the one listing taken for it, so
+    // the pairs block below reads the same records the candidate walk did rather
+    // than listing a tier a second time. The label is the tier token the block's
+    // headings print, spelled from the tier's own parts: the semantic channel's
+    // provenance label is not reused, since its project segment is a flattened
+    // absolute path and these headings name tiers this scan walked rather than
+    // hits it spanned stores to reach.
+    const pairTiers = [{ label: 'project', dir: memDir, memories: projectMemories }];
     const typed = typedTierOrNull(process.cwd());
     if (typed !== null) {
         const typeUsage = readUsage(typed.dir, 'type');
         usageEvidenceLine(typeUsage, '  (type:' + sanitize(typed.type, TYPE_CAP) + ')');
+        const typeMemories = listMemories(typed.dir);
         tierDecayCandidates(typed.dir, typed.type, now, typeUsage, summarize, archive, pinned,
-            listMemories(typed.dir), true);
+            typeMemories, true);
+        pairTiers.push({
+            label: 'type:' + sanitize(typed.type, TYPE_CAP),
+            dir: typed.dir,
+            memories: typeMemories
+        });
     }
     const operator = operatorTierOrNull();
     if (operator !== null) {
         const operatorUsage = readUsage(operator, 'operator');
         usageEvidenceLine(operatorUsage, '  (operator)');
+        const operatorMemories = listMemories(operator);
         tierDecayCandidates(operator, OPERATOR_LABEL, now, operatorUsage, summarize, archive,
-            pinned, listMemories(operator), true);
+            pinned, operatorMemories, true);
+        pairTiers.push({ label: 'operator', dir: operator, memories: operatorMemories });
     }
 
     // The pinned population, counted and then listed, on every scan that
@@ -11639,6 +12291,12 @@ function cmdDecayScan(argv) {
     process.stderr.write(driftBlock(
         tierAnchorDrift(memDir, projectMemories, anchorsRoot),
         anchorsRoot === null ? ANCHOR_ROOTLESS_PIN : ANCHOR_TIER_UNEXAMINED));
+
+    // The neighbour pairs, after the drift block and before the candidate list.
+    // Both blocks above nominate rather than move and this one joins them: what
+    // it adds is the store's own reading of which live records of one tier say
+    // one fact, which no other surface of this pass can see.
+    await printNeighbourPairsBlock(pairTiers);
 
     // Journal entries past the rollup age, tallied per key with the evidence
     // range. An entry whose timestamp does not parse has no age, so it is
@@ -13887,93 +14545,42 @@ async function printNeighbourBlock(name, description) {
 
 // The block itself, called only through the guard above.
 async function neighbourBlock(name, description) {
-    // Two conditions skip the check, and both are wider than the honored pair
-    // every other caller in this file asks storeSignalsPresent about. That is
-    // deliberate and local to this block, because the question here is not the
-    // one storeSignalsPresent answers.
-    //
-    // What each variable does on its own is not the same in the two cases, and
-    // neither case reduces to the other. KIT_EMBEDDER_ROOT selects which code
-    // runs only with KIT_EMBEDDER_ROOT_ALLOW_CODE=1 beside it: with the pair the
-    // embedder really is required out of a directory the command line does not
-    // name, and without it memory-index ignores the variable with a note and
-    // loads from the install location instead. KIT_MEMORY_ROOT moves the store
-    // only with KIT_MEMORY_ROOT_ALLOW_DATA=1 beside it, and moves nothing on its
-    // own. So each bare variable is a skip that was not strictly necessary.
-    //
-    // The breadth is the point all the same, and the reason is where the two
-    // parties stand: the grant that lets an unattended worker run this verb with
-    // no prompt is decided in the hook's process, over the hook's own
-    // environment, while this check runs in the child. The Bash tool's shell
-    // persists across calls, so a variable an earlier call exported is in the
-    // child's environment and not in the hook's, and the hook cannot see which
-    // pair the child will hold. Keying on the presence of either variable is
-    // what makes the child's stand-down no narrower than the hook's grant
-    // condition. The cost is a skipped convenience in a shell carrying a stray
-    // variable, and the line says which condition skipped it.
-    if (process.env.KIT_MEMORY_ROOT) {
-        process.stderr.write('memq: neighbours not checked under a pinned store root'
-            + ' (KIT_MEMORY_ROOT); this check does not block the write\n');
-        return;
-    }
-    if (process.env.KIT_EMBEDDER_ROOT) {
-        process.stderr.write('memq: neighbours not checked under a pinned embedder root'
-            + ' (KIT_EMBEDDER_ROOT); this check does not block the write\n');
+    // The skip a pinned store root or a pinned embedder root earns, decided by
+    // the shared predicate the decay scan's pairs block reads too, so the two
+    // surfaces that reach this load outside `find` stand down on one condition
+    // and name the same variable for it. Why the condition is wider than the
+    // honored pair storeSignalsPresent asks about is stated where the predicate
+    // is. The line naming it is this caller's own, ending in the promise every
+    // line of this block ends in.
+    const standDown = pinnedRootStandDown();
+    if (standDown !== null) {
+        process.stderr.write('memq: neighbours not checked under ' + standDown
+            + '; this check does not block the write\n');
         return;
     }
     // The bound, and what it is a bound on: the embedder load and the whole
-    // store sweep behind the first similarity of a process. The sentinel is a
-    // local object rather than a value the channel could return, so a channel
-    // result can never be mistaken for an expiry. The timer is cleared on the
-    // fast path, since a pending timer would hold the process open for the rest
-    // of its budget after a write that has already been reported.
-    //
-    // The expiry cancels as well as ends the wait, kit-endpoint-lib's shape at
-    // its own timeouts: a controller owned here, aborted by the timer, and the
-    // signal handed to the work so it stops rather than finishing for a reader
-    // that has gone. The two halves of that shape matter in both directions.
-    // Clearing the timer in the finally is what keeps a completion from being
-    // followed by an abort it has already outrun, so the fast path never
-    // cancels a channel whose answer this block is about to print. And an abort
-    // that lands in the same tick as a completion changes nothing, because the
-    // race is already settled and its winner alone decides what prints: the
-    // signal reaches only the work still ahead of the channel's resumption.
-    // How far it reaches is stated at NEIGHBOUR_TIMEOUT_MS, and the short of it
-    // is that memory-index's load and sweep take no cancellation, so the wait is
-    // bounded here and that work is not.
-    const EXPIRED = {};
-    const controller = new AbortController();
-    let timer = null;
-    let channel;
-    try {
-        channel = await Promise.race([
-            // The query is the record as the author has stated it: the name,
-            // which in this store is a fact-bearing phrase (records are named
-            // for what they teach, not numbered), and the description that
-            // becomes its index line. The empty already-shown set and the
-            // withheld archive are this caller's needs rather than `find`'s:
-            // nothing printed above this block needs deduping against, and a
-            // retired record is not a fact the store still answers with, so it
-            // is no reason to reconsider a write. The order and the cap are
-            // asked of the channel rather than applied to its answer, for the
-            // reason its own options comment gives.
-            semanticChannel(name + ': ' + description, null, new Set(), false,
-                { rawOrder: true, limit: NEIGHBOURS_SHOWN, signal: controller.signal }),
-            new Promise((resolve) => {
-                timer = setTimeout(() => {
-                    controller.abort();
-                    resolve(EXPIRED);
-                }, NEIGHBOUR_TIMEOUT_MS);
-            })
-        ]);
-    } finally {
-        if (timer !== null) clearTimeout(timer);
-    }
-    if (channel === EXPIRED) {
-        process.stderr.write('memq: neighbours not checked (the search did not answer within '
-            + NEIGHBOUR_TIMEOUT_MS + 'ms); this check does not block the write\n');
+    // store sweep behind the first similarity of a process. The race, the
+    // cancellation and the expiry sentinel are the shared helper's, which the
+    // scan's pairs block puts the same bound on its own load and sweep through,
+    // and whose comment states why each half of that shape is there.
+    const raced = await raceNeighbourTimeout((signal) =>
+        // The query is the record as the author has stated it: the name, which
+        // in this store is a fact-bearing phrase (records are named for what
+        // they teach, not numbered), and the description that becomes its index
+        // line. The empty already-shown set and the withheld archive are this
+        // caller's needs rather than `find`'s: nothing printed above this block
+        // needs deduping against, and a retired record is not a fact the store
+        // still answers with, so it is no reason to reconsider a write. The
+        // order and the cap are asked of the channel rather than applied to its
+        // answer, for the reason its own options comment gives.
+        semanticChannel(name + ': ' + description, null, new Set(), false,
+            { rawOrder: true, limit: NEIGHBOURS_SHOWN, signal }));
+    if (raced.expired) {
+        process.stderr.write('memq: neighbours not checked (' + neighbourTimeoutCause()
+            + '); this check does not block the write\n');
         return;
     }
+    const channel = raced.value;
     // A truthiness check rather than a null identity, cmdFind's care with this
     // same contract: a future degradation path returning without the key at all
     // would otherwise turn the channel's promise into a TypeError here, which is
@@ -13984,34 +14591,17 @@ async function neighbourBlock(name, description) {
             + '; this check does not block the write\n');
         return;
     }
-    // The sweep's two facts, said before any hit prints and worded for this
-    // caller rather than borrowed from the find that composed them.
-    //
-    // The partial sweep is said for the reason the channel gives: a record it
-    // could not read or embed is missing from this ranking, and an author about
-    // to read the block as the store's answer has to hear that the answer is
-    // partial. The stake is higher here than in a find, a missed neighbour
-    // costing a duplicate record rather than a rerun.
-    //
-    // The persist failure is said only where the sweep actually had records to
-    // persist. A store whose root does not exist yet is the ordinary state of
-    // the first shared-tier write, and there the index write fails for the same
-    // reason there was nothing to index; a line about a failed persist over an
-    // empty sweep would put an error above the heading of a wholly healthy
-    // write. Where there were records, the failure means the next command sweeps
-    // again, which is a real cost and is said in this caller's terms.
-    const sweep = channel.sweep || { failed: 0, carried: 0, records: 0, writeError: null };
-    if (sweep.failed > 0 || sweep.carried > 0) {
-        process.stderr.write('memq: this ranking is partial (' + sweep.failed
-            + ' record(s) unreadable or unembeddable and so missing, ' + sweep.carried
-            + ' served unverified from a directory that could not be scanned);'
-            + ' no neighbour here proves there is none\n');
-    }
-    if (sweep.writeError !== null && sweep.records > 0) {
-        process.stderr.write('memq: could not persist the semantic index ('
-            + sweep.writeError + '); these neighbours are complete, and the next'
-            + ' command that needs the index sweeps again\n');
-    }
+    // The sweep's two facts, said before any hit prints, through the helpers both
+    // blocks that rank on a sweep say them through. What this caller supplies is
+    // the reading's name and what a partial one costs it: a record the sweep
+    // could not read or embed is missing from this ranking, and the stake is
+    // higher here than in a find, a missed neighbour costing a duplicate record
+    // rather than a rerun.
+    const sweep = channel.sweep
+        || { failedRecords: 0, failedDirs: 0, carried: 0, records: 0, writeError: null };
+    process.stderr.write(sweepPartialLine(sweep, 'this ranking',
+        'no neighbour here proves there is none'));
+    process.stderr.write(sweepPersistLine(sweep, 'these neighbours'));
     process.stderr.write('memq: nearest neighbours of ' + sanitize(name, NAME_CAP) + '\n');
     // The same fence the find path puts over this same channel's hits, and for
     // the same reason: these names come from every store and archive on the
@@ -16444,7 +17034,19 @@ function main() {
     }
     else if (cmd === 'delete-type') cmdDeleteType(rest);
     else if (cmd === 'delete-operator') cmdDeleteOperator(rest);
-    else if (cmd === 'decay-scan') cmdDecayScan(rest);
+    // decay-scan is async for the neighbour-pairs block it prints after its
+    // drift block, find's reason and find's backstop: every expected embedder
+    // condition is answered inside the block (each degrades to a printed
+    // heading and the scan carries on), so this catch is for a genuine bug,
+    // reported like any other failed command rather than left to crash as an
+    // unhandled rejection.
+    else if (cmd === 'decay-scan') {
+        cmdDecayScan(rest).catch((err) => {
+            process.stderr.write('memq: decay-scan failed: '
+                + failureText(err) + '\n');
+            process.exitCode = 1;
+        });
+    }
     else if (cmd === 'decay-prune') cmdDecayPrune(rest);
     else if (cmd === 'decay-done') cmdDecayDone(rest);
     else usage(cmd === undefined ? undefined : 'unknown subcommand ' + sanitize(cmd, 40));
@@ -16521,6 +17123,7 @@ module.exports = {
     NEIGHBOUR_FLOOR,
     NEIGHBOURS_SHOWN,
     NEIGHBOUR_TIMEOUT_MS,
+    PAIRS_SHOWN,
     parseSince,
     ARCHIVE_DIR,
     OPERATOR_LABEL,

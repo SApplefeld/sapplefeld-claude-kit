@@ -830,24 +830,24 @@ function runMemq(args) {
     });
 }
 
-test('memq loads code out of a directory in one place, reachable from find and from the two'
-    + ' authoring verbs behind their store-signal skip', () => {
+test('memq loads code out of a directory only where find and the granted blocks that stand'
+    + ' down first reach it', () => {
     // The reason find is left off the grant's verb list is that its path loads
     // code from a directory the command line does not name. That claim is about
     // memq's source, so it is checked against the source rather than restated:
-    // one code load past the built-ins at the top of the file, inside
-    // semanticChannel. A second one anywhere below that block, or this one
-    // moving under another verb, reds here rather than silently widening what a
+    // every code load past the built-ins at the top of the file is listed below by
+    // the function it sits in, and a load anywhere else, or one of these moving
+    // under another verb, reds here rather than silently widening what a
     // prompt-free allow can load.
     //
-    // Three dispatch roots reach it, and the two granted ones reach it only
-    // with the signals off. The authoring verbs print a neighbours block before
-    // a write, which is that same channel, so the load is inside two verbs the
-    // fleet grant does allow; what keeps the grant's reasoning intact is that
-    // the block's first act under those signals is to skip, so a granted
-    // invocation loads no embedder at all. That ordering is asserted below,
-    // because it is the whole of what distinguishes this reach from the one the
-    // grant withholds find for.
+    // The granted roots among them reach it only with the signals off. The
+    // authoring verbs print a neighbours block before a write and the decay scan
+    // prints a neighbour-pairs block after its drift block, both reading the same
+    // index, so the load is inside verbs the fleet grant does allow; what keeps
+    // the grant's reasoning intact is that each block's first act under those
+    // signals is to stand down, so a granted invocation loads no embedder at all.
+    // That ordering is asserted below, because it is the whole of what
+    // distinguishes those reaches from the one the grant withholds find for.
     //
     // Three named exceptions ride in the same contiguous top-of-file block as
     // the node built-ins, each a fixed, kit-shipped sibling under hooks/:
@@ -902,17 +902,19 @@ test('memq loads code out of a directory in one place, reachable from find and f
             dynamic.push({ line: i + 1, text: line.trim() });
         }
     });
-    // Each load, by the module it names and the function it sits in. Three
-    // rather than one because find answers from three channels now, and each
-    // loads its own optional stack: the embedder's index, the model endpoint's
-    // client, and the relevance prompt that client posts. A fourth entry, or
-    // any of these three moving to another function, reds here.
+    // Each load, by the module it names and the function it sits in, listed
+    // whole rather than counted: find answers from several channels, each loading
+    // its own optional stack (the embedder's index, the model endpoint's client,
+    // and the relevance prompt that client posts), and the decay scan's pairs
+    // block reads the same index the semantic channel does. A load anywhere else,
+    // or one of these moving to another function, reds here.
     assert.deepStrictEqual(
         dynamic.map((d) => ({ module: d.text.replace(/^.*require\('([^']+)'\).*$/, '$1'), in: enclosing(d.line) })),
         [
             { module: './memory-index.js', in: 'semanticChannel' },
             { module: './prompts/relevance-v1.js', in: 'relevancePrompt' },
-            { module: './kit-endpoint-lib.js', in: 'judgedChannel' }
+            { module: './kit-endpoint-lib.js', in: 'judgedChannel' },
+            { module: './memory-index.js', in: 'neighbourPairsBlock' }
         ],
         'the code loads past the built-in block, and where each one sits: '
             + JSON.stringify(dynamic));
@@ -939,10 +941,10 @@ test('memq loads code out of a directory in one place, reachable from find and f
     // gives main's presence in the finished set its meaning, since main calls
     // every verb and would otherwise be in the closure of any load at all. With
     // the stops in place, main appears only when a load is reachable from main
-    // by some path that is not through one of these three, which is the failure
-    // this test exists to catch. Widening this list is how a fourth verb's
+    // by some path that is not through one of these, which is the failure
+    // this test exists to catch. Widening this list is how another verb's
     // reach would be admitted, so it is spelled here and nowhere else.
-    const ROOTS = ['cmdFind', 'cmdAddType', 'cmdAddOperator'];
+    const ROOTS = ['cmdFind', 'cmdAddType', 'cmdAddOperator', 'cmdDecayScan'];
     const closure = new Set(dynamic.map((d) => enclosing(d.line)));
     for (const name of closure) {
         if (ROOTS.includes(name)) continue;
@@ -964,50 +966,97 @@ test('memq loads code out of a directory in one place, reachable from find and f
     assert.deepStrictEqual([...closure].sort(), [
         'cmdAddOperator',
         'cmdAddType',
+        'cmdDecayScan',
         'cmdFind',
         'judgedCandidates',
         'judgedChannel',
         'neighbourBlock',
+        'neighbourPairsBlock',
         'parseJudgedAnswer',
         'printNeighbourBlock',
+        'printNeighbourPairsBlock',
         'relevancePrompt',
         'semanticChannel'
-    ], 'every function that can reach a code load belongs to find or to the neighbours '
-        + 'block, and the only dispatch roots among them are the three named: '
-        + JSON.stringify([...closure]));
+    ], 'every function that can reach a code load belongs to find, to the neighbours '
+        + 'block, or to the decay scan\'s pairs block, and the only dispatch roots among '
+        + 'them are the ones named: ' + JSON.stringify([...closure]));
 
-    // The ordering the two granted roots' reach rests on: inside the block, both
-    // store-signal skips answer before the call that loads the embedder, so an
-    // invocation carrying either signal returns without a load. Read off the
-    // source for the reason the loads above are: the claim is about what a
-    // granted command line can make this file do, and a check that ran after the
-    // load would satisfy every behavioural assertion about the printed line
-    // while loading exactly the code the grant's reasoning says it does not. The
-    // block reads the two variables directly rather than through
-    // storeSignalsPresent, which answers a narrower question (the honored pair),
-    // so the pin names the variables.
-    const blockStart = src.findIndex((l) => /^async function neighbourBlock\(/.test(l));
-    assert.ok(blockStart !== -1, 'the neighbours block is a function of this file');
-    let blockEnd = src.length;
-    for (let i = blockStart + 1; i < src.length; i++) {
-        if (src[i] === '}') { blockEnd = i; break; }
-    }
-    const body = src.slice(blockStart, blockEnd);
-    const callAt = body.findIndex((l) => /await semanticChannel\(|semanticChannel\(name/.test(l) && isCode(l));
-    assert.ok(callAt !== -1, 'the block calls the channel: ' + JSON.stringify(body));
+    // The ordering the granted roots' reach rests on: inside each block that can
+    // reach the load, the store-signal stand-down answers before the call that
+    // loads the embedder, so an invocation carrying either signal returns without
+    // a load. Read off the source for the reason the loads above are: the claim
+    // is about what a granted command line can make this file do, and a check
+    // that ran after the load would satisfy every behavioural assertion about the
+    // printed line while loading exactly the code the grant's reasoning says it
+    // does not.
+    //
+    // Both blocks read the condition from one predicate, so the pin is in two
+    // parts: the predicate holds the two variable reads, and each block calls it
+    // ahead of its own load. Naming the predicate is what keeps the second part
+    // honest, since a block that called something else would fail the call
+    // assertion rather than pass on a read that happens elsewhere.
+    const bodyOf = (declaration) => {
+        const start = src.findIndex((l) => declaration.test(l));
+        assert.ok(start !== -1, 'the function is declared in this file: ' + declaration);
+        let end = src.length;
+        for (let i = start + 1; i < src.length; i++) {
+            if (src[i] === '}') { end = i; break; }
+        }
+        return { start, lines: src.slice(start, end) };
+    };
+    const STAND_DOWN = 'pinnedRootStandDown';
+    const predicate = bodyOf(new RegExp('^function ' + STAND_DOWN + '\\(')).lines;
     for (const variable of ['KIT_MEMORY_ROOT', 'KIT_EMBEDDER_ROOT']) {
         // The variable whole, with no identifier character after it. A substring
         // match on KIT_MEMORY_ROOT also matches a read of
         // KIT_MEMORY_ROOT_ALLOW_DATA, which is a different question (the honored
-        // pair) and could sit anywhere in the block, so the pin would be reading
-        // a line it was not asked about and could pass or fail on it.
+        // pair) and could sit anywhere in the predicate, so the pin would be
+        // reading a line it was not asked about and could pass or fail on it.
         const reads = new RegExp('process\\.env\\.' + variable + '(?![0-9A-Za-z_$])');
-        const skipAt = body.findIndex((l) => reads.test(l) && isCode(l));
-        assert.ok(skipAt !== -1,
-            'the block reads ' + variable + ': ' + JSON.stringify(body));
-        assert.ok(skipAt < callAt,
-            'the ' + variable + ' skip answers before the channel is called: skip at line '
-                + (blockStart + skipAt + 1) + ', call at line ' + (blockStart + callAt + 1));
+        assert.ok(predicate.some((l) => reads.test(l) && isCode(l)),
+            STAND_DOWN + ' reads ' + variable + ': ' + JSON.stringify(predicate));
+    }
+    // Each block, with the call whose reach the stand-down bounds: the neighbours
+    // block awaits the semantic channel, and the pairs block requires the index
+    // module itself.
+    for (const [declaration, load] of [
+        [/^async function neighbourBlock\(/, /await semanticChannel\(|semanticChannel\(name/],
+        [/^async function neighbourPairsBlock\(/, /require\('\.\/memory-index\.js'\)/]
+    ]) {
+        const block = bodyOf(declaration);
+        const callAt = block.lines.findIndex((l) => load.test(l) && isCode(l));
+        assert.ok(callAt !== -1, 'the block reaches the load: ' + JSON.stringify(block.lines));
+        const standDownAt = block.lines.findIndex((l) =>
+            new RegExp('\\b' + STAND_DOWN + '\\s*\\(').test(l) && isCode(l));
+        assert.ok(standDownAt !== -1,
+            'the block asks ' + STAND_DOWN + ': ' + JSON.stringify(block.lines));
+        assert.ok(standDownAt < callAt,
+            'the stand-down answers before the load: asked at line '
+                + (block.start + standDownAt + 1) + ', load at line '
+                + (block.start + callAt + 1));
+        // The call above is not the pin: a block that asked the predicate and
+        // threw the answer away would satisfy an ordering assertion while loading
+        // exactly the code the stand-down withholds. So what is pinned is the
+        // gate. The answer is bound to a name and tested within two lines of the
+        // call, and a bare return leaves the function between that test and the
+        // load, which is the only shape that keeps the load unreached under a
+        // pinned root.
+        const bound = new RegExp('^\\s*const (\\w+) = ' + STAND_DOWN + '\\(\\);\\s*$')
+            .exec(block.lines[standDownAt]);
+        assert.ok(bound !== null,
+            'the stand-down\'s answer is bound to a name: ' + block.lines[standDownAt]);
+        const tested = new RegExp('^\\s*if \\(' + bound[1] + ' !== null\\)');
+        const testAt = block.lines.findIndex((l, i) => i > standDownAt
+            && i <= standDownAt + 2 && tested.test(l) && isCode(l));
+        assert.ok(testAt !== -1,
+            'and is tested within two lines of the call: '
+                + JSON.stringify(block.lines.slice(standDownAt, standDownAt + 3)));
+        const returnAt = block.lines.findIndex((l, i) => i > testAt && i < callAt
+            && /^\s*return;\s*$/.test(l) && isCode(l));
+        assert.ok(returnAt !== -1,
+            'and that test returns before the load: tested at line '
+                + (block.start + testAt + 1) + ', load at line '
+                + (block.start + callAt + 1) + ', with no return between them');
     }
 });
 

@@ -28,7 +28,7 @@ The memory store's search is strong, and its write path consults none of it. `me
 
 Before the lock, on the creation path only, the two authoring verbs run the semantic channel in-process with the query `<name>: <description>`, take the three highest-scoring live hits the search admits, ordered by raw similarity rather than the search's blended rank, across every tier and store the index reaches, archived records excluded and superseded ones labeled as the search labels them, and print them on stderr as a neighbours block: name, score, tier and store, a `superseded` token where the record points at a successor, a `machine:<scope>` segment where an operator-tier record is scoped to one box, and the word `likely overlap` on any hit at or above `NEIGHBOUR_FLOOR`. Then the command continues to its refusals and the write exactly as today. The block is three lines wherever the search admits three hits, so the floor is a label on a line the author already sees and never a gate. A `--update` runs no check: it repairs a record already there, whose neighbours were shown when it was written, and the record's own prior version would otherwise rank first against itself. Embedder absent or unusable: one line, `memq: neighbours not checked (<cause>); remedy: <remedy>; this check does not block the write`, the cause and remedy the search's own and the line reshaped because no lexical matches are served here. Whenever `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT` is present at all, the honored pair deliberately not consulted, the check is skipped and one line names the variable that did it: the fleet grant withholds `find` because it loads an embedder from an unnamed directory, an in-process load inside a granted verb would route around that reason, and the stand-down keys on bare presence because it runs in the child while the grant is decided in the hook, so it must never be narrower than the grant condition. Around the hits the block also prints the shared fence line wherever a hit line follows, find's own rule; an expiry line in the not-checked shape when `NEIGHBOUR_TIMEOUT_MS` passes first; a partial-ranking line and a persist-failure line above the heading when the sweep behind the check was partial or could not write the index, both this tool's own words at column zero; and a count of retired records matching at or above the floor, which are never listed. The model-judged block is never used by an authoring verb, so nothing an author types leaves the machine.
 
-The decay scan gains a pairs block on stderr after its anchor-drift block: for each tier the scan reaches, every live pair at or above the floor, one line per pair with both names and the score, pinned records listed, pairs already joined by a `supersedes:` pointer excluded since the store already holds their answer. It reads vectors from the index `memory-index.js` keeps and embeds what the index lacks the way the search does, so a scan on a freshly synced store still answers. It nominates and never moves: no `decay-prune` flag acts on a pair, and the remedy is the author's, a fresh record carrying `--supersedes`, a repair, or a delete, per the skill's four remedies. Embedder absent, or the engine store signals set: the block's heading says not checked and why.
+The decay scan gains a pairs block on stderr after its anchor-drift block: for each tier the scan reaches, the highest-scoring live pairs at or above the floor, one line per pair with both names and the score, capped at `PAIRS_SHOWN` with a counted remainder because this is output a model reads and the candidate set grows with the square of a tier, pinned records listed, pairs already joined by a `supersedes:` pointer excluded since the store already holds their answer. It reads vectors from the index `memory-index.js` keeps and embeds what the index lacks the way the search does, so a scan on a freshly synced store still answers. It nominates and never moves: no `decay-prune` flag acts on a pair, and the remedy is the author's, a fresh record carrying `--supersedes`, a repair, or a delete, per the skill's four remedies. Embedder absent, or `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT` present at all, or the sweep past `NEIGHBOUR_TIMEOUT_MS`: the block's heading says not checked and why.
 
 `NEIGHBOUR_FLOOR` is one constant in `memq.js` beside the semantic constants, seeded at 0.30, above the 0.26 paraphrase control and well below the 0.59 the inbox note reports for a found duplicate. It is a seed rather than a measurement, tuned at a decay pass that has a pairs block to read, and the skill says so in the words the decay thresholds already use.
 
@@ -86,11 +86,11 @@ Tests: lock that the block is stderr only and the write is never gated; lock the
 
 ### 2. The decay scan nominates live pairs above the floor. Model: opus
 
-In `cmdDecayScan`, after the anchor-drift block, print `memq: neighbour pairs (<tier>)` per tier the scan reaches, then one line per live pair at or above `NEIGHBOUR_FLOOR`, `memq: pair  <name>  <name>  <score>`, pinned records included and marked, pairs already joined by a `supersedes:` pointer in either direction excluded, and `memq: no neighbour pairs (<tier>)` for a tier checked whole with none. Vectors come from the index `memory-index.js` keeps; a record the index lacks is embedded the way the search embeds it, and a record that cannot be embedded is counted on the heading, `memq: neighbour pairs (<tier>): <n> not checked`. Embedder absent or unusable, or the engine store signals set: the heading reads `memq: neighbour pairs (<tier>): not checked (<cause>)`, the drift block's own idiom, and no pair lines follow. `decay-prune` is untouched: no flag acts on a pair.
+In `cmdDecayScan`, after the anchor-drift block, print `memq: neighbour pairs (<tier>)` per tier the scan reaches other than the pending tier, which the index excludes and whose records await a verdict rather than a supersession, then the highest-scoring live pairs at or above `NEIGHBOUR_FLOOR` as `memq: pair  <name>  <name>  <score>`, capped at `PAIRS_SHOWN` with a counted remainder in the pinned block's shape and the pair count leading the heading, because this is output a model reads and the candidate set grows with the square of a tier, pinned records included and marked, pairs already joined by a `supersedes:` pointer in either direction excluded, pairs whose members carry differing `machine:` scopes excluded as well because one record per box is duplication by design, a scope printed on the line in the neighbours block's own segment, and `memq: no neighbour pairs (<tier>)` for a tier checked whole with none. Vectors come from the index `memory-index.js` keeps; a record the index lacks is embedded the way the search embeds it, and a record that cannot be embedded is counted on the heading, `memq: neighbour pairs (<tier>): <p> pair(s), <n> of <m> records not checked`. Embedder absent or unusable, the sweep past `NEIGHBOUR_TIMEOUT_MS`, or `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT` present at all through the stand-down predicate the authoring verbs share: the heading reads `memq: neighbour pairs (<tier>): not checked (<cause>)`, the drift block's own idiom, and no pair lines follow. `decay-prune` is untouched: no flag acts on a pair.
 
 Acceptance, watched red first: two live same-tier records whose bodies paraphrase each other print as one pair with their score; the same pair with a `supersedes:` pointer between them prints nothing; a pinned member prints with its mark; a cross-tier pair prints under neither tier, since a pointer cannot cross tiers and the remedy would have nowhere to land; with the embedder absent the heading names the cause; the scan's exit code and stdout are byte-identical to today's and every existing stderr block's text is unchanged, the new block following the drift block.
 
-Files in scope: `plugins/claude-kit/scripts/memq.js`, `plugins/claude-kit/scripts/memory-index.js` where the pairwise read needs an export the index does not yet offer, `test/memq.test.js`, and `test/size-budget.json` for its cap.
+Files in scope: `plugins/claude-kit/scripts/memq.js`, `test/memq.test.js`, `test/size-budget.json` for its caps, and, under amendment 1 because `decay-scan` is a granted verb and this block makes it a further reach of the embedder load, `test/memq-grant.test.js` (the closure pin at its exact-set assertion), `plugins/claude-kit/hooks/memq-grant.js` (comments naming which paths reach that load), and `docs/security-model.md` (the closure sentence, the two stand-down entries, and this block's fence-table row, all main-thread writes), `plugins/claude-kit/skills/memory-system/SKILL.md` for the sentences this block falsifies (the `decay-scan` row's `Writes nothing` and the drift block's place in the order), the row's account of the block itself staying section 3's, `plugins/claude-kit/skills/finishing-work/SKILL.md` for its one sentence saying the scan only reports, and `docs/architecture.md` for the clause naming when the derived index is swept, which this block falsifies.
 
 Tests: lock the exclusion of pointed pairs and the cross-tier silence; lock that nothing moves. The expensive failure is a pair nominated that the store already answered, which would teach a reader to skim the block.
 
@@ -98,11 +98,11 @@ Tests: lock the exclusion of pointed pairs and the cross-tier silence; lock that
 
 In `plugins/claude-kit/skills/memory-system/SKILL.md`: the `add-type` and `add-operator` rows gain one sentence each on the neighbours block, its floor, its stderr-only shape, its embedder-absent line and its fleet skip; the `decay-scan` row gains the pairs block; the four-remedies paragraph gains the sentence that the scan nominates unlinked live pairs and that the remedy is the author's; the decay-lifecycle section's seeds-not-measurements sentence names `NEIGHBOUR_FLOOR` beside the thresholds it already covers; and the operator-tier and project-type-tier sections' authoring paragraphs gain the instruction to read the neighbours block before the write lands, with the project tier's own paragraph telling an author to run `memq find` in the words of the fact before a Write, since no verb sees that write. The skill is a measured file under the size ratchet, so its cap is raised in this section's diff; `docs/` is not measured.
 
-Files in scope: `plugins/claude-kit/skills/memory-system/SKILL.md`, `test/size-budget.json`, and `docs/fleet-integration.md`, whose account of the prompt-free grant's rationale is absent rather than false on the point section 1 changed (the two authoring verbs now reach the embedder load the grant's reasoning once withheld to `find` alone, and stand down on bare `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT`), so amendment 1 lets it travel here and it would otherwise sit in no section's scope.
+Files in scope: `plugins/claude-kit/skills/memory-system/SKILL.md`, `test/size-budget.json`, `docs/fleet-integration.md`, whose account of the prompt-free grant's rationale is absent rather than false on the point section 1 changed (the two authoring verbs now reach the embedder load the grant's reasoning once withheld to `find` alone, and stand down on bare `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT`), so amendment 1 lets it travel here and it would otherwise sit in no section's scope.
 
 ### 4. The index honours the cancellation the neighbours check sends, and exports the composition it owns. Model: opus
 
-The neighbours check bounds its own wait at `NEIGHBOUR_TIMEOUT_MS` and aborts the ranking pass `memq.js` owns, and
+The neighbours check and the decay scan's pairs block both bound their wait at `NEIGHBOUR_TIMEOUT_MS` through one shared race, the first also aborting the ranking pass `memq.js` owns, and
 `plugins/claude-kit/scripts/memory-index.js` honours no signal, so on an expiry the embedder load and store sweep run
 on. `memq` sets `process.exitCode` and never calls `process.exit()`, and nothing in the path calls `unref()`, so that
 abandoned work holds the process open after the block has already said the check was skipped: the author reads the
@@ -113,7 +113,7 @@ from the same module and compose the neighbour query through it, which removes t
 join in favour of the index's own name rewrite; the second component still differs by design, the index embedding a
 record's body where this caller holds only the description, so this narrows the gap rather than closing it.
 
-Acceptance, watched red first: an expired neighbours check leaves no embedder work running, read as the process
+Acceptance, watched red first: an expired neighbours check, and equally an expired pairs block on `decay-scan`, leaves no embedder work running, read as the process
 exiting rather than as elapsed wall clock, with the signal check disabled as the control that the reading can speak;
 a cancellation landing between embed batches stops the remaining batches; a search that is never cancelled is
 unaffected in its hits, its notes and its persisted vectors; and the neighbour query composes byte-identically to
@@ -136,7 +136,7 @@ moment a channel gains a second producer the guard moves to a shared boundary as
 has three. Extract one hit-line composer that takes a hit and the field flags each producer needs (score, `superseded`,
 `machine:`, the overlap label, the retired label) and returns the line, with every charset reduction and cap inside
 it, and route all three producers through it. Format differences that are deliberate per surface stay as flags; the
-supersession placement is reconciled to the separate token, which two of three already print.
+supersession placement is reconciled to the separate token, which two of three already print. The same channel's partial-sweep line has a third producer too: `find`'s semantic channel composes its own, and it still counts an unscannable directory as a record where the helper the authoring and decay blocks share now names directories and records apart; route it through that helper in this section.
 
 Acceptance, watched red first: each producer's existing line tests stay green through the extraction; a byte-level
 pin holds the three producers' lines identical for the same hit and the same flags; and a hit whose name or machine
@@ -516,3 +516,85 @@ and sampled mid-run, where every `node --test` child belonged to this gate.
 
 Next: 2. The decay scan nominates live pairs above the floor. Both standing amendments bind it, and amendment 2 is
 now the structural form. Sections 3, 4 and 5 follow in order.
+
+### Chapter 2 - 2026-09-06
+
+Completed: 2. The decay scan nominates live pairs above the floor
+Commit Model: Commit-and-Push
+
+Shipped. `decay-scan` prints a neighbour-pairs block on stderr after its anchor-drift block: per tier the scan reaches
+other than the pending tier, a heading leading with the pair count and naming the records the check could not read
+(`memq: neighbour pairs (project): 1 pair, 1 of 3 records not checked`), the highest-scoring live pairs at or above
+`NEIGHBOUR_FLOOR` as `memq: pair  <name>  <name>  <score>[  pinned: <name>][  machine:<scope>]`, capped at
+`PAIRS_SHOWN` with a counted remainder in the pinned block's shape, pairs joined by a `supersedes:` pointer in either
+direction excluded, pairs whose members carry differing `machine:` scopes excluded as two facts by design, and
+`memq: no neighbour pairs (<tier>)` for a tier read whole with none. A tier whose directory exists and cannot be listed
+prints the drift block's own unexamined wording through a `tierRecordNames` helper both blocks now share. The vectors
+come from the derived semantic index, brought up to date the way a `find` brings it up to date, which makes that
+per-machine, sync-excluded sidecar the one file the scan writes. The wait is bounded by the race the authoring block
+uses, extracted into `raceNeighbourTimeout`; the stand-down is the shared `pinnedRootStandDown` (bare presence of
+`KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT`, wider than the grant condition by design); the partial-sweep and
+persist-failure lines above the heading are composed by `sweepPartialLine` and `sweepPersistLine`, which both blocks
+call. Each tier's lines compose into one write so a throw yields the whole tier or its not-checked heading, never
+both. The pair lines print at column zero in the tool's own voice and unfenced, the shape of the pinned and drift
+blocks beside them. The scan's stdout and exit code are byte-identical to before. `cmdDecayScan` is async and
+`main` gives it the `.catch` backstop the authoring verbs have. Files: `plugins/claude-kit/scripts/memq.js`,
+`plugins/claude-kit/hooks/memq-grant.js` (comments), `docs/security-model.md`, `docs/architecture.md`,
+`plugins/claude-kit/skills/memory-system/SKILL.md` and `plugins/claude-kit/skills/finishing-work/SKILL.md` (sentences
+the block falsified), `test/memq.test.js`, `test/memq-grant.test.js`, `test/size-budget.json`. Delivered in this
+changeset.
+
+Deviations from the approved spec, all above `## Chapters` and each named to the operator on the relay where the
+broker accepted the message (two attempts at the cap notice were refused by the broker at about 00:23Z and are
+recorded here instead). The pair list is capped at `PAIRS_SHOWN` where the spec said one line per live pair: all
+three round-1 lenses and the file's own stated rule for model-read output that grows with the store called for the
+cap, the operator tier alone being tens of thousands of candidate pairs; reversal is one constant. Pairs of differing
+`machine:` scope are excluded, a rule the spec did not carry, because the store's one-record-per-box family is
+duplication by design and the block's remedies would destroy one box's record. The pending tier gets no heading, the
+index excluding it. The stand-down keys on bare presence rather than the engine store signals, section 1's adjudicated
+rule. The heading carries a pair count and a denominator the spec did not spell. Section 2's `Files in scope:` widened
+under amendment 1 to the closure pin, the hook's comments, the security document, two skill files and
+`docs/architecture.md`; the `memory-index.js` clause was dropped, no export having been needed (`sweep` already
+embeds what the index lacks). Section 4 gained the pairs block's sweep as a second caller of the embedder work
+`memory-index.js` cannot yet cancel; section 5 gained `find`'s own partial line as a third producer of the shared
+channel.
+
+Rounds. Four: a three-lens round, a fix round, a second three-lens round over the fixes, a second fix round, an
+adversarial lens over that delta, a third fix round, and a final adversarial lens over it, all at opus effort max.
+Round 1 found the clean heading printed over a tier that could not be listed (Critical by the blind lens), the
+unbounded wait ahead of the scan's own stdout, the unread partial-sweep counts, and the uncapped list. Round 2 found
+the header contracts in `memq.js` and the hook still saying the scan writes nothing, the security document's fence
+claim falsified by the unfenced row this section added, the row omitting its own sweep lines, the shared partial
+line counting an unscannable directory as a record, and a weakened ordering pin. Round 3 found my own row sentence
+asserting the stand-down equals the grant condition where it is deliberately wider, the pair line blind to
+`machine:` scope, and no pin on the authoring block's partial line after the shared helper changed it. Round 4 found
+the row omitting the `machine:` segment and the per-tier guard heading's failure text, and asked for the spec
+deviations' record, which is this Chapter. All fixed here; the Minors accepted rather than fixed: a directory named
+`<name>.md` inside a tier counts as a record the check could not read (pre-existing, shared with the drift block);
+a second deliberately long expiry case (about 22 s) sits in `test/memq.test.js` beside section 1's, proving the scan
+carries on to its candidate list after the bound; the skill's `decay-scan` row glosses the block in one clause,
+which section 3 must not duplicate; the pairwise cosine pass after the bounded sweep is unbounded and grows with the
+square of a tier, milliseconds at these sizes and noted in the constant's comment.
+
+Named because it changed a closed section's product: the shared partial line the authoring block prints (section 1,
+pushed at `ed264a6`) now names unreadable directories apart from records and appends the carried clause only when a
+record was carried; a cross-surface pin holds the two callers' count clause identical. Named because it sits on the
+close-out path until section 4 lands: on an expiry the scan prints its not-checked heading and continues, and the
+embedder work runs on behind it, so a stalled embedder can hold the process open after the candidate list has
+printed; section 4 is next and closes it for both callers.
+
+Gate. Targeted lane `node --test test/memq.test.js test/memq-grant.test.js test/size-ratchet.test.js
+test/hook-canary.test.js test/doctrine-parity.test.js` (the pin lane folded in, the hook and the security document
+both being in scope): 948 tests, 948 passing, 0 failing, 0 skipped, exit 0 read from the run's own marker, 436 s; the same lane before the
+three fix rounds read 941/940/1/0 at exit 1, the one red a skill word cap this session's own sentence raised and then
+lifted. Build stamp rebuilt after each hook edit and the hook's SHA-256 verified equal to the manifest's. Whole gate
+`node --test test/*.test.js`: 3165 tests, 3155 passing, 1 failing, 9 skipped, exit 1, 902 s, against the section-1 close baseline
+3147/3137/1/9 at exit 1; the one failure is this box's standing red, `a pinned directory too long to name faithfully stands the session down`. Contention lane: the
+process list polled before each spawn, one peer session (AI-OS: Worker) running builds and suites on this box under
+its own claim in alternation with this session's, both sides waiting on the other's claim file and messaging at
+release; two of this session's whole-gate runs took 646 s where the prior run took 507 s, with the peer's read-only
+reviewers the only other load known, reported rather than measured.
+
+Next: 3. The skill states both, and tells a project-tier author to search first. Then 4 and 5 in order. Section 3
+must not duplicate the one-clause gloss of the pairs block already in the skill's `decay-scan` row, and gains
+`docs/fleet-integration.md` for the grant rationale.

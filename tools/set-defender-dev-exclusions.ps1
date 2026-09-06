@@ -5,7 +5,8 @@ development work on a fleet VM. Idempotent: safe to run once at bring-up and aga
 
 What it does:
   - Process exclusions for the executables dev work spawns constantly (node, claude, rg, git,
-    bash, the PowerShell hosts, and the .NET build and test family). A process exclusion skips
+    bash, the PowerShell hosts, the Python and uv interpreters that sessions and the
+    claude-swap watcher run on, and the .NET build and test family). A process exclusion skips
     scanning of files opened by that process wherever they live, so it needs no path list.
   - Path exclusions for the heavy small-file churn locations: the Claude home (plugin cache and
     memory store), the user temp directory, the npm cache, each repo root passed in, and the
@@ -44,6 +45,7 @@ if (-not $svc -or $svc.Status -ne 'Running') {
 $processes = @(
     'node.exe', 'claude.exe', 'rg.exe', 'git.exe', 'bash.exe', 'sh.exe',
     'pwsh.exe', 'powershell.exe',
+    'python.exe', 'python3.exe', 'uv.exe',
     'dotnet.exe', 'testhost.exe', 'testhost.x86.exe', 'MSBuild.exe', 'VBCSCompiler.exe'
 )
 

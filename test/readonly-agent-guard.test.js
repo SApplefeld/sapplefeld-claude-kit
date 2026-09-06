@@ -897,24 +897,24 @@ test('the governed agents are granted no file-writing tool', () => {
 });
 
 // These agents' effort is a literal committed skills cite as load-bearing:
-// executing-work's reviewer-effort table calls `high` the frontmatter default
-// that keeps a fable-tier dispatch off the Workflow route, finishing-work says
-// the same of the finishing gate, and the consult skill says the same of the
-// consultant. Reverting one of these lines to `medium` would leave the whole
-// suite green while the gate silently dropped a notch and the skills asserted a
-// value no longer true, which is the same gap the third doctrine-parity test
-// closes for the doctrine's own grant.
+// executing-work's reviewer-effort table names each per-section reviewer's
+// frontmatter effort as what keeps its fable dispatch off the Workflow route
+// (low for the code and document pairs, medium for the security reviewer),
+// and the consult skill says the same of the consultant at high. Reverting one
+// of these lines would leave the whole suite green while the gate silently
+// moved a notch and the skills asserted a value no longer true, which is the
+// same gap the third doctrine-parity test closes for the doctrine's own grant.
 test('the reviewers and the consultant pin the effort the skills cite as their frontmatter default', () => {
-    for (const name of ['adversarial-reviewer', 'blind-reviewer', 'security-reviewer', 'consultant',
-        'blind-reader', 'prose-reviewer']) {
+    const pinned = { 'adversarial-reviewer': 'low', 'blind-reviewer': 'low', 'blind-reader': 'low', 'prose-reviewer': 'low', 'security-reviewer': 'medium', consultant: 'high' };
+    for (const [name, effort] of Object.entries(pinned)) {
         const text = fs.readFileSync(path.join(AGENTS, `${name}.md`), 'utf8');
         const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
         assert.ok(fm, `${name}.md has no frontmatter`);
         const line = /^effort:[ \t]*(\S+)[ \t]*$/m.exec(fm[1]);
         assert.ok(line, `${name}.md declares no effort, so it inherits the session's and the `
             + 'skills\' "frontmatter default" claim is no longer true of it');
-        assert.strictEqual(line[1], 'high', `${name}.md pins effort ${line[1]}, but `
-            + 'the dispatching skills name `high` as this agent\'s '
+        assert.strictEqual(line[1], effort, `${name}.md pins effort ${line[1]}, but `
+            + `the dispatching skills name \`${effort}\` as this agent's `
             + 'frontmatter default; change the skills too, or restore the pin');
     }
 });

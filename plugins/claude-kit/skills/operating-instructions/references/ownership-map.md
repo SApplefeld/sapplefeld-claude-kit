@@ -28,7 +28,7 @@ How to amend: a row changes when ownership moves, and the move lands in the same
 | The section loop: implement, verify, review, Chapter, and the completion contract that keeps it running | `executing-work` | doctrine (Close each section with a Chapter), `kit-goal` |
 | A dispatch brief's fields, which are standing and which conditional, and the standing directives forwarded verbatim | `executing-work` | doctrine (Before you send), `docs/architecture.md` |
 | Scouts: banding, the return contract, and what a scout may and may not do | `executing-work` | doctrine (Act on found work) |
-| The review roster for a section: the code pair, the document pair an `Audience:` line summons, the tier-up rule and the effort table | `executing-work` | doctrine (Dispatch is requested standing), reviewer charters |
+| The review roster for a section: the code pair, the document pair an `Audience:` line summons, the reviewer-model rule and the effort table | `executing-work` | doctrine (Dispatch is requested standing), reviewer charters |
 | A section's `Standing Brief Amendments` block and its re-read at every section open | `executing-work` | `docs/architecture.md` |
 | Which surfaces a subagent may write, and that `docs/` is the curator's and the main session's alone | `executing-work` (routing), enforced by `hooks/docs-write-guard.js` | reviewer and implementer charters |
 | Killing or replacing a dispatched agent for a reason other than a stall | `executing-work` | doctrine (No completion notification is not a stall signal) |

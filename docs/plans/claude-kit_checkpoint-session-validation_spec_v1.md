@@ -1,6 +1,6 @@
 # Checkpoint session validation
 
-Status: Ready
+Status: In Progress
 Author: SCOTT-CLAUDE Expert seat, from the operator's ruling over the relay, 2026-09-01
 Commit Model: Commit-and-Push
 
@@ -140,3 +140,11 @@ Ships with the plugin: `claude plugin update` plus session restarts, the
 standing fleet-update act.
 
 ## Chapters
+
+### Interim board 1 - 2026-09-06
+Section 1 stage: implemented by implementer-opus (DONE_WITH_CONCERNS: six fixtures in three out-of-scope test files needed the new field; folded by the orchestrator together with three size-budget cap raises), verified on the targeted lane (six test files: 619 tests, 618 pass, 1 fail, exit 1, the one red the size ratchet before the cap raise; ratchet alone afterwards 78 of 78, exit 0; worktree at HEAD 0faeb51 with the section edits unstaged, 2026-09-06 about 09:40), reviewed once (adversarial CHANGES_REQUIRED 0/4/9, blind CHANGES_REQUIRED 0/4/4, security CONCERNS 0/2/6, all three at opus effort max through the Workflow route), and now in its fix round.
+Live dispatch: one implementer-opus running the fix brief at `.kit/verify/s1-fix-brief.md`, which carries the thirteen adopted findings F1 to F13 (bystander open over an existing unbound-goal record; the status adoption promise; clear's misdirected consent and boundary --cancel pointers; unbound-goal clear locking out a resuming run on a stale record and asserting a record that is not there; unreadable-read clear; adoption normalising an unstorable opener; a required opener at the write door with the queue advance passing it; the file header's overclaim; the gate's BOUNDARY_NOTE third cause; a stale comment; the compare-before-delete residual stated; the guard-7 fixture; the older-kit fixture case). Refuted: the adversarial Major that the folded fixtures had no green (the six-file lane above covers them). Not adopted: whole-phrase refusal pins (local precedent); the hard refusal of open on an unresolvable caller stands as the spec's recorded decision, with the leashed-session residual to be named in the Chapter.
+Docs: docs/architecture.md (two passages) and docs/security-model.md (invariant, leg count, accepted-risk paragraph) corrected by the main session to the four-leg predicate and the caller rule; unstaged, folded into the section's files; the security lens rated the drift Major.
+Gate baseline for the fix round: the six-file lane above, plus the peer session's reported whole gate over this worktree at 3190 tests, 3180 pass, 1 fail, 9 skipped, exit 1 (the standing memory-session red), reported by KIT: Expert and not run by this session.
+Tree: peer session KIT: Expert committed 0faeb51 and 1d1d9fd on this checkout during the section (its own files only) and holds nothing staged; this session's unstaged set is the two hooks, four test files, the size budget, the two docs and this plan doc.
+Next: adjudicate the fix report, second review round (the fix delta reaches an allow/deny hook, so a round is owed), close gate, Chapter 1, commit and push, finishing-work.

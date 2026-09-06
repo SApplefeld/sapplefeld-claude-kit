@@ -1,6 +1,6 @@
 # Run every per-section reviewer at Fable with effort set by lens, and retire the Opus cap
 
-Status: In Progress
+Status: Complete
 Commit Model: Commit-and-Push
 Disjoint: yes
 Created: 2026-09-05
@@ -89,6 +89,7 @@ None at authoring.
 - `docs/archive/claude-kit_reviewer-tier-cap_spec_v1.md`: the 2026-08-19 plan this reverses, whose Chapter 1 holds the pre-cap baseline.
 - `docs/archive/claude-kit_reviewer-effort-compensation_spec_v1.md`: the 2026-08-11 plan that built the `max` compensation row this plan narrows back to its original ground.
 - `docs/backlog.md` "Open experiment: effort dials and reviewer tiering in flight": the measurement home.
+- `docs/plans/claude-kit_capacity-gate_spec_v1.md`: meters every fable-override dispatch against the usage cache, and this plan makes every per-section review round on a below-fable session such a dispatch, so it is the largest change to that meter's traffic in the queue; the pointer runs one way because that plan is a parked plan under another session's queue and its header region is its approval fingerprint.
 
 ## Chapters
 
@@ -120,3 +121,250 @@ Seven rows carried no round count and are excluded from the means. Caveats the r
 Commit model: Commit-and-Push; the section's files are delivered in this changeset, in a window the KIT: Worker session granted on the shared checkout.
 
 Next: the finishing pass (QA verification of the acceptance criteria, the finishing adversarial review over the changeset's fix-round delta, close-out and archival).
+
+### Chapter 2 - 2026-09-06 (finishing pass)
+
+Completed: the whole-effort finishing pass. The plan's one section closed in Chapter 1 and was committed and pushed before this pass began, so this Chapter closes the plan rather than a section.
+
+Base Ref: 3f375b62a33403ee5b1dd7f020dc0047525c0ab1, the parent of e00d1e3, the first commit that appended a Chapter to this plan. The changeset listing against it, compared one-directionally with the section's `Files in scope:` union, surfaced two expected classes and nothing else: `kaizen/notes-SCOTT-CLAUDE.md` (standing kaizen capture, named in Chapter 1) and five files of the KIT: Worker session's in-flight section, which landed as a3d8fbf mid-pass and is not this effort's. The three fix-round edits of this pass (`README.md`, `plugins/claude-kit/skills/finishing-work/SKILL.md`, `docs/backlog.md`) plus the curator's one edit (`docs/architecture.md`), the archival move and the two index files are delivered in this changeset.
+
+Metrics: four dispatches, one per step, no round repeated, none stopped, wedged or re-dispatched; every dispatch inherited this session's Fable model with no override, and the two reviewers ran at the frozen plugin view's `high`, so this pass exercised the pre-change rule exactly as Chapter 1 did. Review findings addressed: 2 Majors and 4 Minors from the adversarial lens, 3 Minors from the security lens, 0 Criticals anywhere.
+
+Decisions / Surprises: the security waiver did not apply, because the changeset carries a test file and five agent charters, and section 1 had run no per-section security review over those charters despite executing-work's configuration trigger; the finishing dispatch covered the same files and the miss is recorded here rather than repaired retroactively. The per-row baseline table the spec asked Chapter 1 to record was left in gitignored scratch with only the aggregate in the Chapter, a deviation the adversarial lens named; it is delivered below so the later session that judges the experiment can re-audit it. Both index files carry the archive as a rolling four-entry chain, and both chains omitted the board-routing-and-homing plan archived 2026-09-04, so the close-out re-derived both chains against the contents of `docs/archive/` rather than prepending one entry, which is the fix the backlog item of 2026-08-29 on index drift prescribed; that item is retired to the Q3 snapshot with receipts. The KIT: Worker's section commit landed in the shared checkout during this pass and moved HEAD under this session with no fetch, which is the shape the commit-freeze memory describes; this pass's window was granted by that session before staging.
+
+Review Findings: QA verification (qa-verifier, sonnet pin) returned PASS on all four acceptance criteria against e00d1e3, with the four-file targeted lane at doctrine-parity 71, output-style-parity 11, size-ratchet 78, readonly-agent-guard 116 passing and 0 failing, each read at exit 0; no build exists for this repo; the whole suite was not run at that step because the worker held the heavy-process claim; the contention lane was not named in the brief and this repository defines none. Security review (security-reviewer, inherited Fable at the frozen view's `high`, Agent tool, over 3f375b6..e00d1e3 scoped to the non-prose files): CLEAR, no privilege moved and no guard loosened in code, with three Minors: the finishing route's read-only guard coverage is conditional on the Workflow `agentType` field and the security model does not say so, filed to the backlog because `docs/security-model.md` was the worker's in-flight file; the effort drop is a control-strength decision to be watched, so the backlog amendment now asks the experiment to count zero-tool-call rounds as their own class; and the third copy of the effort values, already on the backlog. Finishing adversarial review (adversarial-reviewer, inherited Fable at `high`, over 6812993..e00d1e3 with the fix-round delta named): APPROVED_WITH_CONCERNS. Fixed: `README.md` line 210's blind-reader sentence still described the old model ("that override rarely"), now scoped to the finishing-pass override; `council-member` dropped from that paragraph's reviewer parenthetical, since it takes neither override; finishing-work's compensation paragraph named only the two code lenses as the `agentType` to compensate while line 12 now routes the document lenses the same way, reworded at net zero words because the file sits at its cap; the per-row table below. Recorded without change: the backlog pointer at the archive path resolves with this delivery's move; Chapter 1's file-by-file account matches the diff, which the lens confirmed reading the record against the change rather than the text against the code. Post-fix lane, single-file runs read at exit 0: parity 71/0, output-style 11/0, ratchet 78/0, agent-guard 116/0.
+
+Drift Adjudications: three items, every one `deviation`, so none stopped the run. D1: `docs/architecture.md` line 29 described the finishing floor's two states without naming the Workflow route, and a reader dispatching from that sentence alone would land at frontmatter effort; the curator added the route sentence, read in `git diff -- docs/` before this commit and kept as true to finishing-work line 12. D2: the security model's Workflow-gap paragraph does not say the finishing gate's default path now rests on the `agentType` field; the curator could not read the pre-change state (its charter grants no Bash), so this rides as an unverified pre-change claim, already carried by the backlog item above. D3: the backlog item of 2026-08-11 on confirming effort pins in the installed cache counted four agents and asked for an Agent-tool reviewer dispatch at frontmatter effort as a special observation; five reviewers now carry pins and that dispatch shape is every per-section round, so a dated amendment on the item says so. Hygiene: H2, a cross-reference gap with the capacity-gate plan, closed one way by the Related bullet above; H3, the index-chain drift, handled as described under Decisions.
+
+Assumptions: none. Chapter 1 recorded no `Assumptions:` line, and this pass made none beyond the spec's own `## Assumptions` section.
+
+Stamps: recorded at the close-out step of this pass; see the close-out status and `memq recent` for the digest.
+
+Gate: the handoff whole gate, `node --test test/*.test.js` under this session's heavy-process claim (written 04:12:28Z, released 04:20:26Z), run after the last step that changed the tree and over the archived layout, because this pass's push lands on main, this kit's install surface with no CI between a commit and a plugin update: 3165 tests, 3155 passing, 1 failing, 9 skipped, exit 1 read from the run's own marker file, 479 s wall clock. No whole-gate baseline was taken on this lane in this session; the one red is `test/memory-session.test.js` "a pinned directory too long to name faithfully stands the session down", the standing red the project memory `suite-baseline-is-not-zero-fail` records for this box (its `D:\Temp` prefix keeps the fixture path under the 260-character guard), so the delta against that recorded baseline is zero and no red is this effort's. The contention lane did not run because this repository defines none (no `test/contention/`). The four-file targeted lane's last reading before this run, after the fix round, was parity 71, output-style 11, ratchet 78, agent-guard 116 passing and 0 failing, each at exit 0.
+
+Operator Handoff: two items, neither holding this plan open, both also carried as a backlog handoff item. Run `claude plugin update` and restart the KIT: Worker session, since a running session reads skills and agents from its frozen plugin view and every review it runs until then is under the cap. Then watch the Fable usage bars over the next few worker sections; the revert is one commit restoring the section-1 files, and the backlog's open reviewer-tiering experiment is where the levels are judged.
+
+Post-cap baseline, per row: the scout's 217-row extraction from the Chapter Metrics of the kit plans archived with a Chapter dated on or after 2026-08-19, as delivered to Chapter 1's aggregate, blanks where the record stated no cell, one row spot-checked exactly and two inconclusive, per Chapter 1.
+
+| plan | section | writer tier | reviewer tier | review rounds | surviving Criticals |
+|---|---|---|---|---|---|
+| arm-time-binding | 1 | opus | opus (max) | 2 | 0 |
+| arm-time-binding | 2 | fable | fable (high) | 2 | 0 |
+| arm-time-binding | 3 | fable |  | 0 |  |
+| blocked-escalation | 1 | fable | fable (adv/blind), opus (security) | 9 | 0 |
+| blocked-escalation | 2 | fable | fable (adv/blind), opus (security) | 9 | 0 |
+| blocked-escalation | 3 | inline (opus) | opus (max) | 1 | 0 |
+| blocked-escalation | 4 | inline (opus) | opus (max) | 1 | 0 |
+| blocked-escalation | 5 | inline (opus) | opus (max) | 1 | 0 |
+| blocked-escalation | 6 | sonnet |  | 0 |  |
+| board-routing-and-homing | 1 | opus | opus (max) | 4 | 0 |
+| board-routing-and-homing | 2 | opus | opus (max) | 15 | 0 |
+| board-routing-and-homing | 3 | sonnet | opus (xhigh) | 8 |  |
+| board-routing-and-homing | 4 | sonnet | opus (max) | 9 | 0 |
+| board-routing-and-homing | 5 | inline (opus) | opus (max) | 2 | 0 |
+| board-routing-and-homing | 6 | inline (opus) | opus (max) | 4 | 0 |
+| boundary-cadence-and-spec-scope | 1 | fable | fable (high) | 1 | 0 |
+| boundary-cadence-and-spec-scope | 2 | opus | opus (max) | 1 | 0 |
+| boundary-cadence-and-spec-scope | 3 | opus | opus (max) | 1 | 0 |
+| boundary-cadence-and-spec-scope | 4 | inline (opus) | opus (max) | 1 | 0 |
+| boundary-ritual-reinforcement | 1 | opus |  | 0 |  |
+| boundary-ritual-reinforcement | 2 | fable | fable (high), opus (max, security) | 1 | 0 |
+| boundary-ritual-reinforcement | 3 | sonnet | opus (xhigh) | 1 |  |
+| boundary-ritual-reinforcement | 4 | sonnet | opus (xhigh) | 1 |  |
+| boundary-ritual-reinforcement | 5 | sonnet | opus (xhigh) | 1 |  |
+| boundary-ritual-reinforcement | 6 | inline (sonnet) |  | 0 |  |
+| compact-boundaries | 1 | fable |  | 1 | 0 |
+| compact-boundaries | 2 | opus | opus (max) | 1 | 0 |
+| compact-boundaries | 3 | inline (opus) | opus (max) | 1 | 0 |
+| compact-boundaries | 4 | inline (opus) |  | 0 |  |
+| compaction-deferral-signal | 1 | opus | opus (max) | 3 | 0 |
+| compaction-deferral-signal | 2 | opus | opus (max) | 3 | 0 |
+| compaction-deferral-signal | 3 | opus | opus (max) | 3 | 0 |
+| compaction-deferral-signal | 4 | inline (opus) | opus (max) | 1 | 0 |
+| compaction-deferral-signal | 5 | opus |  | 0 |  |
+| compaction-deferral-signal | 6 | opus | opus (max) | 7 | 0 |
+| coordinator-and-roles | 1 | fable |  | 3 | 0 |
+| coordinator-and-roles | 2 | fable |  | 3 | 0 |
+| coordinator-and-roles | 3 | inline (opus) |  | 4 | 0 |
+| coordinator-and-roles | 4 | sonnet | opus (xhigh) | 1 | 0 |
+| coordinator-and-roles | 5 | inline (opus) |  | 1 |  |
+| dispatch-authority | 1 | fable | fable | 1 | 0 |
+| dispatch-authority | 2 | opus | opus (max) | 1 |  |
+| dispatch-authority | 3 | opus | opus (max) | 1 |  |
+| dispatch-authority | 4 | opus | opus (max) | 1 |  |
+| dispatch-authority | 5 | inline (opus) |  | 1 |  |
+| dormant-feature-removal | 1 | opus | opus (max) | 1 |  |
+| dormant-feature-removal | 2 | opus | opus (max) | 1 | 0 |
+| dormant-feature-removal | 3 | sonnet | opus (xhigh) | 1 |  |
+| dormant-feature-removal | 4 | inline (sonnet) | opus (max) | 1 |  |
+| durable-boundary | 1 | opus |  | 2 | 0 |
+| durable-boundary | 2 | opus |  | 4 |  |
+| durable-boundary | 3 | sonnet |  | 0 |  |
+| durable-boundary | 4 | opus |  | 1 |  |
+| durable-boundary | 5 | sonnet | opus | 1 |  |
+| endpoint-dialect-key | 1 | opus | opus (max) | 2 | 0 |
+| endpoint-dialect-key | 2 | inline (sonnet) | opus (max) | 3 | 0 |
+| gate-cadence | 1 | sonnet |  | 1 | 0 |
+| gate-cadence | 2 | opus |  | 1 | 0 |
+| gate-cadence | 3 | inline (sonnet) |  | 1 |  |
+| gate-cadence | 4 | opus |  | 1 | 0 |
+| gate-cadence | 5 | opus |  | 1 | 0 |
+| gate-cadence | 6 | opus |  | 1 | 0 |
+| gate-cadence | 7 | opus |  | 1 | 0 |
+| gating-definitions | 1 | inline (opus) | opus (max) | 2 |  |
+| gating-definitions | 2 | opus | opus (max), fable | 10 |  |
+| instruments-not-prose | 1 | opus |  | 3 | 0 |
+| instruments-not-prose | 2 | opus |  | 3 | 0 |
+| instruments-not-prose | 3 | opus | opus (max) | 1 | 0 |
+| instruments-not-prose | 4 | sonnet |  | 3 | 0 |
+| instruments-not-prose | 5 | sonnet |  | 2 | 0 |
+| instruments-not-prose | 6 | sonnet |  | 3 | 0 |
+| instruments-not-prose | 7 | sonnet |  | 5 |  |
+| instruments-not-prose | 8 | sonnet |  | 4 |  |
+| judge-partial-input | 1 | opus |  |  |  |
+| judge-partial-input | 2 | opus |  |  |  |
+| judge-partial-input | 3 | opus |  |  |  |
+| judgment-sidecar | 1 | opus | opus (max) | 1 | 0 |
+| judgment-sidecar | 2 | opus | opus (max) | 1 | 0 |
+| judgment-sidecar | 3 | opus | opus (max) | 1 | 0 |
+| judgment-sidecar | 4 | opus | opus (max) | 1 | 0 |
+| judgment-sidecar | 5 | sonnet | opus (xhigh) | 1 | 0 |
+| judgment-sidecar | 6 | opus | opus (max) | 2 | 0 |
+| judgment-sidecar | 7 | sonnet |  |  |  |
+| kaizen-batch-2 | 1 | fable | fable (high), opus (max, security) | 1 |  |
+| kaizen-batch-2 | 2 | fable | fable (high), opus (max, security) | 1 |  |
+| kaizen-batch-2 | 3 | opus | opus (max) | 1 | 0 |
+| kaizen-batch-2 | 4 | fable | fable (high) | 1 |  |
+| kaizen-batch-2 | 5 | sonnet | opus (xhigh) | 1 | 0 |
+| kaizen-batch | 1 | fable |  | 1 | 0 |
+| kaizen-batch | 2 | opus |  | 1 | 0 |
+| kaizen-batch | 3 | fable |  | 1 | 0 |
+| kaizen-batch | 4 | opus |  | 1 | 0 |
+| kaizen-batch | 5 | opus | opus (max) | 4 | 0 |
+| kaizen-batch | 6 | sonnet |  | 1 | 0 |
+| kaizen-batch | 7 | opus |  | 1 | 0 |
+| kaizen-batch | 8 | opus |  | 1 | 0 |
+| kaizen-batch | 9 | inline (opus) |  | 8 | 0 |
+| kaizen-batch | 10 | fable | fable (high) | 1 | 0 |
+| memory-anchors-and-frontmatter-guard | 1 | opus | opus (max) | 4 | 0 |
+| memory-anchors-and-frontmatter-guard | 2 | opus | opus (max) | 2 | 0 |
+| memory-anchors-and-frontmatter-guard | 3 | opus | opus (max) | 4 | 0 |
+| memory-anchors-and-frontmatter-guard | 4 | opus | opus (max), fable | 5 | 0 |
+| memory-anchors-and-frontmatter-guard | 5 | opus | opus (max) | 2 | 0 |
+| memory-anchors-and-frontmatter-guard | 6 | opus |  | 3 |  |
+| memory-anchors-and-frontmatter-guard | 7 | opus |  | 2 | 0 |
+| memory-read-side | 1 | opus |  |  |  |
+| memory-read-side | 2 | opus | opus (max); escalated to fable | 7 | 0 |
+| memory-read-side | 3 | opus | opus (max) |  | 0 |
+| memory-recognition-reach | 1 | opus |  |  |  |
+| memory-recognition-reach | 2 | opus | opus (max) | 2 | 0 |
+| memory-recognition-reach | 3 | opus | opus (max) | 1 | 0 |
+| memory-recognition-reach | 4 | inline (sonnet) | opus (max) | 2 | 0 |
+| memory-recognition-reach | 5 | opus | opus (max) | 5 | 0 |
+| memory-recognition-reach | 6 | opus | opus (max) | 2 | 0 |
+| memory-recognition | 1 | opus | opus (max) | 2 | 0 |
+| memory-recognition | 2 | opus | opus (max) | 1 | 0 |
+| memory-recognition | 3 | sonnet | opus | 1 | 0 |
+| memory-supersedes | 1 | opus | opus (max) | 1 | 0 |
+| memory-supersedes | 2 | opus | opus (max) | 1 | 0 |
+| memory-supersedes | 3 | inline (sonnet) | opus (max) | 1 | 0 |
+| memq-network-cwd-resolver | 1 | sonnet |  | 0 |  |
+| memq-network-cwd-resolver | 2 | sonnet | opus (xhigh) | 1 |  |
+| memq-network-cwd-resolver | 3 | inline (sonnet) |  | 0 |  |
+| memq-reads-the-harness-shape | 1 | opus | opus (max) | 2 | 0 |
+| park-and-quiesce | 1 | opus |  | 1 |  |
+| park-and-quiesce | 2 | sonnet |  | 0 |  |
+| park-and-quiesce | 3 | opus |  | 5 |  |
+| peer-sessions-skill | 1 | fable | fable | 1 | 0 |
+| peer-sessions-skill | 2 | sonnet | opus (xhigh) | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 1 | sonnet |  | 1 |  |
+| plan-lifecycle-and-diagnostics | 2 | opus | opus (max) | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 3 | opus | opus (max) | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 4 | sonnet | opus (max) | 2 |  |
+| plan-lifecycle-and-diagnostics | 5 | opus | opus | 2 | 0 |
+| plan-lifecycle-and-diagnostics | 6 | sonnet | opus | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 7 | sonnet |  | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 8 | opus | opus (max) | 3 | 0 |
+| plan-lifecycle-and-diagnostics | 9 | sonnet |  | 2 | 0 |
+| plan-lifecycle-and-diagnostics | 10 | sonnet | opus (xhigh) | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 11 | opus | opus (max) | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 12 | sonnet | opus (xhigh) | 1 | 0 |
+| plan-lifecycle-and-diagnostics | 13 | opus | opus (max) | 1 | 0 |
+| precedence-and-ownership | 1 | fable |  | 0 |  |
+| precedence-and-ownership | 2 | fable |  | 0 |  |
+| precedence-and-ownership | 3 | fable |  | 0 |  |
+| precedence-and-ownership | 4 | fable |  | 0 |  |
+| process-rule-repairs | 1 | inline (opus) | opus (max) | 1 |  |
+| process-rule-repairs | 2 | inline (opus) | opus (max) | 5 | 0 |
+| process-rule-repairs | 3 | inline (opus) | opus (max) | 3 | 0 |
+| process-rule-repairs | 4 | inline (opus) | opus (max) | 5 | 0 |
+| process-rule-repairs | 5 | inline (opus) | opus (max) | 2 | 0 |
+| public-surface-hygiene | 1 | inline (sonnet) | opus (max) | 1 | 0 |
+| recap | 1 | opus | opus (max); fable | 3 | 0 |
+| recap | 2 | inline (opus) |  | 0 |  |
+| review-and-record-discipline | 1 | opus | opus (xhigh) | 1 |  |
+| review-and-record-discipline | 2 | sonnet | opus (xhigh) | 1 |  |
+| review-and-record-discipline | 3 | opus | opus (max) | 1 |  |
+| review-and-record-discipline | 4 | sonnet | opus (xhigh) | 1 |  |
+| review-and-record-discipline | 5 | opus | opus (max) | 1 |  |
+| review-and-record-discipline | 6 | opus | opus (max) | 1 |  |
+| review-and-record-discipline | 7 | opus | opus (max) | 1 |  |
+| review-and-record-discipline | 8 | opus | opus (max) | 1 |  |
+| review-and-record-discipline | 9 | sonnet |  | 2 |  |
+| review-and-record-discipline | 10 | sonnet | opus (xhigh) | 1 |  |
+| review-and-record-discipline | 11 | opus |  | 2 |  |
+| review-and-record-discipline | 12 | opus |  | 2 |  |
+| review-and-record-discipline | 13 | sonnet | opus (max) | 3 |  |
+| review-and-record-discipline | 14 | sonnet | opus (max) | 1 |  |
+| review-and-record-discipline | 15 | opus | opus (max) | 4 |  |
+| reviewer-tier-cap | 1 | inline (opus) | fable (high) | 1 | 0 |
+| seat-infrastructure | 1 | opus | opus (max) | 1 |  |
+| seat-infrastructure | 2 | opus | opus (max) | 4 |  |
+| seat-infrastructure | 3 | fable | fable, opus (max, security) | 3 |  |
+| seat-infrastructure | 4 | opus |  | 11 |  |
+| seat-infrastructure | 5 | opus | fable | 1 |  |
+| seat-infrastructure | 6 | sonnet | opus | 1 | 0 |
+| seat-infrastructure | 7 | sonnet | opus | 1 | 0 |
+| seat-infrastructure | 8 | inline (opus) | opus | 1 | 0 |
+| seat-infrastructure | 9 | opus | opus | 2 | 0 |
+| seat-infrastructure | 10 | opus | opus | 2 | 0 |
+| shared-tier-authoring | 1 | opus | opus (max) | 2 | 0 |
+| shared-tier-authoring | 2 | opus | opus | 16 | 0 |
+| shared-tier-authoring | 3 | inline (sonnet) | opus (max) | 8 | 0 |
+| sidecar-staleness-and-liveness | 1 | opus |  | 2 |  |
+| sidecar-staleness-and-liveness | 2 | opus | opus/xhigh | 2 |  |
+| sidecar-staleness-and-liveness | 3 | sonnet | opus/xhigh | 2 |  |
+| standing-lines-and-honest-reports | 1 | opus | fable | 1 |  |
+| standing-lines-and-honest-reports | 2 | opus | opus | 1 | 0 |
+| standing-lines-and-honest-reports | 3 | sonnet | opus/xhigh | 1 | 0 |
+| standing-lines-and-honest-reports | 4 | opus | opus (max) | 3 | 0 |
+| standing-lines-and-honest-reports | 5 | inline (opus) | opus (max) | 1 | 0 |
+| subtraction-bars | 1 | opus | opus (max) | 3 | 0 |
+| subtraction-bars | 2 | sonnet | opus (xhigh) | 1 | 0 |
+| subtraction-bars | 3 | opus | opus (max) | 1 | 0 |
+| subtraction-bars | 4 | opus | opus (max) | 6 | 0 |
+| subtraction-bars | 5 | sonnet | opus (max) | 3 | 0 |
+| sync-state-writer-and-push-pair | 1 | sonnet | opus (xhigh) | 1 | 0 |
+| sync-state-writer-and-push-pair | 2 | opus | opus (max) | 1 |  |
+| sync-state-writer-and-push-pair | 3 | inline (sonnet) | opus (max) | 1 |  |
+| testing-discipline | 1 | fable |  | 1 |  |
+| testing-discipline | 2 | opus | opus (max) | 1 |  |
+| testing-discipline | 3 | sonnet | opus (xhigh) | 1 |  |
+| testing-discipline | 4 | opus | opus (max) | 3 | 0 |
+| verification-artifacts | 1 | opus | opus; escalated to fable | 5 | 0 |
+| verification-artifacts | 2 | opus |  | 1 | 0 |
+| verification-artifacts | 3 | opus | opus (max) | 1 |  |
+| verification-artifacts | 4 | opus | opus (max) | 12 | 2 |
+| verification-artifacts | 5 | inline (sonnet) |  | 0 |  |
+| verification-artifacts | 6 | inline (opus) | opus (max) | 5 | 0 |
+| verification-artifacts | 7 | inline (opus) |  | 0 |  |
+| worktree-goals | 1 | opus | opus (max) | 1 | 0 |
+| worktree-goals | 2 | sonnet |  | 1 |  |
+| worktree-goals | 3 | sonnet |  | 1 |  |
+| worktree-goals | 4 | opus | opus (max) | 1 | 0 |
+| worktree-store-and-autosync | 1 | opus | opus (max) | 1 | 0 |
+| worktree-store-and-autosync | 2 | fable | fable, opus (max, security) | 5 | 0 |
+| worktree-store-and-autosync | 3 | inline (opus) | opus (max) | 1 | 0 |
+
+Next: none. This plan is Complete and archived.
+Commit Model: Commit-and-Push; delivered in this changeset, in a window the KIT: Worker session granted on the shared checkout.

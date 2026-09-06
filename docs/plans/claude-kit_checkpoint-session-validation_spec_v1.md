@@ -93,13 +93,35 @@ Model: opus
   situation in plain words: this checkpoint belongs to the leashed session,
   and a bystander's boundary is declared with the `boundary` verb, which is
   already per-session.
-- `clear` takes the same rule: a caller that is not the blessed session is
-  refused and the existing checkpoint stands.
+- `clear` takes the same rule over a record that is somebody's boundary: a
+  caller that is not the blessed session is refused and the existing
+  checkpoint stands. Over an absent path it stays the exit-0 no-op the
+  section loop runs before it knows whether a boundary is open, and over a
+  record that is nobody's boundary it asks no caller id and removes it,
+  since there is no scope there to protect.
+- Which session a checkpoint blesses is one rule both verbs read
+  (`blessedCheckpointSession`), in this order: a goal state that is present
+  but cannot be read refuses both verbs, since whether any session holds
+  the leash is then unknown; something other than a regular file at the
+  checkpoint path refuses both verbs for every caller, saying what is there
+  and leaving it in place; a path the filesystem would not read is the
+  bound session's where the goal is bound and refused to all where it is
+  not; an illegible or oversized file, another plan's record, a record met
+  with no goal armed, a record naming no opener, a record whose recorded
+  owner is not its own opener, and, under a bound goal, a record whose
+  opener or owner is not the bound session are nobody's boundary; otherwise
+  the bound session where the goal is bound, else the session that armed
+  the goal where the caller is that session, else the opener of the record
+  on disk.
 - A caller whose session id cannot be resolved at all (an operator's bare
-  shell) is refused with a message naming `consent` as the operator's
-  release path. This is a declared default, not a settled fork: if
-  implementation surfaces a real operator need for an unattended open, that
-  is a NEEDS_CONTEXT, not a silent widening.
+  shell) is refused at `open` with a message naming `consent` as the
+  operator's release path, carrying that consent is the operator's verb
+  and never a session's own judgment. `clear` asks for a caller id only
+  over a record that is somebody's boundary, so a bare shell's clear over
+  nothing, or over a record that is nobody's, still succeeds. This is a
+  declared default, not a settled fork: if implementation surfaces a real
+  operator need for an unattended open, that is a NEEDS_CONTEXT, not a
+  silent widening.
 - The checkpoint record gains an `openedBy` field carrying the opener's
   session id.
 
@@ -111,18 +133,31 @@ is otherwise ignored. The role-boundary markers and the consent marker are
 untouched: they are already session-scoped by their own machinery.
 
 Files in scope: `plugins/claude-kit/hooks/kit-compact-checkpoint.js`,
-`plugins/claude-kit/hooks/kit-compact-lib.js` (only if the gate-side read
-lives there; the implementer confirms the reading site before editing),
-`test/kit-compact-gate.test.js`, and whichever existing test file pins the
-checkpoint CLI's verbs.
+`plugins/claude-kit/hooks/kit-compact-lib.js` (the gate-side read lives
+there), `plugins/claude-kit/hooks/kit-compact-gate.js` (the boundary deny
+note, which names the goal CLI's status as the bound session id's source
+and offers no `open`), `plugins/claude-kit/hooks/kit-goal-stop.js` (the
+queue-advance rewrite passes an explicit opener),
+`plugins/claude-kit/hooks/kit-goal-lib.js` (one comment paragraph naming
+the checkpoint CLI's write verbs as a caller of `sessionHoldsLeash`),
+`test/kit-compact-gate.test.js`, `test/compact-deferral-nudge.test.js`,
+`test/kit-goal-stop.test.js`, `test/kit-goal-worktree.test.js` (fixtures
+supply the opener and the caller id), `test/size-budget.json`,
+`docs/architecture.md` (the checkpoint CLI and boundary-note passages) and
+`docs/security-model.md` (the invariant and accepted-risk paragraphs).
 
 Tests, both directions: the bound session's own `open` succeeds and the gate
 honors the checkpoint; a bystander `open` is refused with nothing written; a
 bystander `clear` is refused with the existing checkpoint intact and
 byte-unchanged; the gate ignores a fixture checkpoint whose `openedBy`
 mismatches the compacting session, journaled under the new reason value; an
-`open` with no resolvable caller id is refused naming `consent`. Existing
-leashed-path tests stay green with the caller id supplied.
+`open` with no resolvable caller id is refused naming `consent`; both verbs
+refuse over a present-but-unreadable goal state and over a non-regular file
+at the checkpoint path, with nothing written and the file left in place;
+`status` names an unreadable goal state rather than an absent one; the
+reason vocabulary the gate and the match rule emit is pinned to the
+exported `GATE_REASONS`. Existing leashed-path tests stay green with the
+caller id supplied.
 
 Build: touches `plugins/claude-kit/hooks/`, so the build stamp refresh runs
 before the section's gate (operator-tier memory).
@@ -222,3 +257,11 @@ Not adopted from round 5: an age test in the bound branch (a run resumed under a
 Surprise: the checkpoint opened at the interim board 4 commit was no longer on disk when the gate's seventh held offer was reported (status: no compact checkpoint open, last decision deny-boundary no-checkpoint); the installed kit (ab815dceddca) is what this session runs, not the worktree, and nothing this session ran clears a checkpoint outside temp fixtures; unexplained, recorded for the Chapter.
 Tree: the twelve-file unstaged set plus the plan doc is this session's; nothing staged; peer KIT: Expert holds nothing dirty.
 Next: adjudicate round 6, fixes if any (a further round only where a fix reaches the guard again), spec-matches-reality on section 1 (Files in scope the twelve files; clear's refusal names no consent pointer; the no-id clear carve-out; the unreadable-goal and kind refusals; the owner leg under a binding), memq unstamped, Chapter 1, then section 2 inline, whole gate under claim, commit and push, checkpoint, finishing-work.
+### Interim board 6 - 2026-09-06
+Section 1 stage: six fix rounds landed. Round 6 (K1 to K6): both write verbs' bound-goal refusals carry the spec's boundary-verb pointer and a conditioned re-arm clause (a run resumed under a new session id whose bound predecessor is gone re-arms, which rebinds; arming replaces the whole queue, so any other session leaves the goal alone), the goal predicate treats a non-object state file (0, false, an empty string) as unanswered rather than as no goal armed, the header names the goal library's own kinds and scopes the guard to the two write verbs, the no-open pin's claim is narrowed to the invocation shape it reads with a class-shaped second leg over every verb the note invokes after a script path, and the no-caller refusal at open no longer prints a runnable consent form. Verified on the implementer's eight-file lane 854/854/0 exit 0 read from .kit/verify/s1-fix6-lane.exit (baseline before the round 853/853/0; the one added is the K2 test; worktree at HEAD 99ff18b with the section unstaged, 2026-09-06 about 14:30; red-first probe exit 1 against the reverted predicate, restored byte-identical by cmp). Two implementer deviations, both accepted on the code read: the brief's word-boundary open leg over the boundary note cannot pass because the note itself says 'rather than open', so a class-shaped leg over invocation sites stands in; the record-leg refusal test carries a controlled negative pin on the single-sourced pointer constant rather than the positive pins the brief named, since that leg gains neither the pointer nor the clause.
+Round 7 verdicts (opus effort max via Workflow, first-turn reading claude-opus-5 on every transcript, 0 synthetic; the Workflow ran two agents at a time, so the security reviewer started when the blind one finished): adversarial APPROVED_WITH_CONCERNS 0/0/6, blind APPROVED_WITH_CONCERNS 0/0/3, security CONCERNS 0/0/3. No Critical and no Major. Adopted for a round 7 fix (brief at .kit/verify/s1-fix7-brief.md): single-source the two K1 sentences duplicated across open and clear and pin their identity once; treat a state file holding an array, or an object carrying a binding with no usable plan string, as unanswered (the withheld control, an object with neither plan nor binding, still reads as no goal armed); drop 'kind' from the opaque-readings list its only consumer can never see; correct the header line claiming only a settled-absent goal state reads as no goal armed; say 're-arm the goal with its whole queue' in both verbs; say in the non-regular-file refusal that no verb here removes what is there; assert the queue advance's opener on read-back in test/kit-goal-stop.test.js; state the PreCompact-stderr channel claim in the gate's comment as a harness dependency. Adopted for the orchestrator (docs): qualify the spec's first guard leg with 'over a path that holds something'; add to docs/security-model.md a clause naming the induced-act class a refusal line can carry and the conditioning as its control; mark the stderr-channel claim in docs/architecture.md as a harness dependency.
+Not adopted from round 7: letting the leash holder's open write through a symlink or FIFO at the checkpoint path (the blind reviewer's lost self-heal; fail-closed by design, the accepted-risk paragraph names the manual recovery, and the refusal will now say no verb removes it); closing the no-open pin's reach axis by pinning the note's single permitted open mention (the residual is declared instead: both legs key on a verb immediately after a .js path, so a note phrased 'status, then open one' or a script path without a .js extension would pass them; recorded as unproven rather than clean).
+Dispatch defect of this session's own: the round 7 blind reviewer's prompt named which line ranges held the newest edits, which is diff-describing framing its charter forbids; the reviewer recorded the contamination, disregarded the focus direction and reviewed the whole delta, and two of its three findings fell outside the named ranges. Round 8's blind prompt carries the base ref and file list only.
+Stamps: memq unstamped --since 9h lists 0 project-tier and 4 operator-tier records read and not applied (cut-before-the-pass-that-needs-the-room, coordinator-carries-kaizen-notes, a-drifted-convention-costs-only-the-outsider, function-hooks-prototype-ships-behind-a-flag); none shaped this section's work, all four reached through trigger matches on skills this session loaded, so none is stamped.
+Tree: the twelve-file unstaged set plus the plan doc is this session's; nothing staged; peer KIT: Expert holds nothing dirty; the tree was byte-identical across round 7 by git status capture.
+Next: round 7 fixes (implementer-opus, brief at .kit/verify/s1-fix7-brief.md), docs fixes inline, round 8 over the round 7 fix delta alone (owed because the goal predicate feeds the guard's first leg), Chapter 1, then section 2 inline, whole gate under claim, commit and push, checkpoint, finishing-work.

@@ -82,7 +82,7 @@
     "test/memory-usage-stamp.test.js": 436,
     "test/memq-grant.test.js": 1312,
     "test/memq-shim.test.js": 603,
-    "test/memq.test.js": 29632,
+    "test/memq.test.js": 29653,
     "test/merged-pr-push-guard.test.js": 714,
     "test/output-style-parity.test.js": 253,
     "test/pr-docs-guard.test.js": 177,

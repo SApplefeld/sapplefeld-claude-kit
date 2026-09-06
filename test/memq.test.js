@@ -28605,6 +28605,27 @@ test('a store segment past the display cap is cut identically by every surface t
     }
 });
 
+test('the cross-store hit line has one composer: the provenance label is read inside it alone, and'
+    + ' every surface printing the line composes through it', () => {
+    // The byte pin above proves the surfaces agree today. This one refuses the
+    // bypass the section names, a producer re-composing its own line in the
+    // same format, which the byte pin cannot see while the formats still match.
+    const src = fs.readFileSync(MEMQ, 'utf8');
+    const body = (name) => {
+        const m = src.match(new RegExp('\\n(?:async )?function ' + name
+            + '\\([^)]*\\) \\{\\n([\\s\\S]*?)\\n\\}\\n'));
+        assert.ok(m !== null, name + ' is declared at column zero');
+        return m[1];
+    };
+    const labelSites = src.split('\n')
+        .filter((l) => l.includes('tierProvenanceLabel(') && !/^function tierProvenanceLabel\(/.test(l));
+    assert.strictEqual(labelSites.length, 1, 'the label is composed at one site: ' + labelSites.join(' | '));
+    assert.ok(body('hitLine').includes('tierProvenanceLabel('), 'and that site is the composer');
+    for (const producer of ['semanticHitLine', 'judgedHitLine', 'neighbourBlock']) {
+        assert.ok(/\bhitLine\(/.test(body(producer)), producer + ' composes its line through hitLine');
+    }
+});
+
 // ------------------------------- the decay scan's neighbour-pairs block -----
 //
 // After its drift block the scan reports, per tier it reached, the live pairs

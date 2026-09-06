@@ -921,12 +921,12 @@ test('memq loads code out of a directory only where find and the granted blocks 
         'the code loads past the built-in block, and where each one sits: '
             + JSON.stringify(dynamic));
 
-    // And the property those loads are policed for: no verb outside the three
-    // named roots can reach one. Asked as the transitive closure of callers
+    // And the property those loads are policed for: no verb outside the roots
+    // ROOTS names can reach one. Asked as the transitive closure of callers
     // rather than one function's direct callers, because a load now sits three
     // functions deep and a one-level check would go quiet the moment a helper
     // picked up a second caller under another verb. The closure's dispatch
-    // functions are those three and no others, which is the claim the grant's
+    // functions are the roots ROOTS names and no others, which is the claim the grant's
     // verb list rests on.
     const callersOf = (name) => {
         const found = new Set();

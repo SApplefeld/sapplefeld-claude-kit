@@ -1,17 +1,20 @@
 # Checkpoint session validation
 
-Status: In Progress
+Status: Complete
 Author: SCOTT-CLAUDE Expert seat, from the operator's ruling over the relay, 2026-09-01
 Commit Model: Commit-and-Push
 
 ## Related
 
 Extends the chapter-checkpoint machinery shipped by
-`../archive/claude-kit_compaction-deferral-signal_spec_v1.md` and follows the
-precedent set by `../archive/claude-kit_durable-boundary_spec_v1.md`, which
+`claude-kit_compaction-deferral-signal_spec_v1.md` and follows the
+precedent set by `claude-kit_durable-boundary_spec_v1.md`, which
 moved the role-seat boundary markers to one file per session so two seats on
 one checkout cannot unmake each other's declarations. This plan brings the
-chapter checkpoint under the same discipline.
+chapter checkpoint under the same discipline. `claude-kit_output-channel-eliding_spec_v1.md`
+(active in `plans/` at this writing) sweeps the same CLI's model-read output
+channel, which the refusal lines this plan added through `emitOut` and
+`emitErr` now belong to.
 
 ## What this is about
 
@@ -142,6 +145,8 @@ and offers no `open`), `plugins/claude-kit/hooks/kit-goal-stop.js` (the
 queue-advance rewrite passes an explicit opener),
 `plugins/claude-kit/hooks/kit-goal-lib.js` (one comment paragraph naming
 the checkpoint CLI's write verbs as a caller of `sessionHoldsLeash`),
+`plugins/claude-kit/hooks/chapter-boundary-nudge.js` (its stderr-channel
+comment stated as a harness dependency),
 `test/kit-compact-gate.test.js`, `test/compact-deferral-nudge.test.js`,
 `test/kit-goal-stop.test.js`, `test/kit-goal-worktree.test.js` (fixtures
 supply the opener and the caller id), `test/size-budget.json`,
@@ -292,3 +297,17 @@ Finishing stage: both sections closed; the run resumed under session 783cd923 af
 Live dispatches: none at this write; next is the finishing review round (security-reviewer and adversarial-reviewer at fable, effort high, through Workflow) over cebda41..HEAD, bracketed by git status capture.
 Rulings adopted since the last boundary: none.
 Next: review round, adjudicate and fix, docs-curator, final Chapter, archive, handoff gate, push, memory, kaizen check.
+### Chapter 3 - 2026-09-06
+Completed: finishing pass for the plan; sections 1 and 2 were closed in Chapters 1 and 2.
+Implemented By: main thread (orchestration and the finishing fixes inline), with qa-verifier, security-reviewer, adversarial-reviewer and docs-curator dispatched.
+Commit model: Commit-and-Push, honored: the finishing fixes, the curated docs, the archived plan doc, the backlog prune and the index refresh land in one commit on main, pushed.
+Base ref: cebda41 (parent of 770d25b, the first commit that appended a Chapter); the changeset listing against it matched the union of the two sections' Files in scope plus the plan doc, the docs index and one sibling kaizen commit (41fbeab, NEO-CLAUDE's note), with chapter-boundary-nudge.js added to section 1's scope line at this pass since Chapter 1 already counted it.
+Finishing reviews: security-reviewer CONCERNS (0 Critical, 1 Major, 3 Minor) and adversarial-reviewer APPROVED_WITH_CONCERNS (0 Critical, 2 Major, 4 Minor), both dispatched at fable effort high through Workflow, resolved-model distribution claude-fable-5-1 on 54 of 54 and 53 of 53 assistant lines with 0 synthetic, so no substitution and no compensation; the tree bracket held (git status --porcelain identical before and after, the one entry the foreign kaizen/notes-SCOTT-CLAUDE.md). Adopted and fixed inline: the re-arm remedy in REARM_REMEDY and in the executing-work skill's steps 0 and 8 now names the arm the resumed run makes as `arm --self-armed`, since a bare arm records the invocation as the operator's and writes the operator's parallelization request into the goal's condition text (adversarial Major), and both skill clauses now carry the remedy's negative, that any other session leaves the goal alone, with docs/security-model.md's accepted-risk paragraph naming the skill as the conditioning's second carrier (security Major); step 0 names the two further exit-1 readings, a transient read under an unbound goal and an unresolvable caller id over a guarded record, and attributes the re-arm to the run rather than to the resumption (three Minors); the gate hook's header clause 5 lists the opener leg with its reason (adversarial Minor); section 1's Files in scope carries the thirteenth file (adversarial Minor). Recorded rather than edited, the Chapters being append-only: Chapter 1's clause that the deferral nudge passes the opener through is inaccurate, compact-deferral-nudge.js only reads the checkpoint and only its test fixtures changed (adversarial Minor, low confidence, confirmed by reading the hook). The security reviewer's fourth Minor, that the subagent-compaction defect's only actionable note sits in a dirty working copy, is carried to the close-out and to the backlog item narrowed at this pass. No fix reached a guard leg, an outward action or a new module, and the changed sentence is pinned by tests reading the constant off the source, so no further review round was owed for the fix delta; the targeted lane after it ran 928/928/0 exit 0 from .kit/verify/finishing-fix-lane.exit against the section-close lane's 928/928/0, after build.ps1 exit 0 refreshed the stamp.
+The NEO-CLAUDE loop reading (spec, second observation): unverifiable from here, neither confirmed nor refuted. The gate journal that would settle it is NEO-CLAUDE's .kit/compact-gate.jsonl, which this box does not hold; the bystander-clear cause the spec proposed is refused by construction from this changeset on, so if that was the cause it is closed, and the distinct cause this run observed on SCOTT-CLAUDE, a dispatched subagent's auto-compaction spending the leash holder's checkpoint under the parent's session id, is not closed by this plan and is captured as the gate defect below.
+Docs curation: four deviations, no mistakes, every item carrying a basis; none rested on a pre-change claim needing the read. D1 (docs/backlog.md's caller-check item overstated the gap by the layer this plan shipped): adjudicated at the prune, the shipped half moved to the 2026-Q3 snapshot and the item narrowed to its residual, the subagent leg. D2 (architecture.md's step-0 clear read as unconditional), D3 (security-model.md's CLAUDE_CODE_SESSION_ID inventory omitted the write door, mirrored in docs/README.md) and D4 (architecture.md's unreadable-goal refusal lacked clear's over-a-present-path qualifier): documented as built by the curator, its diff read by the orchestrator before commit. Hygiene H1 (stale index entries) is discharged by the archive refresh; H2 (no cross-reference to the output-channel-eliding plan, whose section 2 sweep enumerates the refusal lines this effort added through emitOut and emitErr) is discharged by the Related section, one way, since that plan is still active and its own file is not this plan's to edit.
+Decisions / Surprises: the run resumed under session 783cd923 after a plugin-update reset killed the previous worker; the operator re-armed the twelve-plan queue with this plan first, which rebound the leash. The Agent tool launched qa-verifier and docs-curator asynchronously despite run_in_background false, awaited in-turn on TaskOutput with the cap the hold rule sets. The heavy-process poll before the fix lane showed thirteen node and pwsh processes and no claim file; read as idle sessions and sidecars rather than a suite, inferred, and the lane's counts matched baseline. Chapter 1's kaizen capture (the gate reads no agent key off the PreCompact payload and the checkpoint discipline has no subagent leg) is still in kaizen/notes-SCOTT-CLAUDE.md beside a peer's uncommitted lines and stays uncommitted by this plan's commit, since that file is not this session's to stage.
+Assumptions: the harness sets CLAUDE_CODE_SESSION_ID in the Bash tool's environment and a dispatched subagent's shell inherits the dispatching session's id (confirmed from three reviewers' shells in three rounds, one harness version); PreCompact stderr reaches the operator's terminal and never the model (observed, now documented as a review trigger); the executing-work skill's word cap raise to 21381 is section 2's own step, and its raise to 21474 at this pass is the finishing fix's; the thirteen-process poll before the fix lane held no test runner (inferred from the empty claims directory and the matching counts).
+Stamps: memq unstamped --since 8h listed six project-tier and six operator-tier reads; seven stamped applied (two-sessions-one-checkout-commit-freeze, an-efforts-base-ref-is-not-your-own-first-commit, test-suite-invocation, suite-baseline-is-not-zero-fail, size-ratchet-counts-words-after-the-frontmatter-strip, skill-amendments-collide-with-neighbours, and the operator-tier an-estimate-is-anchored-at-the-stamp-beside-it), five operator-tier nudge reads skipped as shaping nothing.
+Operator-pending verifications: none specific to this plan; the two boundary-gated-compaction items already in the backlog (judge the nudge and the gate on a real leashed run) remain the operator's and are unchanged.
+Gate: handoff whole gate `node --test "test/*.test.js"` 3219 tests, 3209 pass, 1 fail, 9 skipped, exit 1 read from .kit/verify/finishing-handoff-gate.exit, run under a heavy-process claim over the tree as archived (Chapter 3 written, plan moved, backlog pruned, indexes refreshed), the one red test/memory-session.test.js pinned-directory case the suite-baseline memory records as permanent on this box, so no delta against Chapter 1 and the QA run (both 3219/3209/1/9); contention lane: none defined in this repo. This gate discharges the install-surface push gate, the Gate line fill being the only edit after it.
+Next: none; the plan is Complete and archived. The leash advances to docs/plans/claude-kit_scenario-probes_spec_v1.md.

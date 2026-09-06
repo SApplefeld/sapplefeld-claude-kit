@@ -108,10 +108,14 @@
 //      bind, matching the one the advance carries, is backlogged.
 //   5. No boundary checkpoint is open. A checkpoint matches only when its
 //      recorded plan equals the armed goal's plan, its recorded boundSession
-//      equals the goal's current boundSession, AND it is fresh (the shared
-//      match rule and its age bounds live in kit-compact-lib.js); anything
-//      else is treated as absent. The plan match retires a stale file from a
-//      prior run, and the session match
+//      equals the goal's current boundSession, its recorded openedBy equals
+//      that same session, AND it is fresh (the shared match rule and its age
+//      bounds live in kit-compact-lib.js); anything else is treated as
+//      absent. The plan match retires a stale file from a prior run; the
+//      opener match refuses a record some other session wrote under the
+//      binding, so a bystander's open never declares the leash holder's
+//      boundary (the CLI's write door refuses that open first, and this leg
+//      catches a record an older CLI or a hand edit produced); and the session match
 //      retires an orphan from a crashed run: a checkpoint written just before
 //      a crash names the same plan, but the resumed session re-binds under a
 //      new id, so the orphan must not open the gate for its first mid-chapter

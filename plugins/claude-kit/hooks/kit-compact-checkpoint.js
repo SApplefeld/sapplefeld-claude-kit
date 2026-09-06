@@ -1001,9 +1001,13 @@ const BOUNDARY_VERB_REMEDY = 'a session with a boundary of its own to bank decla
 // queue rather than adding to it, so a resumed run that re-arms with one plan
 // path drops the rest of the queue it was carrying. And the act is the resumed
 // run's alone: a peer seat acting on it would take the leash holder's binding and
-// replace its queue at the same time.
+// replace its queue at the same time. The spelling rides too: an arm a run makes
+// for itself carries --self-armed, since a bare arm records the invocation as
+// the operator's and writes the operator's parallelization request into the
+// goal's condition text (the kit-goal skill owns that flag).
 const REARM_REMEDY = 're-arm the goal with its whole queue, which rebinds it: arming replaces the'
-    + ' queue rather than adding to it, so a re-arm naming fewer plans drops the rest, and a session'
+    + ' queue rather than adding to it, so a re-arm naming fewer plans drops the rest, the run'
+    + ' spells it arm --self-armed since the invocation is its own, and a session'
     + ' that is not that run leaves the goal alone';
 
 // What is at the goal-state path when readGoal did not answer with a goal, or

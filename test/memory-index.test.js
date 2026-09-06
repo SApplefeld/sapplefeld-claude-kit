@@ -1013,3 +1013,310 @@ test('cosine refuses to compare vectors of different widths', () => {
     // A caller holding the model's own Float32Array is compared, not refused.
     assert.strictEqual(mi.cosine(Float32Array.from([1, 0, 0]), [1, 0, 0]), 1);
 });
+
+// ------------------------------------------------- cancelling the work -----
+//
+// The two callers outside `find` bound their wait on this module with a timer
+// and abort a controller when it expires, so an abandoned sweep or query is an
+// ordinary condition here rather than a bug: it answers a typed 'cancelled'
+// status, keeps whatever vectors it had already paid for, and never throws. A
+// pass that stops before the walk has nothing to keep. Each case below aborts at
+// a point a real expiry can land and reads what stopped off the stub's own record
+// of the calls it was asked to make, so nothing here is timed and nothing depends
+// on the module's batch size.
+//
+// The failure these cases are shaped against is a signal check placed where no
+// expiry reaches it: green on the shape with the hang left where it was. So the
+// aborts land inside an embed call, which is where a timer fires against a real
+// stack, rather than between two of this module's own statements.
+
+// The stub, with the controller aborted as each embed call returns: the caller
+// has walked away while the model was working, which is the shape of every real
+// expiry here. `batches` is the texts of each call in order, so a case says how
+// far the embedding got rather than how long it took.
+function makeCancellingStub(controller) {
+    const stub = makeStub();
+    const batches = [];
+    const embed = stub.embed;
+    stub.batches = batches;
+    stub.embed = async (texts) => {
+        batches.push(texts.slice());
+        const vectors = await embed(texts);
+        controller.abort();
+        return vectors;
+    };
+    return stub;
+}
+
+// Plant `count` memories in one project store, each with its own text, which is
+// how a case reaches more records than one embed batch holds without naming the
+// batch size the module keeps to itself. The name to body map it answers is what
+// lets a case compose the exact text each record is embedded through.
+function plantMany(count) {
+    const words = ['signing', 'migrations', 'timeout', 'cache', 'lockfile', 'anchor'];
+    const bodies = new Map();
+    for (let i = 0; i < count; i++) {
+        const name = 'fact-' + i;
+        const body = 'the alpha project fact number ' + i + ' about '
+            + words[i % words.length] + '\n';
+        plant('D--proj-alpha', 'project', name, body);
+        bodies.set(name, body);
+    }
+    return bodies;
+}
+
+test('a signal already aborted stops a sweep before the store walk, in the shape a caller'
+    + ' already reads', async () => {
+    await withStore(async (root) => {
+        plantEveryTier();
+        const controller = new AbortController();
+        controller.abort();
+        const stub = makeStub();
+        const result = await mi.sweep({ embedder: stub, signal: controller.signal });
+
+        assert.strictEqual(result.status, 'cancelled');
+        // Nothing was embedded: the check sits ahead of the walk, which is the
+        // only placement a stalled load can benefit from.
+        assert.deepStrictEqual(stub.calls, []);
+        assert.deepStrictEqual(result.records, []);
+        assert.strictEqual(result.written, false);
+        assert.strictEqual(fs.existsSync(path.join(root, mi.SIDECAR_FILE)), false);
+        // The same key set a completed sweep carries, read off a completed sweep
+        // of this same store, so the callers that print counts off this object
+        // meet numbers rather than undefined.
+        const completed = await mi.sweep({ embedder: makeStub() });
+        assert.strictEqual(completed.status, 'ok');
+        assert.deepStrictEqual(Object.keys(result).sort(), Object.keys(completed).sort());
+    });
+});
+
+test('a cancellation landing between embed batches stops the remaining batches and keeps the'
+    + ' vectors already paid for, which the next sweep resumes from', async () => {
+    await withStore(async (root) => {
+        // An index built and persisted first, so this case reads what a cancelled
+        // sweep does to a real one rather than only what it writes from nothing.
+        plantEveryTier();
+        const first = await mi.sweep({ embedder: makeStub() });
+        assert.strictEqual(first.written, true);
+
+        // More records than one batch holds, so there is a second batch for the
+        // abort to stop. The count is not the module's batch size and does not
+        // need to be: what the case reads is that the embedding stopped after the
+        // first call with texts still pending.
+        const bodies = plantMany(40);
+        const controller = new AbortController();
+        const stub = makeCancellingStub(controller);
+        const result = await mi.sweep({ embedder: stub, signal: controller.signal });
+
+        assert.strictEqual(result.status, 'cancelled');
+        assert.strictEqual(stub.batches.length, 1,
+            'the embedding stopped at the first batch boundary: '
+            + JSON.stringify(stub.batches.map((b) => b.length)));
+        assert.ok(stub.batches[0].length < 40,
+            'and it had not embedded every pending record: ' + stub.batches[0].length);
+
+        // The names the one batch covered, and the ones still pending, read off
+        // the texts the stub was handed rather than off any batch size.
+        const embedded = [...bodies].filter(([name, body]) =>
+            stub.batches[0].includes(mi.embedText(name, body)));
+        const pending = [...bodies].filter(([name, body]) =>
+            !stub.batches[0].includes(mi.embedText(name, body)));
+        assert.ok(embedded.length > 0 && pending.length > 0,
+            'the batch split the planted records: ' + embedded.length + ' embedded, '
+            + pending.length + ' pending');
+
+        // What the pass paid for is on disk: the prior index plus exactly the
+        // records this pass embedded, and nothing standing in for the remainder.
+        // A cancelled sweep that discarded these would leave every bounded caller
+        // sweeping from empty forever, since the bound is what cancels it.
+        assert.strictEqual(result.written, true);
+        const onDisk = keysOf(readSidecarLines(root).map((l) => JSON.parse(l)));
+        assert.deepStrictEqual(onDisk,
+            EVERY_TIER_KEYS
+                .concat(embedded.map(([name]) => 'D--proj-alpha project ' + name)).sort());
+        for (const [name] of pending) {
+            assert.ok(!onDisk.includes('D--proj-alpha project ' + name),
+                'the pending remainder is absent from the index: ' + name);
+        }
+
+        // And the remainder is named in failed rather than left out of the
+        // account: the counters above already counted these records, and a caller
+        // decides a pass was partial from failed and the carried tiers, so a
+        // cancelled pass silent about them would read as a complete one over an
+        // index missing them.
+        assert.deepStrictEqual(result.failed.map((f) => f.name).sort(),
+            pending.map(([name]) => name).sort());
+        for (const f of result.failed) {
+            assert.strictEqual(f.store, 'D--proj-alpha');
+            assert.strictEqual(f.tier, 'project');
+            assert.strictEqual(f.reason,
+                'the sweep was cancelled before this memory was embedded');
+        }
+
+        // And the remainder is what the next uncancelled sweep embeds: exactly
+        // those texts, once each, which is the self-healing the failed records
+        // already have.
+        const resumed = makeStub();
+        const second = await mi.sweep({ embedder: resumed });
+        assert.strictEqual(second.status, 'ok');
+        assert.deepStrictEqual(resumed.calls.slice().sort(),
+            pending.map(([name, body]) => mi.embedText(name, body)).sort());
+        assert.deepStrictEqual(keysOf(second.records),
+            EVERY_TIER_KEYS
+                .concat([...bodies.keys()].map((name) => 'D--proj-alpha project ' + name)).sort());
+        assert.deepStrictEqual(second.failed, [],
+            'and the cancelled pass names nothing once it is finished: '
+                + JSON.stringify(second.failed));
+    });
+});
+
+test('a cancellation landing between the per-item retries stops the rest of them', async () => {
+    await withStore(async (root) => {
+        plantMany(20);
+        const controller = new AbortController();
+        const batches = [];
+        // A batch whose vectors this module will not write sends the sweep into
+        // its per-item retry, which is the second loop a signal has to reach: a
+        // check in the batch loop alone would leave a whole batch's worth of
+        // single-text calls running for a caller who has gone.
+        const stub = {
+            status: 'ready',
+            available: true,
+            identity: 'stub@1/bag-of-words/none',
+            dim: STUB_DIM,
+            batches,
+            embed: async (texts) => {
+                batches.push(texts.slice());
+                if (texts.length > 1) return texts.map(() => [1]);
+                const vector = bagVector(texts[0]);
+                controller.abort();
+                return [vector];
+            }
+        };
+        const result = await mi.sweep({ embedder: stub, signal: controller.signal });
+
+        assert.strictEqual(result.status, 'cancelled');
+        // The refused batch, then exactly one retry: the abort landed inside that
+        // retry and the next item read it before calling the embedder.
+        assert.strictEqual(batches.length, 2,
+            'one refused batch and one retry: ' + JSON.stringify(batches.map((b) => b.length)));
+        assert.strictEqual(batches[1].length, 1,
+            'the retry embeds one text at a time: ' + JSON.stringify(batches.map((b) => b.length)));
+        // The one retry that answered is kept, as in the batch case: the pass
+        // writes what it embedded and leaves the rest to the next sweep.
+        assert.strictEqual(result.written, true);
+        assert.strictEqual(result.records.length, 1,
+            'exactly the record the answered retry produced: ' + keysOf(result.records));
+        assert.deepStrictEqual(keysOf(readSidecarLines(root).map((l) => JSON.parse(l))),
+            keysOf(result.records));
+    });
+});
+
+test('query answers the cancelled status rather than ranking, wherever the abort lands: ahead of'
+    + ' the sweep, inside it, or ahead of the ranking', async () => {
+        await withStore(async (root) => {
+            plantEveryTier();
+            // Aborted before the query is entered: the sweep is never reached,
+            // which is what the null sweep says.
+            const early = new AbortController();
+            early.abort();
+            const first = await mi.query('this operator has no github cli on any machine',
+                { embedder: makeStub(), signal: early.signal });
+            assert.strictEqual(first.status, 'cancelled');
+            assert.deepStrictEqual(first.hits, []);
+            assert.strictEqual(first.sweep, null);
+            assert.ok(first.embedder.available, 'the embedder is still reported');
+            assert.deepStrictEqual(Object.keys(first).sort(),
+                ['embedder', 'hits', 'status', 'sweep']);
+            assert.strictEqual(fs.existsSync(path.join(root, mi.SIDECAR_FILE)), false,
+                'and a cancelled query persisted nothing');
+
+            // Aborted inside the sweep's embedding, with more records planted than
+            // one batch holds so the abort lands with records still pending: the
+            // query carries the sweep that stopped and ranks nothing.
+            const bodies = plantMany(40);
+            const planted = EVERY_TIER_KEYS.length + bodies.size;
+            const during = new AbortController();
+            const stub = makeCancellingStub(during);
+            const second = await mi.query('this operator has no github cli on any machine',
+                { embedder: stub, signal: during.signal });
+            assert.strictEqual(second.status, 'cancelled');
+            assert.deepStrictEqual(second.hits, []);
+            assert.strictEqual(second.sweep.status, 'cancelled');
+            // The sweep keeps the vectors it paid for and accounts for the rest,
+            // and the query still ranks nothing over them: a partial index is a
+            // sound thing to persist and an unsound thing to answer a search from.
+            assert.strictEqual(second.sweep.written, true);
+            assert.ok(second.sweep.records.length > 0
+                && second.sweep.records.length < planted,
+            'the index is short of the store: ' + second.sweep.records.length
+                + ' of ' + planted);
+            assert.strictEqual(second.sweep.records.length + second.sweep.failed.length, planted,
+                'every planted record is either indexed or named in failed: '
+                    + second.sweep.records.length + ' + ' + second.sweep.failed.length);
+            assert.ok(fs.existsSync(path.join(root, mi.SIDECAR_FILE)));
+
+            // Aborted on the query's own embed, with nothing left to sweep: the
+            // check ahead of the ranking is the only one left to read it, and the
+            // completed sweep rides out with the cancelled status so a caller can
+            // still say what the index knows.
+            const finished = await mi.sweep({ embedder: makeStub() });
+            assert.strictEqual(finished.status, 'ok');
+            assert.strictEqual(finished.records.length, planted);
+            const late = new AbortController();
+            const lateStub = makeCancellingStub(late);
+            const third = await mi.query('this operator has no github cli on any machine',
+                { embedder: lateStub, signal: late.signal });
+            assert.strictEqual(third.status, 'cancelled');
+            assert.deepStrictEqual(third.hits, []);
+            assert.strictEqual(third.sweep.status, 'ok',
+                'the sweep ahead of it completed: ' + third.sweep.status);
+            assert.strictEqual(third.sweep.records.length, planted);
+            assert.deepStrictEqual(lateStub.batches.map((b) => b.length), [1],
+                'the one embed the abort landed on is the query text: '
+                    + JSON.stringify(lateStub.batches));
+        });
+    });
+
+test('a signal that is never aborted changes nothing about the sweep, the hits or the'
+    + ' persisted vectors', async () => {
+    await withStore(async (root) => {
+        plantEveryTier();
+        const sidecar = path.join(root, mi.SIDECAR_FILE);
+        const plain = await mi.query('this operator has no github cli on any machine',
+            { embedder: makeStub(), limit: 3 });
+        const bytes = fs.readFileSync(sidecar, 'utf8');
+
+        // The control every case above rests on: the same query under a live
+        // signal nobody aborts. A check reading a signal's presence rather than
+        // its abort would fail here and pass everywhere else.
+        const signal = new AbortController().signal;
+        const guarded = await mi.query('this operator has no github cli on any machine',
+            { embedder: makeStub(), limit: 3, signal });
+
+        assert.strictEqual(guarded.status, 'ok');
+        assert.deepStrictEqual(guarded.hits, plain.hits);
+        assert.strictEqual(guarded.sweep.status, 'ok');
+        assert.strictEqual(guarded.sweep.unchanged, 7);
+        assert.strictEqual(guarded.sweep.written, true);
+        assert.strictEqual(fs.readFileSync(sidecar, 'utf8'), bytes,
+            'the sidecar is byte-identical under a signal that never fired');
+    });
+});
+
+test('embedText is exported and is the composition every indexed record is embedded through',
+    async () => {
+        // The name's separators become words: a memory name is a fact-bearing
+        // phrase in this store, so what the model reads is the phrase.
+        assert.strictEqual(mi.embedText('a-fact_here', 'the body'), 'a fact here\n\nthe body');
+        await withStore(async () => {
+            const body = 'the beta project rotates its signing key monthly\n';
+            plant('D--proj-beta', 'project', 'beta-live', body);
+            const stub = makeStub();
+            await mi.sweep({ embedder: stub });
+            // The call site and the exported composition are one string, so a
+            // caller composing a query through embedText composes it the way the
+            // corpus it will be ranked against was composed.
+            assert.deepStrictEqual(stub.calls, [mi.embedText('beta-live', body)]);
+        });
+    });

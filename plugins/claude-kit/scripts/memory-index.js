@@ -703,9 +703,57 @@ function hashOf(text) {
 // a fact-bearing phrase in this store (memories are named for what they teach,
 // not numbered), so it belongs in the embedded text rather than being carried
 // only as an identifier.
+//
+// Exported, because a caller ranking a record that is not in the index yet has to
+// compose its query the way the corpus was composed: the authoring verbs' neighbour
+// query is the name and description of the record being written, spelled through
+// here. A second spelling of this composition is a silent ranking defect, so the
+// suites pin the call site against this function on both sides, in
+// test/memory-index.test.js and test/memq.test.js.
 function embedText(name, body) {
     const text = name.replace(/[-_]+/g, ' ') + '\n\n' + body;
     return text.length > TEXT_CAP ? text.slice(0, TEXT_CAP) : text;
+}
+
+// Whether the caller has abandoned the work in flight. The signal is optional,
+// so a caller with no clock passes none and every check below reads as running
+// to completion.
+//
+// An abandoned caller is an expected condition here, the judgment an absent
+// embedder gets rather than the one a bug gets: a caller under a bound has
+// already printed whatever it says in place of a ranking by the time the abort
+// lands, so the work stops and answers with a typed status instead of throwing
+// at a reader who is no longer there.
+function isCancelled(signal) {
+    return Boolean(signal && signal.aborted);
+}
+
+// The answer to an abort read before the store was walked: the sweep shape with
+// nothing in it. Every key a completed sweep carries is present, so a caller
+// reading a count or the record list meets a number or an array rather than
+// undefined. Every count is zero, the record list is empty and nothing is
+// written because this pass read no file and embedded no text: there is no
+// account of the store to give and nothing to persist, and the sidecar keeps
+// whatever the last completed sweep left. An abort read later, after the
+// embedding, returns through the ordinary path instead and carries the counts and
+// the records that pass did produce.
+function cancelledSweep(embedder) {
+    return {
+        status: 'cancelled',
+        embedder,
+        indexPath: indexPath(),
+        rebuilt: false,
+        added: 0,
+        changed: 0,
+        removed: 0,
+        retimed: 0,
+        unchanged: 0,
+        carried: 0,
+        failed: [],
+        records: [],
+        written: false,
+        writeError: null
+    };
 }
 
 // Bring the index up to date with the store, and return both it and an account
@@ -745,6 +793,33 @@ function embedText(name, body) {
 // options.embedder accepts an already-loaded embedder ({identity, dim, embed}),
 // which is how a caller that already loaded one avoids a second load and how
 // tests drive the sweep's transitions without the optional stack installed.
+//
+// options.signal is an AbortSignal owned by a caller under a clock. An abort
+// stops this sweep at the next check rather than finishing it for a reader who
+// has gone, and it answers status 'cancelled'.
+//
+// Every point that reads it is a point where nothing is in flight: the
+// resumption after the embedder load, which is the slow step a caller's bound is
+// drawn around; each embed batch boundary, which is where the cost of a large
+// store goes; between the items of the per-item retry a refused batch falls into;
+// and once more where the embedding ends, which is the read that decides whether
+// this pass answers 'ok' or 'cancelled'. None of them reaches inside the load
+// itself, or inside an embed call already handed to the model, which are the
+// awaits no check can interrupt: a stack that never resolves the load is not
+// stopped here, and the caller's own bound is what ends the wait on that.
+//
+// What a cancelled pass leaves on disk depends on where the abort was read. The
+// abort read after the load, before anything is read or embedded, writes nothing:
+// there is no pass to persist and the sidecar stays whatever the last completed
+// sweep left. An abort read at or after an embed boundary writes what the pass did
+// embed, which is the failed-record rule at a wider granularity: the records the
+// abandoned batches never reached are named in failed and absent from the index
+// rather than stale in it, so the next sweep sees them as new and finishes the
+// job, and a caller reading this pass as partial reads it off the same fields it
+// reads a failed embedding off. That is what keeps a store whose load and sweep
+// outrun a caller's bound from having no index at all, since every bounded caller
+// would otherwise discard the pass that was building one and only an unbounded
+// search would ever finish it.
 async function sweep(options) {
     const opts = options || {};
     const embedder = opts.embedder || await loadEmbedder();
@@ -766,6 +841,13 @@ async function sweep(options) {
             writeError: null
         };
     }
+
+    // The load above is one await this module cannot interrupt, so the abort is
+    // read the moment it returns, ahead of the index read, the store walk, the
+    // file reads and the embedding below. An absent or unusable stack is
+    // reported first: that is a condition the caller can act on, where a
+    // cancellation says only that nobody is reading.
+    if (isCancelled(opts.signal)) return cancelledSweep(embedder);
 
     const identity = embedder.identity;
     const prior = readIndex();
@@ -838,7 +920,19 @@ async function sweep(options) {
         });
     }
 
-    const embedded = await embedAll(embedder, pending, failed);
+    const embedded = await embedAll(embedder, pending, failed, opts.signal);
+    // An abort that landed in the batches above changes the status and what is
+    // named in failed, and nothing else: the vectors already paid for are
+    // written, and the records the abandoned batches would have embedded are
+    // absent from the index and named in failed the same way a record whose
+    // embedding failed is, so the next sweep sees them as new and finishes the
+    // job and a caller reading this pass as partial has the fields to read it off.
+    // Discarding the vectors instead would leave a store whose load and sweep
+    // outrun a caller's bound with no index at all, since every bounded caller
+    // would throw away the pass that was building one.
+    const cancelled = isCancelled(opts.signal);
+    if (cancelled) noteUnreached(pending, embedded, failed);
+
     const carried = carryUnscanned(priorByKey, walk);
     const removed = countRemoved(priorByKey, walk.records, carried);
     const records = kept.concat(carried, embedded);
@@ -846,7 +940,7 @@ async function sweep(options) {
 
     const write = writeIndex(records);
     return {
-        status: 'ok',
+        status: cancelled ? 'cancelled' : 'ok',
         embedder,
         indexPath: indexPath(),
         rebuilt,
@@ -902,10 +996,19 @@ function countRemoved(priorByKey, found, carried) {
 // A record that fails either way is reported and left out of the index, which
 // means the next sweep tries it again: it is new again, because nothing
 // recorded it.
-async function embedAll(embedder, pending, failed) {
+//
+// `signal` is the caller's abort, optional. It is read at a batch boundary and,
+// inside the per-item retry, between items, which are the points where nothing
+// is in flight: an embed call already handed to the model is the one thing here
+// that cannot be taken back, so a check any finer would not stop anything
+// sooner. What was embedded before the abort is returned rather than discarded,
+// and the sweep persists it: an index missing the records the abandoned batches
+// never reached is what the next sweep finishes.
+async function embedAll(embedder, pending, failed, signal) {
     const out = [];
     const width = typeof embedder.dim === 'number' ? embedder.dim : null;
     for (let i = 0; i < pending.length; i += EMBED_BATCH) {
+        if (isCancelled(signal)) return out;
         const batch = pending.slice(i, i + EMBED_BATCH);
         let vectors = null;
         try {
@@ -918,6 +1021,7 @@ async function embedAll(embedder, pending, failed) {
             continue;
         }
         for (const item of batch) {
+            if (isCancelled(signal)) return out;
             let one = null;
             let reason = 'the embedder returned no usable vector';
             try {
@@ -931,6 +1035,31 @@ async function embedAll(embedder, pending, failed) {
         }
     }
     return out;
+}
+
+// The pending records a cancelled pass never handed to the model, named in failed
+// so the account of the pass is whole. The counters already counted them as added
+// or changed, and a caller decides a pass was partial from failed and the carried
+// tiers, so leaving them out of both would read as a complete sweep over an index
+// that is missing them. Anything already embedded or already failed is left alone,
+// which is what makes this sound at either of the two points a batch loop can stop
+// at: the boundary before a batch, and between the items of a batch's retry.
+function noteUnreached(pending, embedded, failed) {
+    const accounted = new Set(embedded.map((r) => recordKey(r.store, r.tier, r.name)));
+    for (const f of failed) {
+        if (f.name !== null) accounted.add(recordKey(f.store, f.tier, f.name));
+    }
+    for (const item of pending) {
+        const key = recordKey(item.store, item.tier, item.name);
+        if (accounted.has(key)) continue;
+        accounted.add(key);
+        failed.push({
+            store: item.store,
+            tier: item.tier,
+            name: item.name,
+            reason: 'the sweep was cancelled before this memory was embedded'
+        });
+    }
 }
 
 // Whether a vector may be written into the index: non-empty, every component a
@@ -1028,17 +1157,37 @@ function search(queryVector, records, options) {
     return scored.slice(0, limit);
 }
 
+// query's answer to an abort, in the shape every other typed status here takes,
+// so a caller reading the hits or the sweep behind them meets the same keys it
+// meets on an absent embedder. `swept` is whatever the sweep reported, and null
+// where the abort landed before the sweep was entered at all.
+function cancelledQuery(embedder, swept) {
+    return { status: 'cancelled', embedder, hits: [], sweep: swept };
+}
+
 // The whole query path: bring the index up to date, embed the query, rank.
 // This is the one call a search surface needs, and it answers absence in the
 // same typed shape every other entry point here does, so a caller degrades to
 // its lexical channel by reading a status rather than by catching an error.
+//
+// options.signal reaches the sweep and the embedding behind it as well as the
+// three checks here, so a query a caller has abandoned stops at the next check
+// with status 'cancelled' rather than ranking for nobody and holding the process
+// open while it does.
 async function query(text, options) {
     const opts = options || {};
     const embedder = opts.embedder || await loadEmbedder();
     if (!embedder.available) {
         return { status: embedder.status, embedder, hits: [], sweep: null };
     }
+    // The load is the await a caller's bound is likeliest to expire across, so
+    // the abort is read the moment it returns and before the sweep is entered.
+    if (isCancelled(opts.signal)) return cancelledQuery(embedder, null);
     const swept = await sweep({ ...opts, embedder });
+    // The sweep reads the same signal out of the same options, so a sweep that
+    // stopped is this query stopping too: there is no index to rank against and
+    // no reader waiting for a ranking.
+    if (swept.status === 'cancelled') return cancelledQuery(embedder, swept);
     let vector = null;
     try {
         const vectors = await embedder.embed([String(text)]);
@@ -1061,6 +1210,10 @@ async function query(text, options) {
             detail: 'the embedder returned no vector for the query text'
         };
     }
+    // The last check, ahead of the ranking: the query embed above is another
+    // await, and the search below is the whole of this function's remaining
+    // cost, a full pass over every record in the index.
+    if (isCancelled(opts.signal)) return cancelledQuery(embedder, swept);
     return { status: 'ok', embedder, hits: search(vector, swept.records, opts), sweep: swept };
 }
 
@@ -1086,6 +1239,7 @@ module.exports = {
     readIndex,
     walkStore,
     recordPath,
+    embedText,
     sweep,
     cosine,
     search,

@@ -260,8 +260,18 @@ const SEMANTIC_SHOWN_FOR_TEST = memq.SEMANTIC_SHOWN;
 // NANVEC yields a vector with a NaN component, the seam the non-finite-query
 // case uses; and a text containing HANGVEC never returns inside any caller's
 // patience, the seam the neighbours block's time bound is read against.
+//
+// Two environment seams sit beside the text ones, for readings no text can
+// carry. KIT_FAKE_EMBEDDER_LOAD_MS delays the pipeline() the loader awaits, which
+// is the step a caller's bound is drawn around and where an expiry lands against
+// a real cold stack; a case that needs the abort to arrive with the load still in
+// flight sets it, and every other case leaves it unset and pays nothing.
+// KIT_FAKE_EMBEDDER_LOG names a file each embedded text is appended to as a JSON
+// line, which is how a case reads the text a caller actually composed instead of
+// rebuilding that text from its own idea of the composition.
 const FAKE_EMBEDDER_SOURCE = `'use strict';
 const crypto = require('crypto');
+const fs = require('fs');
 const DIM = 384;
 function vec(text) {
     const v = new Float64Array(DIM);
@@ -279,7 +289,13 @@ function vec(text) {
 module.exports = {
     env: {},
     pipeline: async function () {
+        const loadMs = Number(process.env.KIT_FAKE_EMBEDDER_LOAD_MS || 0);
+        if (loadMs > 0) await new Promise((r) => setTimeout(r, loadMs));
         return async function (texts) {
+            const log = process.env.KIT_FAKE_EMBEDDER_LOG;
+            if (log) {
+                for (const t of texts) fs.appendFileSync(log, JSON.stringify(String(t)) + '\\n');
+            }
             const data = new Float64Array(texts.length * DIM);
             for (let i = 0; i < texts.length; i++) {
                 if (String(texts[i]).includes('EMBEDFAIL')) {
@@ -10871,8 +10887,15 @@ function homeChildEnv(store, extra) {
     return env;
 }
 
-function runHome(store, args, extra) {
+// `options` is where a case adds spawn options of its own, today a timeout: a
+// case whose whole reading is that the child exited rather than being held open
+// by work it walked away from needs the run to end either way, and a timeout is
+// what turns a hang into a result there is something to assert about. It is
+// spread first and the three fixed keys land after it, so no option can move the
+// store the precondition checked or the environment homeChildEnv screened.
+function runHome(store, args, extra, options) {
     return spawnSync(process.execPath, [MEMQ].concat(args), {
+        ...(options || {}),
         cwd: store.proj,
         encoding: 'utf8',
         env: homeChildEnv(store, extra)
@@ -27887,10 +27910,11 @@ test('a search that does not answer inside its budget still lets the record land
             'added slow-embedder-fact to the operator tier (body 37 chars)\n');
         // The expiry cancels the check as well as ending the wait: when the
         // embedder finally answers, the ranking this file owns is not done for a
-        // block that has already printed its line. What the cancellation cannot
-        // reach is the embedder load and the store sweep inside memory-index,
-        // which take no signal, so this is a reading of the part that is
-        // cancellable and not of the whole cost.
+        // block that has already printed its line. This case reads the ranking
+        // pass alone, which is memq's own half of that cost; the load and sweep
+        // inside memory-index read the same signal at their own checks, and the
+        // pair of cases below reads those, where the evidence is the child
+        // exiting rather than a marker going unprinted.
         assert.ok(!res.stderr.includes(RANKING_PASS_MARKER),
             'the abandoned ranking never started: ' + res.stderr);
     } finally {
@@ -27918,6 +27942,140 @@ test('the ranking pass a cancelled search skips is the one an answered search ru
         const block = neighbourBlock(res.stderr);
         assert.ok(block !== null && block.hits.length === 1,
             'and it produced the block: ' + res.stderr);
+        // The control for the two absence readings below, which accept a sidecar
+        // that is not there: a check answered inside the bound writes one here, so
+        // the file's absence in those cases is the abandoned work rather than a
+        // path this suite spells wrong.
+        assert.ok(fs.existsSync(path.join(store.root, mi.SIDECAR_FILE)),
+            'an answered check leaves the index it built at '
+                + path.join(store.root, mi.SIDECAR_FILE));
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+// The load delay a case gives the fake stack when what it needs is the abort
+// arriving with the load still in flight: past the bound, so the block has
+// printed its expiry line and stopped waiting before the stack is ready to embed
+// anything at all. That is the expiry a real cold or stalled stack produces,
+// which is why the two cases reading it stall the load rather than one record's
+// text: the check the sweep answers this expiry with is the one sitting where the
+// load returns, ahead of the walk, and a check placed after the sweep's own work
+// would never be reached by it. The margin is small on purpose: both timers run
+// in the child's one event loop, so the abort is always queued before the load
+// resolves, and anything more is suite time.
+const STALLED_LOAD_MS = memq.NEIGHBOUR_TIMEOUT_MS + 500;
+
+// The ceiling on a child whose reading is that it exited, and the arithmetic that
+// makes the exit mean something. The stalled load resolves at STALLED_LOAD_MS
+// (20.5 s), leaving this ceiling 18 s of headroom for the exit that follows. Each
+// store below plants two records the fake stack hangs 22 s each on, and it hangs
+// per text inside one batch call, so a child that entered the walk and the
+// embedding behind the abort owes 44 s against those 18 and cannot reach the exit
+// inside them: spawnSync reports a killed child instead. The reading is therefore
+// the exit itself rather than an elapsed figure, and it speaks in
+// both directions: an entered sweep is a kill, a skipped one is an exit.
+const EXIT_CEILING_MS = STALLED_LOAD_MS + 18000;
+
+// The body of a record the fake stack hangs on, for a store planted to make the
+// work behind an expiry expensive rather than to be found by a search.
+function slowRecordBody(name) {
+    return '# ' + name + '\n\nHANGVEC the local stack never answers about this record\n';
+}
+
+// Whether a child ended on its own rather than being killed at the ceiling
+// above, said in one place because two cases read it and a killed child reports
+// an exit status of null, which an assertion on the status alone would print
+// without saying what happened.
+function exitedOnItsOwn(res) {
+    return 'the child exited on its own: status ' + JSON.stringify(res.status)
+        + ', signal ' + JSON.stringify(res.signal)
+        + ', error ' + (res.error ? res.error.code || res.error.message : 'none');
+}
+
+test('an expired neighbours check leaves the sweep behind it not entered: the child exits when'
+    + ' the stalled load returns to a check nobody is waiting on', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        // Two records the stack hangs on, so the sweep the abandoned check would
+        // otherwise run outlasts this case's ceiling. The stalled load is what
+        // makes the expiry land before that sweep is entered, which is where a
+        // real one lands: the load of a local model is the seconds this bound was
+        // drawn around.
+        for (const name of ['first-slow-record', 'second-slow-record']) {
+            plantAt(store, ['memory-operator'], name, slowRecordBody(name));
+        }
+        const res = runHome(store, ['add-operator', 'exit-after-expiry-fact',
+            'the shell comes back when the check gives up'],
+        { ...HOME_EMBEDDER, KIT_FAKE_EMBEDDER_LOAD_MS: String(STALLED_LOAD_MS) },
+        { timeout: EXIT_CEILING_MS });
+
+        // The reading: this command sets an exit code and never calls
+        // process.exit(), so work still pending holds the process open past the
+        // line saying the check was skipped. The load itself is one await no check
+        // interrupts, and it resolves here at the delay above; what the exit
+        // proves is that the walk and the embedding behind it were never entered,
+        // since the two hanging records below would hold the child past this
+        // case's ceiling.
+        assert.strictEqual(res.status, 0, exitedOnItsOwn(res) + '\n' + res.stderr);
+        assert.strictEqual(res.signal, null, exitedOnItsOwn(res));
+        assert.ok(!res.error, exitedOnItsOwn(res));
+        assert.ok(res.stderr.includes('memq: neighbours not checked (the search did not answer'
+            + ' within ' + memq.NEIGHBOUR_TIMEOUT_MS + 'ms)' + NO_BLOCK_PROMISE),
+        'the expiry names the bound: ' + res.stderr);
+        assert.strictEqual(neighbourBlock(res.stderr), null, res.stderr);
+        assert.ok(fs.existsSync(path.join(store.root, 'memory-operator',
+            'exit-after-expiry-fact.md')), 'and the record landed anyway');
+        assert.match(res.stdout,
+            /^added exit-after-expiry-fact to the operator tier \(body \d+ chars\)\n$/,
+            'stdout is the success line it always was: ' + JSON.stringify(res.stdout));
+        // A pass cancelled where the load returns has read no file and embedded no
+        // text, so it writes nothing and the sidecar stays as it was, which here
+        // is absent. A pass cancelled later keeps the vectors it paid for, which
+        // is not this placement.
+        assert.strictEqual(fs.existsSync(path.join(store.root, mi.SIDECAR_FILE)), false,
+            'the abandoned sweep wrote no index');
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('the neighbour query is the index\'s own text composition, the name rewrite included', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        plantAt(store, ['memory-operator'], 'twin-note',
+            '# twin-note\n\nthe deploy pipeline refuses an unsigned artifact\n');
+        const log = path.join(store.home, 'embedded-texts.jsonl');
+        const name = 'unsigned-artifacts-are-refused';
+        const description = 'the deploy pipeline refuses an unsigned artifact';
+        const res = runHome(store, ['add-operator', name, description],
+            { ...HOME_EMBEDDER, KIT_FAKE_EMBEDDER_LOG: log });
+        assert.strictEqual(res.status, 0, res.stderr);
+
+        const texts = fs.readFileSync(log, 'utf8').split('\n')
+            .filter((l) => l !== '')
+            .map((l) => JSON.parse(l));
+        // The query is the last text the stack was asked to embed: the sweep's
+        // records go first and the query vector after them. The expected string is
+        // computed by the index rather than spelled here, so the case cannot agree
+        // with a composition that drifted: what it pins is that one function
+        // composes the corpus and the query alike, name rewrite included.
+        assert.strictEqual(texts[texts.length - 1], mi.embedText(name, description),
+            'the query is the index composition: ' + JSON.stringify(texts));
+        // And never the hand-rolled join, which is what makes the line above a
+        // reading of the composition rather than of any string at all.
+        assert.ok(!texts.includes(name + ': ' + description),
+            'nothing composes the query by hand: ' + JSON.stringify(texts));
+        // The block itself is unaffected: the same neighbour, found through the
+        // same channel.
+        const block = neighbourBlock(res.stderr);
+        assert.ok(block !== null && block.hits.length === 1,
+            'the block printed its one neighbour: ' + res.stderr);
+        assert.ok(block.hits[0].includes('  twin-note  '), block.hits[0]);
     } finally {
         rmHomeStore(store);
     }
@@ -29119,6 +29277,13 @@ test('a tier with more pairs than the block lists prints the cap and counts the 
             assert.deepStrictEqual(scores, scores.slice().sort((a, b) => b - a),
                 'the listed pairs are the highest-scoring, in order: '
                 + JSON.stringify(scores));
+            // The control for this verb's absence reading below, which accepts a
+            // sidecar that is not there: a scan whose sweep answers writes one at
+            // this path, so the file's absence there is the abandoned sweep rather
+            // than a path this suite spells wrong.
+            assert.ok(fs.existsSync(path.join(store.root, mi.SIDECAR_FILE)),
+                'an answered sweep leaves the index it built at '
+                    + path.join(store.root, mi.SIDECAR_FILE));
         } finally {
             rmHomeStore(store);
         }
@@ -29155,6 +29320,46 @@ test('a sweep that does not answer inside its budget leaves every tier not check
         assert.match(res.stdout, /^archive {2}idle-session-timeout {2}idle \d+d/m,
             'the scan answered: ' + JSON.stringify(res.stdout));
         assert.ok(res.stderr.includes(NO_DRIFT), res.stderr);
+    } finally {
+        rmHomeStore(store);
+    }
+});
+
+test('an expired pairs block leaves the sweep behind it not entered: the scan exits when the'
+    + ' stalled load returns to a check nobody is waiting on', (t) => {
+    const store = makeHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        installHomeEmbedder(store);
+        const memDir = homeMemDir(store);
+        // The authoring block's case, from the other caller of the same bound and
+        // the same helper. This one reaches memory-index's sweep directly rather
+        // than through the search, so the reading is of the sweep's own checks: a
+        // stalled load past the bound, two records the stack hangs on behind it,
+        // and a ceiling the abandoned work cannot fit inside.
+        for (const name of ['session-times-out-after-thirty-idle-minutes',
+            'idle-session-timeout']) {
+            plantRecord(memDir, name, slowRecordBody(name));
+            fs.utimesSync(path.join(memDir, name + '.md'), daysAgo(400), daysAgo(400));
+        }
+
+        const res = runHome(store, ['decay-scan'],
+            { ...HOME_EMBEDDER, KIT_FAKE_EMBEDDER_LOAD_MS: String(STALLED_LOAD_MS) },
+            { timeout: EXIT_CEILING_MS });
+
+        assert.strictEqual(res.status, 0, exitedOnItsOwn(res) + '\n' + res.stderr);
+        assert.strictEqual(res.signal, null, exitedOnItsOwn(res));
+        assert.ok(!res.error, exitedOnItsOwn(res));
+        assert.deepStrictEqual(tierPairs(res.stderr, 'project'), {
+            heading: 'memq: neighbour pairs (project): not checked (the search did not answer'
+                + ' within ' + memq.NEIGHBOUR_TIMEOUT_MS + 'ms)',
+            pairs: []
+        }, 'the heading names the bound: ' + res.stderr);
+        // The product the bound exists for, unchanged by any of it.
+        assert.match(res.stdout, /^archive {2}idle-session-timeout {2}idle \d+d/m,
+            'the scan answered: ' + JSON.stringify(res.stdout));
+        assert.strictEqual(fs.existsSync(path.join(store.root, mi.SIDECAR_FILE)), false,
+            'and the abandoned sweep wrote no index');
     } finally {
         rmHomeStore(store);
     }

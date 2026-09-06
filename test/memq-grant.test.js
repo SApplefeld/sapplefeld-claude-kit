@@ -906,7 +906,8 @@ test('memq loads code out of a directory only where find and the granted blocks 
     // whole rather than counted: find answers from several channels, each loading
     // its own optional stack (the embedder's index, the model endpoint's client,
     // and the relevance prompt that client posts), and the decay scan's pairs
-    // block reads the same index the semantic channel does. A load anywhere else,
+    // block reads the same index the semantic channel does, as does the authoring
+    // verbs' neighbours block, which composes its query through it. A load anywhere else,
     // or one of these moving to another function, reds here.
     assert.deepStrictEqual(
         dynamic.map((d) => ({ module: d.text.replace(/^.*require\('([^']+)'\).*$/, '$1'), in: enclosing(d.line) })),
@@ -914,7 +915,8 @@ test('memq loads code out of a directory only where find and the granted blocks 
             { module: './memory-index.js', in: 'semanticChannel' },
             { module: './prompts/relevance-v1.js', in: 'relevancePrompt' },
             { module: './kit-endpoint-lib.js', in: 'judgedChannel' },
-            { module: './memory-index.js', in: 'neighbourPairsBlock' }
+            { module: './memory-index.js', in: 'neighbourPairsBlock' },
+            { module: './memory-index.js', in: 'neighbourBlock' }
         ],
         'the code loads past the built-in block, and where each one sits: '
             + JSON.stringify(dynamic));
@@ -1016,24 +1018,49 @@ test('memq loads code out of a directory only where find and the granted blocks 
         assert.ok(predicate.some((l) => reads.test(l) && isCode(l)),
             STAND_DOWN + ' reads ' + variable + ': ' + JSON.stringify(predicate));
     }
-    // Each block, with the call whose reach the stand-down bounds: the neighbours
-    // block awaits the semantic channel, and the pairs block requires the index
-    // module itself.
-    for (const [declaration, load] of [
-        [/^async function neighbourBlock\(/, /await semanticChannel\(|semanticChannel\(name/],
-        [/^async function neighbourPairsBlock\(/, /require\('\.\/memory-index\.js'\)/]
+    // Each block, with every line in it that reaches the load, because they are
+    // different lines and only some of them reach the embedder. Requiring the index
+    // module loads no embedder: the module's own top level is node built-ins and
+    // this file. What reaches the stack is the call that makes it search or sweep,
+    // so each such line is named per block and the ordering below is asserted for
+    // every line that matches rather than for the first one found, which is how a
+    // load moved above the stand-down while its sibling stayed below would
+    // otherwise pass unread. The `mi.` pattern is the structural one over the
+    // class: every reach into the index module goes through that binding, whatever
+    // the member, so a new member called above the stand-down reds here without
+    // anyone adding a pattern for it.
+    for (const [declaration, loads] of [
+        [/^async function neighbourBlock\(/,
+            [/require\('\.\/memory-index\.js'\)/, /semanticChannel\(/, /\bmi\./]],
+        [/^async function neighbourPairsBlock\(/,
+            [/require\('\.\/memory-index\.js'\)/, /mi\.sweep\(/, /\bmi\./]]
     ]) {
         const block = bodyOf(declaration);
-        const callAt = block.lines.findIndex((l) => load.test(l) && isCode(l));
-        assert.ok(callAt !== -1, 'the block reaches the load: ' + JSON.stringify(block.lines));
+        const reaching = [];
+        for (const load of loads) {
+            const found = block.lines
+                .map((text, at) => ({ text, at }))
+                .filter((line) => load.test(line.text) && isCode(line.text));
+            assert.ok(found.length > 0,
+                'the block reaches the load through ' + load + ': '
+                    + JSON.stringify(block.lines));
+            for (const line of found) reaching.push(line);
+        }
         const standDownAt = block.lines.findIndex((l) =>
             new RegExp('\\b' + STAND_DOWN + '\\s*\\(').test(l) && isCode(l));
         assert.ok(standDownAt !== -1,
             'the block asks ' + STAND_DOWN + ': ' + JSON.stringify(block.lines));
-        assert.ok(standDownAt < callAt,
-            'the stand-down answers before the load: asked at line '
-                + (block.start + standDownAt + 1) + ', load at line '
-                + (block.start + callAt + 1));
+        for (const line of reaching) {
+            assert.ok(standDownAt < line.at,
+                'the stand-down answers before every line that reaches the load:'
+                    + ' asked at line ' + (block.start + standDownAt + 1)
+                    + ', reached at line ' + (block.start + line.at + 1) + ': '
+                    + line.text.trim());
+        }
+        // The earliest of them is what the gate below has to sit in front of: a
+        // return placed after it would leave the block loading under a pinned
+        // root however the later lines are ordered.
+        const callAt = Math.min(...reaching.map((line) => line.at));
         // The call above is not the pin: a block that asked the predicate and
         // threw the answer away would satisfy an ordering assertion while loading
         // exactly the code the stand-down withholds. So what is pinned is the

@@ -121,7 +121,9 @@ unaffected in its hits, its notes and its persisted vectors; and the neighbour q
 what `embedText` produces for the same name.
 
 Files in scope: `plugins/claude-kit/scripts/memory-index.js`, `plugins/claude-kit/scripts/memq.js`,
-`test/memq.test.js`, `test/size-budget.json` for its cap.
+`test/memq.test.js`, `test/size-budget.json` for its caps; folded at review: `test/memory-index.test.js`,
+`test/memq-grant.test.js` (the load-site roster pin), `plugins/claude-kit/skills/memory-system/SKILL.md` (the
+decay-scan row this section re-opens).
 
 Tests: lock that a cancelled query stops rather than finishing, in a shape that fails if the signal is ignored; lock
 that an uncancelled query is unchanged. The expensive failure is a signal check placed where no realistic expiry
@@ -649,4 +651,116 @@ section's five dirty files. Contention lane: the heavy-process claim read
 before every spawn; the AI-OS: Worker seat held it for a section-8 lane and then a section-9 implementer, and this
 session's whole gate started only once that claim had aged past its estimate, under a claim of its own, released after.
 Next: 4. The index honours the cancellation the neighbours check sends, and exports the composition it owns. Then 5.
+Commit Model: Commit-and-Push
+
+### Interim board 4 - 2026-09-06
+
+Written at section 4's round-1 adjudication, on the compaction gate's signal (30 offers held over 3 minutes).
+Section 4 is open and this entry carries no `Completed:` line.
+
+Stage, section 4: implemented by implementer-opus (dispatch `a79c16026cad12f26`, model override opus, first-turn
+reading 43 assistant lines all `claude-opus-5`, zero synthetic), returned DONE_WITH_CONCERNS; verified at source by
+this session (diff read, three end-to-end cases re-run here: 3/3 exit 0, both expiry cases exiting at 22 s where the
+pre-change control was killed at the 40 s ceiling). Review round 1 run and adjudicated; the fix set is dispatched
+and not yet verified. Not closed.
+
+Live dispatches: the same implementer, resumed via SendMessage on `.kit/verify/s4-fix1-brief.md` (three Majors,
+seven Minors, two extra files in scope: `test/memq-grant.test.js` and `test/memory-index.test.js`); its resumed
+run read 45 assistant lines all `claude-opus-5` at the first-turn window. Workflow run `wf_7aaff9f0-fdf`
+(adversarial-reviewer and blind-reviewer, both opus at effort max via the Workflow route, both read
+`claude-opus-5` only) has completed.
+
+Gate figures, each with its moment. Targeted lane `node --test test/memory-index.test.js test/memq-grant.test.js
+test/size-ratchet.test.js test/doctrine-parity.test.js` after the grant-pin fold and the cap raise: 133/133 exit 0
+on the ratchet and grant files (`.kit/verify/lane-s4b.exit`), following 242/241/1 exit 1 on the four-file run whose
+one red was the grant test's line cap (`lane-s4a`). The implementer's own `node --test test/memq.test.js`:
+697/697 exit 0, 264.9 s (`s4-memq.exit`), measured on the main checkout at HEAD f1b77fc with the section's own
+files dirty and nothing foreign. Whole gate: not yet run this section; the section-3 close baseline is
+3165/3155/1/9 exit 1 at HEAD e00d1e3, the one red the standing TEMP-path failure.
+
+Rulings adopted since Chapter 3, all at round 1 against the code: (1) the cancellation comments and two test
+titles overclaimed; the load is one uninterruptible await and the abort is read when it returns, so the wording
+states that residual. (2) A cancelled sweep persists what it embedded, the module's own failed-record rule, against
+the implementer's declared assumption that it writes nothing: at HEAD an expired check still wrote the index, and
+discarding the work leaves a slow store never building one. (3) This session's own fold of the grant pin anchored
+the neighbours block on the require, which loads no embedder; the pin now holds every load-reaching line after the
+stand-down. Minors adopted: the unreachable cancelled branch in the pairs block deleted, the key-set pin derived
+from a completed sweep, the stalled-load margin cut to 500 ms, a positive sidecar control beside the two absence
+assertions, three comment corrections. The out-of-scope surface the implementer named (the grant pin) folded at
+adjudication, `Files in scope:` to be widened at the Chapter. Security reviewer not dispatched: the product code
+adds no boundary, and the test harness change reuses the suite's own spawner.
+
+Next action, section 4: verify the fix delta at source, run one adversarial lens over it (the delta touches the
+index's persistence rule, which the between-batches test exercises directly, so the lens is judgment rather than an
+owed round), close gate on the targeted lane plus the full memq file, whole gate before the push, Chapter 4, commit,
+push, checkpoint. Then section 5.
+
+### Chapter 4 - 2026-09-06
+
+Completed: 4. The index honours the cancellation the neighbours check sends, and exports the composition it owns
+Implemented By: implementer-opus (dispatch `a79c16026cad12f26`, model override opus, first-turn reading all
+`claude-opus-5`, zero synthetic, on the initial run and on both resumes)
+Metrics: review rounds 2 (the pair at round 1; one adversarial lens over the fix delta at round 2), plus an author
+re-read of the round-2 fix delta; NEEDS_CONTEXT 0; escalations 0; consults 0
+Decisions / Surprises: The section's `Files in scope:` widened above `## Chapters` (approval drift, deliberate) with
+three folds: `test/memory-index.test.js` (the index lane the spec's Tests line implies), `test/memq-grant.test.js`
+(the load-site roster pin, which the neighbours block's new lazy require of memory-index reddened; folded by this
+session at round-1 adjudication and hardened at round 2), and `plugins/claude-kit/skills/memory-system/SKILL.md`
+(section 3's decay-scan row, which this section's expiry behaviour falsified: the step-5 re-open, corrected under
+amendment 1's reasoning rather than routed). The persistence rule was decided at round 1 against the implementer's
+declared assumption: a sweep cancelled after its embedding persists what it embedded, and at round 2 it also names
+the records it never reached in `failed` with the reason `the sweep was cancelled before this memory was embedded`,
+so a caller deriving partial from `failed` and `carried` reads a cancelled pass as partial. The embedder load is one
+uninterruptible await: the abort is read where the load returns, at each batch boundary and between per-item
+retries, and a stack that never resolves its load still holds the process open; the comments and both end-to-end
+test titles state that residual. The pairs block's fall-through on a `cancelled` status rests on
+`raceNeighbourTimeout` aborting and resolving EXPIRED in one timer callback; the dead branch stays deleted and the
+dependency is stated at both sites. One observation left as is: `sweepPartialLine` would word a cancelled record as
+unreadable or unembeddable, but no surface reads a cancelled sweep's facts today (the pairs block returns at its
+expiry and the channel answers `off` first), so the wording is unreachable for that status and untouched.
+The size ratchet measures test files in lines and skills in words; the initial brief said words for the test caps,
+and the implementer used the tool's own measure. The two end-to-end expiry cases cost about 21 s each of serial
+wall clock in `test/memq.test.js`, spec-mandated (the acceptance reads the exit, not elapsed time). The KIT: Expert
+seat committed d496125 (the kaizen inbox only) to this checkout mid-section; none of this section's files carried
+content this session or its implementer did not write, re-read before staging. Interim board 4 was written mid-section
+on the compaction gate's nudge and rides in this commit.
+Assumptions: (decided 2026-09-06, section 4) route (b): the new index-lane cases live in `test/memory-index.test.js`
+and the process-exit cases in `test/memq.test.js`, each beside the harness it drives. (decided 2026-09-06, section 4)
+route (b): the security reviewer was not dispatched; the product code adds no boundary and the test harness change
+(`runHome`'s spawn-options argument, spread first so `homeChildEnv`'s `cwd`, `encoding` and `env` cannot be
+overridden) reuses the suite's own spawner.
+Review Findings: Round 1 (adversarial and blind, both opus at max via the Workflow route): the cancellation comments
+and two test titles overclaiming the abort's reach (Major, both lenses); a cancelled sweep discarding its embedded
+vectors (Major, both); the grant pin's neighbours-block anchor on a line that loads no embedder (Major, adversarial).
+All fixed. Minors (unreachable branch, hand-written key set, stalled-load margin, missing positive control, three
+comment corrections) all fixed. Round 2 (one adversarial lens at opus/max over the fix delta): a cancelled sweep's
+unreached records absent from `failed` (Major); the pairs block's fall-through resting on an unstated cross-function
+ordering (Major, comments at both sites); the memory-system skill's decay-scan row falsified (Major, folded); the
+query cancellation test's second case never producing a partial index (Major, planted 40 and a third case added for
+the pre-ranking check). Nine Minors (a false `exactly as find does`, an undercounted read-point list, embedText's
+doc, the scope line, a self-comparing assertion, a same-verb positive control, the ceiling arithmetic, a structural
+`/\bmi\./` pattern for the grant pin with a withheld control, a title possessive) all fixed. The round-2 fix delta
+was read by this session against the code (noteUnreached, the skill sentence, the persistence comment) rather than
+lensed again: its subject is exercised directly by the between-batches and query cases, each shown red then green.
+blind: reviewed the six code and test files; docs/ paths withheld.
+Stamps: adjudicated 4, stamped 2 (`size-ratchet-counts-words-after-the-frontmatter-strip`, project tier: the
+skill cap raised to the ratchet's own reading; `proceeding-past-an-aged-claim-is-not-taking-it`, operator tier: the
+close gate waited on the AI-OS: Worker seat's claim rather than writing beside it); skipped 2
+(`coordinator-traps-ledger-maintenance`, `autocrlf-rewrites-a-file-without-changing-it`, both read by nudge, neither
+steering).
+Gate: Targeted lane `node --test test/memory-index.test.js test/memq-grant.test.js test/size-ratchet.test.js
+test/doctrine-parity.test.js`: 242 tests, 242 passing, 0 failing, 0 skipped, exit 0 read from
+the run's own marker (`.kit/verify/lane-s4c.exit`); the implementer's own runs of the same lane read 242/242 exit 0
+after each fix round, reddening only on the size ratchet until the caps were raised to the measured figures. Full
+`node --test test/memq.test.js`: 697 tests, 697 passing, 0 failing, 0 skipped, exit 0, 266 s, against the
+implementer's 697/697 exit 0 at 264.9 s on the pre-fix tree. Whole gate `node --test test/*.test.js`, run before
+the push because main is the install surface: 3174 tests, 3164 passing, 1 failing, 9 skipped,
+exit 1, 517 s, against the section-3 close baseline 3165/3155/1/9 at exit 1; the one failure is this box's standing
+red, `a pinned directory too long to name faithfully stands the session down`. Measured on the main checkout at HEAD d496125 with 1 foreign dirty files (ocs/plans/claude-kit_write-time-neighbours_spec_v1.md) beside
+this section's eight dirty files. Contention lane: the heavy-process claim read before every spawn; the AI-OS: Worker
+seat held it at the close (written 05:51:25Z, estimate 900 s); this session's gates started at 06:06:30Z once that
+claim had aged past its estimate, proceeding past it rather than writing beside it, so the gates ran under no claim of
+their own; the holder deleted its claim during the run. The process poll before the wait showed only the idle MSBuild
+node-reuse workers.
+Next: 5. One emitter owns the cross-store hit line. Then finishing-work.
 Commit Model: Commit-and-Push

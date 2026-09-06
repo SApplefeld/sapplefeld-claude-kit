@@ -103,8 +103,10 @@
 // wrong, so that block nominates a re-read and no `decay-prune` flag acts on
 // it; and it reports the live pairs of each tier it reaches whose records read
 // as one fact, which no `decay-prune` flag acts on either. That pairs block
-// sweeps the derived vector index at the store root through memory-index.js
-// exactly as `find` does, so the index is the one file the scan writes.
+// sweeps the derived vector index at the store root through memory-index.js as
+// `find` does, under a bound `find` has none of: the scan abandons that sweep at
+// the expiry and keeps whatever it had embedded by then, so the index is the one
+// file the scan writes and a bounded pass leaves it short rather than unwritten.
 // Which candidates to
 // act on is a judgment made in-session, never automated here. `decay-prune`
 // then performs exactly the mechanical rewrites its arguments call for
@@ -575,15 +577,23 @@ const NEIGHBOURS_SHOWN = 3;            // neighbour lines the authoring block pr
 // who typed one command. What the bound buys is the record: at expiry the
 // block prints its not-checked line and the write goes through.
 //
-// Expiry cancels the check as well as ending the wait, and the cancellation
-// reaches exactly as far as this file's own work: the channel drops out at its
-// resumption point, so the frontmatter read per hit, the tally, the
-// supersession lookups and the sort are never done for a ranking nobody will
-// read. The embedder load and the store sweep behind it are memory-index's,
-// which takes no cancellation signal, so that work runs to completion with no
-// consumer and can hold the process open past the expiry line; by then the
-// record is on disk, which is the part that was at risk.
-const NEIGHBOUR_TIMEOUT_MS = 20000;    // the bound on this process's wait, not on the load and sweep
+// Expiry cancels the check as well as ending the wait, and every consumer of the
+// signal reads it at a resumption point: the channel drops out at its own, so the
+// frontmatter read per hit, the tally, the supersession lookups and the sort are
+// never done for a ranking nobody will read, and memory-index reads it where its
+// embedder load returns and at each embed batch boundary, so the store sweep
+// behind an expired check is not entered and the remaining batches of one already
+// under way are not run.
+//
+// What that does not reach is the load itself, which is a single await no check
+// can interrupt: a stack that never resolves it is never stopped, and an expiry
+// against one is the wait ending while the load runs on. This command sets an
+// exit code and never calls process.exit(), so on that stack the process stays
+// open past the line saying the check was skipped, for as long as the load takes.
+// The record is on disk by then, which is the part that was at risk. The
+// whole-store sweep and its embedding are what the checks keep off a process
+// nobody is waiting on, and they are the half that grows with the store.
+const NEIGHBOUR_TIMEOUT_MS = 20000;    // the bound on the wait, and where the work behind it reads its cancellation
 
 // The store root this process reads and writes under.
 //
@@ -5729,10 +5739,12 @@ function supersedesForTier(cache, liveTier, store) {
 // earlier is acted on at that point and not before, and that point is where
 // every remaining cost of this function sits: the ranking below reads
 // frontmatter, applied tallies and
-// supersession pointers per hit across every store on the machine. What the
-// signal cannot reach is memory-index's own embedder load and store sweep,
-// which take no cancellation of any kind, so an abandoned query still runs
-// there to completion.
+// supersession pointers per hit across every store on the machine. The signal
+// rides into memory-index with the query, which reads it after its embedder load
+// and between its embed batches, so an abandoned query stops there too and comes
+// back with a cancelled status rather than a ranking; this function answers both
+// spellings of the same condition at one branch, the aborted signal it holds and
+// that status.
 //
 // The require of memory-index.js is lazy and rides after an await, both
 // deliberately. memory-index requires this module back for the store's
@@ -5762,7 +5774,13 @@ async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
         // there is nothing to save by fetching less, and a truncation here
         // is what would let the floor, the dedupe, or the tag filter strand
         // a matching record below it (the no-pool comment at the constants).
-        result = await mi.query(String(term), { limit: Number.MAX_SAFE_INTEGER });
+        //
+        // The signal goes with it, which is what puts the embedder load and the
+        // store sweep inside a caller's bound rather than only this function's
+        // ranking: memory-index checks it at its own points and answers a
+        // cancelled status, read at the branch below.
+        result = await mi.query(String(term),
+            { limit: Number.MAX_SAFE_INTEGER, signal: opts.signal });
     } catch (err) {
         // memory-index answers every expected embedder condition as a typed
         // status, so a throw here is a genuine bug in the optional stack; it
@@ -5780,14 +5798,19 @@ async function semanticChannel(term, tag, alreadyShown, showArchived, options) {
     // The cancellation point, read here because everything below is this
     // function's own cost and there is no reader left to pay it for: a caller
     // whose signal is aborted has already printed whatever it says instead of
-    // this ranking. The returned shape is a whole one all the same, off carrying
+    // this ranking. Two spellings of the one condition meet here, the signal
+    // this function holds and the cancelled status memory-index answers with
+    // when the same signal reached its own checks first, and they are answered
+    // together because a caller reading an off cannot act on the difference: one
+    // says the abort landed on this side of the query, the other that it landed
+    // inside it. The returned shape is a whole one all the same, off carrying
     // the abandonment the way it carries an absent embedder, so a caller that
     // did keep the promise around reads a result rather than a hole. No caller
     // does today: the only one that passes a signal is the neighbours block,
     // which prints its own expiry line and never reads what the race lost. The
     // payload is built for the caller that will, so nobody hunting for its
     // consumer has to conclude the branch is dead.
-    if (opts.signal && opts.signal.aborted) {
+    if ((opts.signal && opts.signal.aborted) || result.status === 'cancelled') {
         return {
             notes: [],
             hits: [],
@@ -11715,9 +11738,21 @@ function sweepPersistLine(facts, subject) {
 // outrun, so the fast path never cancels work whose answer the caller is about to
 // print. And an abort landing in the same tick as a completion changes nothing,
 // because the race is already settled and its winner alone decides what prints.
-// How far the signal reaches is the work's own business: memory-index's load and
-// sweep take no cancellation today, so the wait is bounded here and that part of
-// the work is not.
+// How far the signal reaches is the work's own business, and both callers hand it
+// down: memory-index reads it where its embedder load returns and at each embed
+// batch boundary, so an expiry here ends the wait and leaves the store sweep
+// behind the load unentered rather than run for nobody. The load itself is one
+// await no check can interrupt, so a stack that never resolves it keeps the
+// process open for as long as it takes whatever this timer does; the bound is on
+// the wait, and on the work that resumes after the load, not on the load.
+//
+// One timer callback does both halves, aborting the controller and resolving
+// EXPIRED, so this race settles on the expiry before any answer the abort causes
+// the work to produce can be read. The pairs block relies on that: it words
+// nothing for the 'cancelled' status memory-index answers with, on the ground
+// that its own expiry return has already run. Splitting the abort from the
+// resolve, or resolving on the work's answer after aborting it, moves that
+// status into reach there and the two have to move together.
 async function raceNeighbourTimeout(work) {
     const EXPIRED = {};
     const controller = new AbortController();
@@ -12031,10 +12066,15 @@ function printTierPairs(mi, t, vectors) {
 // thousands of candidate pairs, and the count on the heading is what tells a
 // reader which of those two magnitudes the block they are reading came from.
 //
-// That same growth is outside what NEIGHBOUR_TIMEOUT_MS bounds. The bound covers
-// the embedder load and the sweep, which is where a stalled stack holds a pass;
-// the pairwise cosine pass over each tier runs after it, unbounded, and grows
-// with the square of the tier. It is milliseconds at the store sizes this kit
+// That same growth is outside what NEIGHBOUR_TIMEOUT_MS bounds. The bound ends
+// this pass's wait on the embedder load and the sweep, which is where a stalled
+// stack holds a scan, and the sweep reads the expiry's abort where the load
+// returns and at each embed batch boundary, so an expired scan leaves the walk and
+// the embedding unentered while the load itself, one uninterruptible await, runs
+// to whatever end it has; the pairwise cosine pass over each tier runs after all
+// of it, unbounded, and grows with the square of the tier, on the sweeps that
+// answered inside the bound and so on no pass carrying an expiry. It is
+// milliseconds at the store sizes this kit
 // carries and nothing on the heading reports it, so a tier large enough for that
 // pass to cost real time would spend it with no line saying where it went.
 async function neighbourPairsBlock(tiers) {
@@ -12068,9 +12108,16 @@ async function neighbourPairsBlock(tiers) {
     const swept = raced.value;
     // Narrowed to the two conditions embedderOffReason speaks for, the channel's
     // own care with the same helper: those are the statuses the sweep answers
-    // with when the stack cannot serve, and a status of any other spelling is an
-    // impossible state this block words nothing for, so it reaches the reading
-    // below and the guard around this block answers for whatever it throws.
+    // with when the stack cannot serve, and a status of any other spelling
+    // reaches the reading below, where the guard around this block answers for
+    // whatever it throws.
+    //
+    // The one other spelling the sweep has is 'cancelled', and this line is out
+    // of its reach: the only signal handed to that sweep is the race's own, and
+    // raceNeighbourTimeout aborts it and resolves EXPIRED inside one timer
+    // callback, so the expiry above has already returned by the time a cancelled
+    // answer could be read here. Nothing below is worded for it, so the two move
+    // together: see raceNeighbourTimeout.
     if (swept.status === 'absent' || swept.status === 'unusable') {
         const cause = embedderOffReason(swept.status);
         for (const t of tiers) {
@@ -14558,22 +14605,39 @@ async function neighbourBlock(name, description) {
             + '; this check does not block the write\n');
         return;
     }
+    // The index module, for the one thing this block needs of it directly: the
+    // text composition the query below is spelled through. The require is lazy
+    // and rides after an await, the pairs block's two reasons at its own
+    // require: memory-index requires this module back for the store's shape and
+    // this file assigns module.exports at its bottom, so the await is what puts
+    // the require past this file's own evaluation; and lazy keeps the load off
+    // every command that stands down above. The channel reaches the same cached
+    // module through a require of its own.
+    await null;
+    const mi = require('./memory-index.js');
     // The bound, and what it is a bound on: the embedder load and the whole
     // store sweep behind the first similarity of a process. The race, the
     // cancellation and the expiry sentinel are the shared helper's, which the
     // scan's pairs block puts the same bound on its own load and sweep through,
     // and whose comment states why each half of that shape is there.
     const raced = await raceNeighbourTimeout((signal) =>
-        // The query is the record as the author has stated it: the name, which
-        // in this store is a fact-bearing phrase (records are named for what
-        // they teach, not numbered), and the description that becomes its index
-        // line. The empty already-shown set and the withheld archive are this
-        // caller's needs rather than `find`'s: nothing printed above this block
-        // needs deduping against, and a retired record is not a fact the store
-        // still answers with, so it is no reason to reconsider a write. The
-        // order and the cap are asked of the channel rather than applied to its
-        // answer, for the reason its own options comment gives.
-        semanticChannel(name + ': ' + description, null, new Set(), false,
+        // The query is the record as the author has stated it, composed by the
+        // index rather than here: embedText is the composition every record in
+        // the index was embedded through, so the query is spelled the way the
+        // corpus it is ranked against is, the name's rewrite into words included
+        // (a memory name is a fact-bearing phrase in this store, records being
+        // named for what they teach rather than numbered, and the rewrite is
+        // what puts those words in front of the model as words). The second
+        // component differs by design: the index embeds a record's body, where
+        // this caller holds the description that becomes its index line, so one
+        // composition narrows the gap between query and corpus rather than
+        // closing it. The empty already-shown set and the withheld archive are
+        // this caller's needs rather than `find`'s: nothing printed above this
+        // block needs deduping against, and a retired record is not a fact the
+        // store still answers with, so it is no reason to reconsider a write.
+        // The order and the cap are asked of the channel rather than applied to
+        // its answer, for the reason its own options comment gives.
+        semanticChannel(mi.embedText(name, description), null, new Set(), false,
             { rawOrder: true, limit: NEIGHBOURS_SHOWN, signal }));
     if (raced.expired) {
         process.stderr.write('memq: neighbours not checked (' + neighbourTimeoutCause()

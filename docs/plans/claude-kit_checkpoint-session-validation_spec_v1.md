@@ -127,6 +127,50 @@ leashed-path tests stay green with the caller id supplied.
 Build: touches `plugins/claude-kit/hooks/`, so the build stamp refresh runs
 before the section's gate (operator-tier memory).
 
+### 2. The section loop names the refusals its two checkpoint steps can meet
+
+Model: opus
+Locus: inline
+
+`plugins/claude-kit/skills/executing-work/SKILL.md`, step 0 and step 8, describe
+`clear` as a no-op when nothing is open and `open` as a no-op refusal when no
+goal is armed, and say step 0 clears a leftover checkpoint regardless. After
+section 1 both verbs also refuse at exit 1 to a caller that is not the session
+the checkpoint blesses, and to every caller over a goal state that is present
+but cannot be read or a checkpoint path holding something other than a regular
+file. The case a run actually meets is a run resumed under a new session id
+against a goal still bound to the dead one: both steps exit 1 until the goal is
+re-armed, which rebinds it, and that remedy lives today only in the CLI's
+stderr.
+
+- Step 0 gains one clause: the clear refuses, at exit 1, over a record that is
+  another session's boundary or over a state it cannot read, naming the remedy
+  (re-arm the goal where the run resumed under a new session id; move aside by
+  hand what is not a checkpoint file), and the no-op reading stays for the
+  absent path.
+- Step 8 gains one clause: the open refuses the same way to a caller the
+  checkpoint would not bless, with the same re-arm remedy, and the
+  "regardless" claim is narrowed to a record the calling session may clear.
+- Both clauses state current fact and never the change; no em or en dashes.
+- `test/size-budget.json`: raise the skill's word cap to its new count.
+
+Files in scope: `plugins/claude-kit/skills/executing-work/SKILL.md`,
+`test/size-budget.json`.
+
+Tests: `node --test test/size-ratchet.test.js test/doctrine-parity.test.js`
+(the ratchet reads the raised cap; parity confirms the skill carries no
+doctrine-mirrored block this edit could desynchronize). No new test: the
+edit is prose in a skill with no behavior of its own.
+
+Acceptance: each step carries its clause; a reader of step 0 or step 8 who
+meets exit 1 on a resumed run finds the re-arm remedy in the step itself;
+the size-ratchet lane is green at the raised cap.
+
+Appended under executing-work's out-of-scope route while section 1 was in
+review: two section 1 reviewers named the skill as describing behavior the
+section changed, the file sits outside section 1's directory so the fold
+predicate fails, and the surface serves this plan's goal.
+
 ## Out of scope
 
 - The role-boundary markers and the `consent` verb: already session-scoped.
@@ -170,3 +214,11 @@ Docs: docs/architecture.md clear passage also names the refusal over a checkpoin
 Not adopted from round 4: the hard refusal of open on an unresolvable caller (spec decision, fourth time raised); holding the caller id to the binding's UUID shape (premise false: normalizeState shapes armingSession only, kit-goal-lib.js:277, and the suite's non-UUID fixtures bind green); the upgrade-time note on pre-update records (bounded, documented, to the Chapter). Carried to the close gate: the adversarial reviewer named seven further test files whose subjects include a changed file (doctrine-parity, memq-grant, seat-stop, memory-sync, kit-goal-lib, doctor-encoding, memory-session); kit-goal-lib ran in the lane and the rest run beside the whole gate before the push.
 Tree: the twelve-file unstaged set is this session's; nothing staged; peer KIT: Expert holds nothing dirty.
 Next: adjudicate round 5, fixes if any (a further round only where a fix reaches the guard again), spec-matches-reality (Files in scope widened to the twelve files; clear's refusal names no consent pointer; the no-id clear carve-out; the unreadable-goal and kind refusals), memq unstamped, Chapter 1, whole gate under claim, commit and push, checkpoint, finishing-work.
+### Interim board 5 - 2026-09-06
+Section 1 stage: five fix rounds landed (round 5: J1 to J9, the bound branch answering nobody's boundary for a record whose recorded owner is not the binding, the checkpoint-path refusal and the status verb printing a phrase per reading instead of a raw token or a false no-goal, the 'file' goal phrase covering a state file the normalizer rejects, the record leg answering nobody where the opener is null, the third boundary-note cause pinned, two test comments restated as present fact, the no-open pin made a regex over the printed CLI path with a speaking control, the file header pointing at the guard as the owner of the nobody's-boundary enumeration), verified on the implementer's eight-file lane 853/853/0 exit 0 read from .kit/verify/s1-fix5-lane.exit (baseline before the round 849/849/0; the four added are the round's tests; worktree at HEAD 1ac8f3e with the section unstaged, 2026-09-06 about 13:55; red-first probe exit 1 with four of five new tests red against the pre-edit hook, restored byte-identical). Round 5 verdicts: adversarial CHANGES_REQUIRED 0/2/9, blind CHANGES_REQUIRED 0/2/4, security CLEAR 0/0/3, all at opus effort max via Workflow (first-turn reading claude-opus-5 on every transcript, 0 synthetic). Both Majors were curated-doc drift and are fixed: docs/architecture.md's boundary-note paragraph now describes the note as shipped (three no-longer-honored causes, the status / goal-CLI status / consent --session chain, no open remedy and why), its clear passage's nobody's list carries the ownerless, owner-not-opener and bound-owner states, and its refusal sentence splits the non-regular-file refusal from the transient readings; docs/security-model.md's invariant paragraph names the two composed CLI paths and its accepted-risk paragraph names the manual recovery a planted non-regular file requires; both CRLF by byte count, no dashes.
+Live dispatch: review round 6 (adversarial, blind, security at opus max) over the round 5 fix delta, brief at .kit/verify/s1-r6-brief.md, owed because J1 and J7 touched the guard.
+Scope change: section 2 appended above Out of scope (executing-work SKILL.md step 0 and step 8 wording naming the caller-scope refusals and the re-arm remedy, plus its size cap; inline, prose only), named on the relay at the moment of the append; two round 5 reviewers named the file, which sits outside section 1's directory, so the fold predicate failed.
+Not adopted from round 5: an age test in the bound branch (a run resumed under a new session id is a bystander until re-arm by design, and the refusal names that remedy; the blind reviewer's Major); a fallback from an unresolvable caller to the binding (spec decision, fifth time raised; the blind reviewer's second Major, whose premise the round 5 security reviewer answered by confirming CLAUDE_CODE_SESSION_ID from its own dispatched shell); the interactive note's '" boundary' pin spelling (adjacent, unadopted, named by the implementer).
+Surprise: the checkpoint opened at the interim board 4 commit was no longer on disk when the gate's seventh held offer was reported (status: no compact checkpoint open, last decision deny-boundary no-checkpoint); the installed kit (ab815dceddca) is what this session runs, not the worktree, and nothing this session ran clears a checkpoint outside temp fixtures; unexplained, recorded for the Chapter.
+Tree: the twelve-file unstaged set plus the plan doc is this session's; nothing staged; peer KIT: Expert holds nothing dirty.
+Next: adjudicate round 6, fixes if any (a further round only where a fix reaches the guard again), spec-matches-reality on section 1 (Files in scope the twelve files; clear's refusal names no consent pointer; the no-id clear carve-out; the unreadable-goal and kind refusals; the owner leg under a binding), memq unstamped, Chapter 1, then section 2 inline, whole gate under claim, commit and push, checkpoint, finishing-work.

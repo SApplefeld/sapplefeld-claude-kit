@@ -1,6 +1,6 @@
 # The corpus is read by cold probes at the tier that runs it, and a wording change that moves an answer fails a test
 
-Status: Ready
+Status: In Progress
 Commit Model: Commit-and-Push
 Created: 2026-09-01
 
@@ -49,6 +49,12 @@ Acceptance: the runner reproduces the pilot's three verdicts on the precedence p
 
 Acceptance: both skills carry the hook-in in one sentence each, pointing at the runner rather than restating it; the parity and shape suites green at baseline; suite delta against a recorded baseline.
 
+### 4. The size ratchet classifies the probe set. Model: sonnet
+
+`plugins/claude-kit/scripts/kit-size.js`: the measured corpus gains a `test/probes/` root, measured in words with the shape `test/probes/<name>.md`, listed ahead of the `test/` root because the classifier takes the first root holding a path; `test/size-budget.json` gains a cap per probe file and for `test/probes/README.md`, each at the file's current word count; `test/size-ratchet.test.js` extends whatever pins the root roster, its count, or the classifier's coverage, with a pin that a `test/probes/*.md` path classifies as words and a `test/probes/<name>.txt` path reds as unclassified. Appended by section 3's review round: a tracked `test/probes/*.md` matches no shape under the `test/` root and reds the ratchet as unclassified the moment section 1's files are tracked, and no section listed the classifier.
+
+Acceptance: `classify` over every path under `test/probes/` returns them as word-measured entries with none unclassified (proved in-process, since the check verb reads tracked files and the probe set is untracked until the section commit); `node --test test/size-ratchet.test.js` green; `node plugins/claude-kit/scripts/kit-size.js check` green; suite delta against a recorded baseline.
+
 ## Out of Scope
 
 - Ruling on the contested moments themselves: the backlog item from the precedence plan carries those asks.
@@ -63,3 +69,13 @@ Acceptance: both skills carry the hook-in in one sentence each, pointing at the 
 - `sidecar/batteries/`: the frozen-battery precedent the probe set's freeze-at-ruling rule follows.
 
 ## Chapters
+
+### Interim board 1 - 2026-09-06
+
+Run start: the header read `Status: Ready` and now reads `In Progress`, normalized at run start per executing-work. The pilot's original cold-reader prompt is not recoverable on this machine (four scans over every kit-project transcript found no dispatch carrying it), so the runner's template is written from the precedence plan's Chapter description of the pilot; declared route (b), section 2. The reader isolation model is declared route (b), section 2: the headless CLI on this box (2.1.263) authenticates by OAuth with no API key, so `--bare` is unavailable and the cold shape is a scratch `CLAUDE_CONFIG_DIR` holding only the credentials file, confirmed or corrected by section 2's isolation control. Section 4 appended by section 3's review round (approval drift, recorded here): the size ratchet reds a tracked `test/probes/*.md` as unclassified, and no section listed the classifier.
+
+Sections in flight: 1 (probe set, implementer-opus, dispatched 21:58Z, running; nine probe files and the parser are on disk). 2 (runner, implementer-opus, dispatched 21:58Z, running; run.mjs, template.md and probe-file.mjs import on disk). 3 (hook-ins, implementer-sonnet, DONE at 22:05Z; round 1 at opus/high via Workflow returned adversarial CHANGES_REQUIRED 0/8/4 and blind CHANGES_REQUIRED, converging: the finishing-work sentence mandated a repo-local command in a portable skill, added a field to the Gate line executing-work owns, sat unplaced in step 5's written order, dropped Decision 2's reports-never-blocks; the writing-skills sentence collided with the several-reps and home/-shape neighbours and ran past forty words. Both sentences rewritten inline by the main session at 22:15Z; lane `node --test test/doctrine-parity.test.js test/size-ratchet.test.js test/hook-canary.test.js` 199/199/0 exit 0, size check exit 0 with caps finishing-work 16860 to 16945 and writing-skills 2608 to 2698; fix-delta adversarial review at opus/high dispatched 22:21Z, running. Ruling: section 3's commit is held behind sections 1 and 2's commits so the pointers never ship ahead of their targets). 4 (size root, implementer-sonnet, dispatched 22:21Z, running).
+
+Gate baseline: whole suite 3219 tests / 3209 pass / 1 fail / 9 skipped, exit 1, measured 2026-09-06 at plan 1's handoff gate on this main checkout at b4e249b with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md, the one red being test/memory-session.test.js "a pinned directory too long to name faithfully stands the session down", permanent on this box.
+
+Rulings adopted since the last boundary: probe rulings are `proposed` until the operator's batched brief is answered, which the plan makes the operator's; the brief goes out on the relay once section 1 reports and the set freezes at the ruling. Next per section: 1 and 2 await their reports, then verification, then fable review pairs (security beside them on 2); 3 awaits its fix-delta review, then closes after 1 and 2 commit; 4 awaits its report, then opus reviewers at high.

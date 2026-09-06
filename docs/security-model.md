@@ -441,9 +441,10 @@ own spelling taken from the store, so the model supplies the ordering and one cl
 an identifier. That clause is the only model-authored text on the surface, length-bounded and
 reduced to short printable ASCII with the double quote barred, on the same screen every other
 untrusted string this CLI prints passes through. The block rides under the same provenance
-fence as the semantic block, naming itself as model-judged and advisory. The two authoring verbs'
-write-time neighbours check never reaches this channel: it runs the local semantic block alone, so a
-record's name and description stay on the machine at a write.
+fence as the semantic block, naming itself as model-judged and advisory. Neither the two authoring
+verbs' write-time neighbours check nor the decay scan's neighbour-pairs block reaches this
+channel: each reads the local index alone, so a record's name and description stay on the
+machine at a write and at a scan.
 
 Failure is silent about nothing and fatal to nothing. A missing config stands the channel down
 without a word, because a line every find printed would be noise about a channel nobody

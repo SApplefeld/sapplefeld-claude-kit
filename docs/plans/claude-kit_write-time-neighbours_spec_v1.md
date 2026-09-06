@@ -95,10 +95,11 @@ Files in scope: `plugins/claude-kit/scripts/memq.js`, `test/memq.test.js`, `test
 Tests: lock the exclusion of pointed pairs and the cross-tier silence; lock that nothing moves. The expensive failure is a pair nominated that the store already answered, which would teach a reader to skim the block.
 
 ### 3. The skill states both, and tells a project-tier author to search first. Model: sonnet
+Locus: inline (writes under `docs/`, so the main thread authors it at the session's own model)
 
-In `plugins/claude-kit/skills/memory-system/SKILL.md`: the `add-type` and `add-operator` rows gain one sentence each on the neighbours block, its floor, its stderr-only shape, its embedder-absent line and its fleet skip; the `decay-scan` row gains the pairs block; the four-remedies paragraph gains the sentence that the scan nominates unlinked live pairs and that the remedy is the author's; the decay-lifecycle section's seeds-not-measurements sentence names `NEIGHBOUR_FLOOR` beside the thresholds it already covers; and the operator-tier and project-type-tier sections' authoring paragraphs gain the instruction to read the neighbours block before the write lands, with the project tier's own paragraph telling an author to run `memq find` in the words of the fact before a Write, since no verb sees that write. The skill is a measured file under the size ratchet, so its cap is raised in this section's diff; `docs/` is not measured.
+In `plugins/claude-kit/skills/memory-system/SKILL.md`: the `add-type` row gains a passage on the neighbours block, its floor, its stderr-only shape, its embedder-absent line and its fleet skip, and the `add-operator` row one sentence pointing at it; the `decay-scan` row gains the pairs block; the four-remedies paragraph gains the sentence that the scan nominates unlinked live pairs and that the remedy is the author's; the decay-lifecycle section's seeds-not-measurements sentence names `NEIGHBOUR_FLOOR` beside the thresholds it already covers; and the operator-tier and project-type-tier sections' authoring paragraphs gain the instruction to read the neighbours block before the write lands, with the project tier's own paragraph telling an author to run `memq find` in the words of the fact before a Write, since no verb sees that write. The skill is a measured file under the size ratchet, so its cap is raised in this section's diff; `docs/` is not measured.
 
-Files in scope: `plugins/claude-kit/skills/memory-system/SKILL.md`, `test/size-budget.json`, `docs/fleet-integration.md`, whose account of the prompt-free grant's rationale is absent rather than false on the point section 1 changed (the two authoring verbs now reach the embedder load the grant's reasoning once withheld to `find` alone, and stand down on bare `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT`), so amendment 1 lets it travel here and it would otherwise sit in no section's scope.
+Files in scope: `plugins/claude-kit/skills/memory-system/SKILL.md`, `test/size-budget.json`, `docs/security-model.md` for the sentence saying only the authoring verbs' check stays off the model endpoint, absent rather than false on the pairs block and travelling here under amendment 1, `docs/fleet-integration.md`, whose account of the prompt-free grant's rationale is absent rather than false on the point section 1 changed (the two authoring verbs now reach the embedder load the grant's reasoning once withheld to `find` alone, and stand down on bare `KIT_MEMORY_ROOT` or `KIT_EMBEDDER_ROOT`), so amendment 1 lets it travel here and it would otherwise sit in no section's scope.
 
 ### 4. The index honours the cancellation the neighbours check sends, and exports the composition it owns. Model: opus
 
@@ -598,3 +599,54 @@ reviewers the only other load known, reported rather than measured.
 Next: 3. The skill states both, and tells a project-tier author to search first. Then 4 and 5 in order. Section 3
 must not duplicate the one-clause gloss of the pairs block already in the skill's `decay-scan` row, and gains
 `docs/fleet-integration.md` for the grant rationale.
+
+### Chapter 3 - 2026-09-06
+
+Completed: 3. The skill states both, and tells a project-tier author to search first
+Implemented By: main session (`Locus: inline`, the section writing under `docs/`; the session's own model, Fable)
+Metrics: review rounds 3 (the pair, then one adversarial lens over each fix delta); NEEDS_CONTEXT 0; escalations 0;
+consults 0
+Decisions / Surprises: The section carried its `Model: sonnet` on the heading line and no locus, so a `Locus: inline` line
+was added under it, and its `Files in scope:` widened to `docs/security-model.md` for the sentence saying only the
+authoring verbs' check stays off the model endpoint (absent on the pairs block, travelling under amendment 1); both
+edits sit above `## Chapters` and are approval drift by construction. The spec said the two authoring rows gain one
+sentence each; the `add-type` row took a passage and the `add-operator` row one sentence pointing at it, and the spec
+text was reconciled. The `decay-scan` row's one-clause gloss of the pairs block was replaced in place by the full
+statement rather than kept beside it, per Chapter 2's constraint. Two lenses in two rounds attributed a reversed
+`superseded` direction to the spec's Approach and section 1 body; both sentences were read and say the token is
+labeled as the search labels it, so the spec was left alone and only the skill's clause was corrected, twice, the
+second time for an ambiguous parse rather than a wrong claim. Chapter 1's own line carries the reversed wording and
+stays, Chapters being journal. The KIT: Expert seat worked the same checkout throughout: it committed and pushed
+6812993 and 3f375b6 under two announced windows (a Defender script, a new reviewer-uncap plan and two index lines),
+cleared here since neither touched a file of this section, and left a third window's files dirty in the tree during
+this section's gates, named on the Gate line; none of this section's five files carried content this session did not
+write, re-read before staging.
+Assumptions: (decided 2026-09-06, section 3) route (b): `NEIGHBOUR_FLOOR`'s numeric value is not restated in the skill,
+the reader being sent to memq's source for it, on amendment 2's reasoning that a value kept elsewhere is unkept here.
+Review Findings: Round 1 (adversarial and blind, both at fable, effort high): the add-type row's claim that every line
+carries the no-block suffix (a Major on both lenses), its claim that the hit lines are drawn from the archive (a Major
+on both), and the project-tier instruction equating `find`'s semantic block with the neighbours check (a Major on the
+blind lens); Minors on the superseded and store fields, the conditional closing line, the machine-scope reasoning, a
+twice-stated stand-down, the scan row's not-checked causes, the pinned mark's plurality, the security document's
+mechanism wording and wrap, the fleet document's per-tier lines and creation path, and a past-tense seeds sentence.
+All fixed. Round 2 (one adversarial lens over the delta): the `superseded` token described backwards (Major), the
+lexical dedupe that withholds a `find` hit from the semantic block (Major); Minors on the machine-scope condition, a
+missing failure cause, the two withheld-pair reasons, the count's wording and the block's shape. All fixed. Round 3
+(one adversarial lens over that delta): the `superseded` clause readable as the pointer's mirror (Major, wording); the
+two sweep lines, the conditional fence and the untiered failure line (Minors). All fixed in a delta of four clauses
+read against the emitting lines by this session and not lensed again, an author re-read rather than a round.
+blind: reviewed the skill and the budget file; docs/ paths withheld.
+Stamps: adjudicated 2, stamped 1 (`forward-resource-arrangements-into-dispatch-briefs`, operator tier: every brief
+carried the peer's heavy-process claim as a binding workspace constraint); skipped 1 (`vm-bringup-defender-exclusions`,
+nudged by a diff of a peer's file this section never used).
+Gate: Targeted lane `node --test test/size-ratchet.test.js test/doctrine-parity.test.js` (the two tests reading the
+changed files): 149 tests, 149 passing, 0 failing, 0 skipped, exit 0 read from the run's own marker; the same lane read red three times mid-section on this skill's word cap,
+lifted each time to the measured count (28224 to 28980), and once on two files of the Expert seat's in-flight window,
+which that seat trimmed. Whole gate `node --test test/*.test.js`, run before the push because main is the install
+surface: 3165 tests, 3155 passing, 1 failing, 9 skipped, exit 1, 451 s, against the section-2 close baseline 3165/3155/1/9 at exit 1; the one failure is this box's
+standing red, `a pinned directory too long to name faithfully stands the session down`. Measured on the main checkout at HEAD e00d1e3 with no foreign dirty file beside this
+section's five dirty files. Contention lane: the heavy-process claim read
+before every spawn; the AI-OS: Worker seat held it for a section-8 lane and then a section-9 implementer, and this
+session's whole gate started only once that claim had aged past its estimate, under a claim of its own, released after.
+Next: 4. The index honours the cancellation the neighbours check sends, and exports the composition it owns. Then 5.
+Commit Model: Commit-and-Push

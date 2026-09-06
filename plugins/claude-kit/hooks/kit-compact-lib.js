@@ -189,9 +189,9 @@ function sameSessionId(a, b) {
 // status report uses the reason to say why a checkpoint on disk gates
 // nothing. A checkpoint counts only when its recorded plan equals the armed
 // goal's plan, its recorded boundSession equals the goal's current
-// boundSession, and its openedAt is fresh (parseable, within the age bound that
-// applies to it, and no further than CHECKPOINT_FUTURE_SKEW_MS into the
-// future).
+// boundSession, its recorded openedBy names that same session, and its openedAt
+// is fresh (parseable, within the age bound that applies to it, and no further
+// than CHECKPOINT_FUTURE_SKEW_MS into the future).
 //
 // Which age bound applies takes TWO facts, not one. The record's own
 // pendingOffer flag says an offer was being held when the boundary was
@@ -208,6 +208,26 @@ function sameSessionId(a, b) {
 // cannot read the state to answer it, narrows the window rather than widening
 // it.
 //
+// The record's openedBy is held to the same session, which is the read-side
+// half of the caller validation the checkpoint CLI's write door enforces. Two
+// records fail it: one an older kit wrote, which carries no openedBy at all,
+// and one a bystander opened while the goal was unbound and a later claim
+// adopted, whose owner is the leash holder while its opener is somebody else.
+// Neither is a boundary the leash holder declared, so neither blesses its
+// compaction.
+//
+// The session compared against is the goal's binding rather than a compacting
+// session passed in, and the two are the same value everywhere it matters: this
+// clause sits below the wrong-session leg, so cp.boundSession already equals
+// goal.boundSession by the time it runs, and the PreCompact gate reaches the
+// boundary verdict only for a session that either already holds that binding or
+// has just written it (kit-compact-gate.js's three boundary call sites). The
+// CLI's status report, the Stop hook's queue advance and the deferral nudge ask
+// the same question of the same binding. Deriving it here rather than taking it
+// as an argument is what keeps a caller from omitting the subject and getting
+// the clause skipped, which would be a fail-open default on the one leg that
+// exists to refuse a record.
+//
 // Returns { ok:true, reason:null } on a match, else { ok:false, reason } with
 // reason naming the first failed clause in evaluation order:
 //   'no-checkpoint'  cp is missing or carries no plan string
@@ -215,6 +235,9 @@ function sameSessionId(a, b) {
 //   'wrong-plan'     the plans differ (a stale file from a prior run)
 //   'wrong-session'  the bound sessions differ (an orphan from a crashed run,
 //                    or an unbound side on either record)
+//   'wrong-opener'   openedBy is absent, or names a session other than the one
+//                    the record is bound to (an older kit's record, a hand
+//                    edit, or a bystander's boundary that a claim adopted)
 //   'no-timestamp'   openedAt is missing or does not parse as a date
 //   'expired'        openedAt is older than the bound that applied:
 //                    CHECKPOINT_PENDING_MAX_AGE_MS when the record claims
@@ -235,6 +258,11 @@ function checkpointMatches(cp, goal, nowMs, pendingCorroborated) {
     }
     if (cp.plan !== goal.plan) return { ok: false, reason: 'wrong-plan' };
     if (!sameSessionId(cp.boundSession, goal.boundSession)) return { ok: false, reason: 'wrong-session' };
+    // The opener is read through the storage rule the writer stores it under, so
+    // a value that rule cannot support (an empty string, a number a hand edit
+    // left) reads as no opener rather than as one nothing can ever match.
+    const opener = storableCheckpointOwner(cp.openedBy).value;
+    if (!sameSessionId(opener, goal.boundSession)) return { ok: false, reason: 'wrong-opener' };
     if (typeof cp.openedAt !== 'string') return { ok: false, reason: 'no-timestamp' };
     const opened = Date.parse(cp.openedAt);
     if (!Number.isFinite(opened)) return { ok: false, reason: 'no-timestamp' };
@@ -274,7 +302,7 @@ function regularFileSize(target) {
     return st.isFile() ? st.size : null;
 }
 
-// The checkpoint's read cap. The writer produces four short fields, a couple of
+// The checkpoint's read cap. The writer produces five short fields, a couple of
 // hundred bytes, and never grows. Anything past 64 KB is not something this
 // wrote, and reading it whole on a hook path that runs before any verdict is
 // emitted is cost with nothing to gain.
@@ -411,25 +439,41 @@ function atomicTmpPath(target) {
 // than true stores false, so a caller with no answer records the conservative
 // one.
 //
+// openedBy records WHICH SESSION declared this boundary, which the match rule
+// requires to equal the owner: the read-side half of the caller validation the
+// CLI's write door enforces, and what catches a record an older kit wrote or a
+// hand edit made. It is required, with no default: every caller of this writer
+// knows which session is declaring the boundary, and a default standing in the
+// owner's value would store a real-looking opener for a caller that simply
+// omitted the subject, on the one field that exists to refuse a record. So an
+// omitted or null opener is a refusal here rather than a record the match rule
+// can never tell from a genuine declaration.
+//
 // The atomic write, the unpredictable tmp name and the cleanup that removes
 // only what this writer created are writeJsonAtomic's, reached through
 // putCheckpoint below, which owns every field this file stores.
-function writeCheckpoint(cwd, planRel, boundSession, pendingOffer) {
+function writeCheckpoint(cwd, planRel, boundSession, pendingOffer, openedBy) {
+    if (openedBy === undefined || openedBy === null) {
+        return { ok: false, reason: 'opening session is missing' };
+    }
     return putCheckpoint(cwd, {
         plan: planRel,
         boundSession,
+        openedBy,
         openedAt: new Date().toISOString(),
         pendingOffer: pendingOffer === true
     });
 }
 
-// The storage rules the checkpoint's owner field is held to, as { ok, value }:
-// a string, non-empty, within the 128-character cap and free of control
-// characters, which is the shape bindSession stores a binding under, or an
-// explicit null for an unbound goal. Absent and null are the same answer, so a
-// caller with no owner records null rather than a coerced string. One
-// definition, because two writers store the field (an open and an adoption) and
-// a rule spelled twice is a rule one of them ends up spelling loosely.
+// The storage rules a session id on the checkpoint record is held to, as
+// { ok, value }: a string, non-empty, within the 128-character cap and free of
+// control characters, which is the shape bindSession stores a binding under, or
+// an explicit null for an unbound goal. Absent and null are the same answer, so
+// a caller with no owner records null rather than a coerced string. One
+// definition, because two writers store these fields (an open and an adoption),
+// there are two of them (the owner and the opener), and the match rule reads the
+// opener back through this same rule, so a value the writer would refuse can
+// never sit in a field the comparison is made on.
 function storableCheckpointOwner(value) {
     if (value === undefined || value === null) return { ok: true, value: null };
     if (typeof value !== 'string' || value === '' || value.length > 128
@@ -445,7 +489,8 @@ function storableCheckpointOwner(value) {
 // them, so a second writer cannot store a path or an owner the first one would
 // have refused. The plan goes through kit-goal-lib's normalizePlanArg (control
 // characters and any path escaping cwd are refused, and the NORMALIZED form is
-// what gets stored), and the owner through the storage rules above.
+// what gets stored), and the owner and the opener through the storage rules
+// above, which is the same rule the match rule reads the opener back by.
 //
 // verify is optional and is handed straight to writeJsonAtomic, which runs it in
 // the last moment before the rename with the temporary file already written:
@@ -464,12 +509,17 @@ function putCheckpoint(cwd, state, verify) {
     if (!owner.ok) {
         return { ok: false, reason: 'bound session is invalid' };
     }
+    const opener = storableCheckpointOwner(state.openedBy);
+    if (!opener.ok) {
+        return { ok: false, reason: 'opening session is invalid' };
+    }
     const target = checkpointPath(cwd);
     try {
         fs.mkdirSync(path.dirname(target), { recursive: true });
         const published = writeJsonAtomic(target, {
             plan,
             boundSession: owner.value,
+            openedBy: opener.value,
             openedAt: state.openedAt,
             pendingOffer: state.pendingOffer === true
         }, verify);
@@ -587,15 +637,28 @@ function checkpointAdoptable(cp, goal) {
 // grants no freshness, a record already past its bound stays expired, and the
 // pending flag is copied as recorded rather than raised.
 //
+// openedBy is carried over verbatim for the same reason and one more: an
+// adoption answers who OWNS a boundary, never who declared it. So a record
+// carrying no opener stays without one and the match rule refuses it, which is
+// the belt-and-braces check standing rather than a gap, since a record with no
+// opener is one an older kit or a hand edit produced and nothing here can say
+// whose boundary it was; and a bystander's boundary declared while the goal was
+// unbound is adopted like any other and then refused on its opener, so the
+// leash holder's compaction is never blessed by a boundary it did not declare.
+//
 // The write is abandoned rather than published if the record on disk moved
 // between the read and the rename, which is not the single-writer case the gate
 // assumes elsewhere: that serialization runs through the one bound session, and
 // this runs precisely while there is none, so a checkpoint CLI open racing this
 // adoption is a real ordering. The verify runs in writeJsonAtomic's last moment
-// before the rename, and comparing the three fields that identify the record is
-// enough, because every writer of this file writes all four at once: a record
-// whose plan, opened timestamp and ownerlessness are unchanged is the record
-// that was read. The verify narrows the window rather than closing it: there is
+// before the rename, and it compares the fields that identify the record, which
+// every writer of this file writes at once: a record whose plan, opened timestamp,
+// opener and ownerlessness are unchanged is the record that was read. The opener
+// is one of them because it is the only field two racing opens need differ in:
+// both run while the goal is unbound, so both record no owner and the same plan,
+// and two inside one millisecond record the same timestamp too, which would leave
+// the stale record republished over the newer one under the binding. The verify
+// narrows the window rather than closing it: there is
 // no lock, so a newer boundary landing before the verify reads survives, and one
 // landing between that read and the rename is overwritten. The residual is
 // bounded and fail-open, costing one further deferral rather than a lost plan.
@@ -613,14 +676,24 @@ function adoptCheckpoint(cwd, goal, sessionId) {
     const cp = readCheckpoint(cwd);
     const adoptable = checkpointAdoptable(cp, goal);
     if (!adoptable.ok) return { ok: true, adopted: false, reason: adoptable.reason };
+    // Read through the storage rule on both sides of the comparison below, so a
+    // record whose opener that rule reads as none matches one written without the
+    // field at all rather than counting as a different record.
+    const opener = storableCheckpointOwner(cp.openedBy).value;
     const written = putCheckpoint(cwd, {
         plan: goal.plan,
         boundSession: owner.value,
+        // Read through the storage rule rather than copied raw: a hand edit can
+        // leave a value the writer would refuse, and passing it on would fail
+        // the whole adoption instead of adopting with no opener, which is the
+        // outcome the header describes and the one the match rule then refuses.
+        openedBy: opener,
         openedAt: cp.openedAt,
         pendingOffer: cp.pendingOffer === true
     }, () => {
         const now = readCheckpoint(cwd);
         return !!now && now.plan === cp.plan && now.openedAt === cp.openedAt
+            && storableCheckpointOwner(now.openedBy).value === opener
             && storableCheckpointOwner(now.boundSession).value === null;
     });
     if (!written.ok) return { ok: false, adopted: false, reason: written.reason };
@@ -849,11 +922,17 @@ const GATE_VERDICTS = ['allow', 'deny-boundary', 'deny-interactive'];
 // channel a model reads, and the charset and length caps alone would let
 // arbitrary prose through; checking the value against the list it is drawn
 // from costs nothing and bounds it to this file's own words.
+//
+// The list is paired with the match rule's own reason codes by hand, and
+// gateRecord drops an unpaired one to null, which would land a deny with no
+// clause on it; the list is exported so a pin can read those codes off
+// checkpointMatches and hold them against this one.
 const GATE_REASONS = [
     'not-auto', 'external-engine', 'no-session', 'no-goal', 'bystander',
     'automation', 'checkpoint', 'valve', 'illegible',
     'role-boundary', 'operator-consent',
-    'no-checkpoint', 'wrong-plan', 'wrong-session', 'no-timestamp', 'expired', 'future'
+    'no-checkpoint', 'wrong-plan', 'wrong-session', 'wrong-opener', 'no-timestamp',
+    'expired', 'future'
 ];
 
 // A string safe to store and to print back: printable ASCII, length-capped,
@@ -4040,7 +4119,7 @@ module.exports = {
     coordinatorRoot, coordinatorDir, registryField, sanitizeForOutput,
     readRegistryEntryText, writeRegistryEntryAtomic,
     projectHoldsSessionTranscript, sessionTranscriptPath, usableSessionId,
-    gateStatePath, gateLogPath, readGateState, readGateStateResult, recordGateDecision,
+    gateStatePath, gateLogPath, readGateState, readGateStateResult, recordGateDecision, GATE_REASONS,
     gateEpisodeOpen, pendingOfferCorroborated, checkpointOwner, recordEpisodeNudge,
     interactiveHoldOpen, INTERACTIVE_HOLD_REASONS, INTERACTIVE_HOLD_MAX_ENTRIES,
     holdNudgePath, holdNudgedAt, recordHoldNudge, readHoldNudgesResult, HOLD_NUDGE_TTL_MS,

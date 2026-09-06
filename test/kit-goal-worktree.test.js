@@ -145,8 +145,10 @@ function runGoalCli(args, cwd) {
     return spawnSync(process.execPath, [GOAL_CLI, ...args], { cwd, encoding: 'utf8', env: childEnv() });
 }
 
-function runCheckpointCli(args, cwd) {
-    return spawnSync(process.execPath, [CHECKPOINT_CLI, ...args], { cwd, encoding: 'utf8', env: childEnv() });
+function runCheckpointCli(args, cwd, session) {
+    const env = childEnv();
+    if (session !== undefined) env.CLAUDE_CODE_SESSION_ID = session;
+    return spawnSync(process.execPath, [CHECKPOINT_CLI, ...args], { cwd, encoding: 'utf8', env });
 }
 
 function runGate(payload) {
@@ -436,7 +438,7 @@ test('acceptance: a real `git worktree add` worktree holds a leash of its own', 
         assert.strictEqual(armed.ok, true, 'setup: goal should arm in the worktree');
 
         // Acceptance 1: the checkpoint CLI honours the worktree's own leash.
-        const opened = runCheckpointCli(['open'], tree);
+        const opened = runCheckpointCli(['open'], tree, SESSION);
         assert.strictEqual(opened.status, 0, 'open succeeds from the worktree; stderr: ' + opened.stderr);
         assert.ok(opened.stdout.includes(PLAN_REL), 'output names the plan: ' + opened.stdout);
         const cp = JSON.parse(fs.readFileSync(checkpointPath(tree), 'utf8'));
@@ -503,20 +505,20 @@ test('gate: the worktree\'s own leash gates it, and matching semantics do not wi
         // A matching checkpoint in the worktree's own .kit releases it: this
         // is the control that proves the two deny cases below fail on the
         // mismatch and not on state the gate never found.
-        assert.strictEqual(writeCheckpoint(w.tree, PLAN_REL, SESSION).ok, true, 'setup: checkpoint');
+        assert.strictEqual(writeCheckpoint(w.tree, PLAN_REL, SESSION, false, SESSION).ok, true, 'setup: checkpoint');
         const matched = runGate(gatePayload(w.tree, transcript));
         assert.strictEqual(matched.status, 0, 'matching checkpoint allows; stderr: ' + matched.stderr);
         assert.ok(!fs.existsSync(checkpointPath(w.tree)), 'the allow consumed the checkpoint');
 
         // Guard direction: where state is found changed; what matches did not.
-        assert.strictEqual(writeCheckpoint(w.tree, 'docs/plans/some-prior-run.md', SESSION).ok, true);
+        assert.strictEqual(writeCheckpoint(w.tree, 'docs/plans/some-prior-run.md', SESSION, false, SESSION).ok, true);
         const wrongPlan = runGate(gatePayload(w.tree, transcript));
         assert.strictEqual(wrongPlan.status, 2, 'a checkpoint for another plan still denies');
         assert.ok(wrongPlan.stderr.includes(DENY_NOTE), 'as a boundary deny: ' + wrongPlan.stderr);
         assert.ok(fs.existsSync(checkpointPath(w.tree)), 'and is not consumed');
         fs.rmSync(checkpointPath(w.tree));
 
-        assert.strictEqual(writeCheckpoint(w.tree, PLAN_REL, 'ses-99998888-aaaa-bbbb-cccc-000011112222').ok, true);
+        assert.strictEqual(writeCheckpoint(w.tree, PLAN_REL, 'ses-99998888-aaaa-bbbb-cccc-000011112222', false, 'ses-99998888-aaaa-bbbb-cccc-000011112222').ok, true);
         const wrongSession = runGate(gatePayload(w.tree, transcript));
         assert.strictEqual(wrongSession.status, 2, 'a checkpoint for another session still denies');
         assert.ok(wrongSession.stderr.includes(DENY_NOTE), 'as a boundary deny: ' + wrongSession.stderr);

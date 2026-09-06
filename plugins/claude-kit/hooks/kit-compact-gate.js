@@ -426,13 +426,14 @@ function latestConsumedTokens(transcriptPath) {
 // name, which for a session that just claimed the binding is its own id.
 //
 // Clause 5: a matching open checkpoint is the boundary firing. The match rule
-// (plan equals the goal's, boundSession equals the goal's, openedAt fresh; see
-// the header for why each leg exists) is checkpointMatches in
-// kit-compact-lib.js, single-sourced there because the CLI's status report
-// answers from the same rule and the two must never drift. Allow and consume
-// on a match, single-shot; a non-matching checkpoint reads as absent and is
-// left in place (the next CLI write replaces it, and the expired case in
-// particular must NOT be consumed: an expiry deny is not the boundary firing).
+// (plan equals the goal's, boundSession equals the goal's, openedBy equal to
+// that same session, openedAt fresh; see the header for why each leg exists) is
+// checkpointMatches in kit-compact-lib.js, single-sourced there because the
+// CLI's status report answers from the same rule and the two must never drift.
+// Allow and consume on a match, single-shot; a non-matching checkpoint reads as
+// absent and is left in place (the next CLI write replaces it, and the expired
+// case in particular must NOT be consumed: an expiry deny is not the boundary
+// firing).
 // A checkpoint opened while the goal was still unbound records boundSession
 // null, and every claim point adopts such a record for the session it binds
 // (adoptCheckpoint in the lib, called from this hook's two claim branches and
@@ -715,8 +716,14 @@ function main() {
 // drain before the process ends; each note carries no input data, the one
 // composed value being this hook's own installed directory (see CHECKPOINT_CLI
 // below), and each is distinct per deny kind so a transcript reader can tell
-// which deferral fired, there so the operator watching (PreCompact stderr reaches
-// the operator only, never the model) reads a deferral, not a failure. Any
+// which deferral fired, there so the operator watching reads a deferral, not a
+// failure. That audience is a dependency on the harness version this kit runs
+// on: PreCompact stderr is observed to reach the operator alone and never the
+// model, which the harness does not guarantee and can change upstream. The note
+// carries a runnable release chain, so an erosion of that reading would put a
+// command that ends a deferral in front of the model with nothing but the model's
+// own judgment between the two; a harness release that changes where this
+// channel lands is therefore a review trigger for what these notes may say. Any
 // exception, and any verdict value that is not a recognized deny, allows:
 // fail-open on every axis.
 // The gate ships as a plugin and runs in every project, so a repo-relative
@@ -731,16 +738,32 @@ function main() {
 // controls this file's path is already running this file's code. The CLI reads
 // its state from the cwd, so the remedy names the project directory too.
 const CHECKPOINT_CLI = __dirname.split('\\').join('/') + '/kit-compact-checkpoint.js';
+// The goal CLI, composed the same way and for the same reason. The note needs it
+// because the session id `consent --session` takes is printed there and nowhere
+// else the operator can reach: the checkpoint CLI's own status never prints the
+// binding, its checkpoint and gate-state reports naming no session id at all and
+// its hold-stamp report withholding ids by design, and the ids its marker legs do
+// print are each marker's own session, which is the session already holding a
+// release rather than the one an operator is looking to release. The goal CLI's
+// status prints the binding as "bound to session <id>".
+const GOAL_CLI = __dirname.split('\\').join('/') + '/kit-goal.js';
 const BOUNDARY_NOTE = 'kit-compact-gate: auto-compaction deferred to the next chapter close or interim board entry; '
     + 'this is the kit scheduling the compaction, not an error. Keep working. '
     + 'The hold runs until that boundary or the context safety valve fires near the token limit, whichever '
     + 'comes first; a skipped boundary costs a compaction landing at the worst point in the section, never a '
     + 'wedged run. Repeating for many turns within one section is expected. If it is still firing after a '
     + 'Chapter has closed, either the boundary checkpoint was never opened or the one that was opened is no '
-    + 'longer honored (an expired one, or one whose pending-offer flag no deferral episode vouches for): '
+    + 'longer honored (an expired one, one whose pending-offer flag no deferral episode vouches for, or one '
+    + 'a session other than the leash holder opened, which is also how every record written before the '
+    + 'opener was recorded reads): '
     + 'prompt the session to close its '
     + 'boundary, or check yourself from the project directory with node "' + CHECKPOINT_CLI
-    + '" status and open one at a true boundary with node "' + CHECKPOINT_CLI + '" open.';
+    + '" status, read that session\'s id from node "' + GOAL_CLI
+    + '" status, which prints the binding as "bound to session <id>", and release that session '
+    + 'yourself with node "' + CHECKPOINT_CLI
+    + '" consent --session <that session\'s id>. The release is the operator\'s path rather than open, '
+    + 'which is scoped to the calling session: from a shell of your own it has no session id to write, '
+    + 'and from another session\'s it would be declaring that session\'s boundary.';
 // The clause a boundary deny carries when this run's own ownerless boundary
 // record could not be given the binding. Two things produce that, an unwritable
 // .kit and a concurrent open replacing the record under the write, so it names

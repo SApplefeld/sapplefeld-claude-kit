@@ -217,9 +217,12 @@ function armingSessionClaims(state, sessionId) {
 // costs is that an arm made outside any session, which records no arming id,
 // answers false for the session that will claim on its typed text.
 //
-// This is the read-only spelling of the question, for surfaces that report or
-// remind rather than decide who binds: the two nudges call it. The claim points
-// do not, and that is not a second spelling of the rule but the same rule taken
+// This is the read-only spelling of the question, for surfaces that do not
+// themselves bind: the two nudges call it to report or remind, and the checkpoint
+// CLI's write verbs call it as a write door, where a caller holding the leash by
+// the arming route may open a chapter boundary over another session's record and
+// clear one. The claim points do not call it, and that is not a second spelling
+// of the rule but the same rule taken
 // apart, because they must know WHICH route claimed in order to bind on it and
 // to say so; both of their branches call armingSessionClaims above and
 // sameSessionId, which are the two legs this composes.

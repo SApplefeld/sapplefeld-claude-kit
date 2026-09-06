@@ -26,6 +26,69 @@
 // other plan as absent: with no goal armed there is nothing the file could
 // ever match, so the open refuses rather than writing a dead checkpoint.
 //
+// `open` and `clear` are scoped to the session the checkpoint blesses, which on
+// a checkout several sessions share is what keeps one seat out of another's
+// compaction timing. The blessed session is the leash holder where the goal is
+// bound and the record is one that holder could spend; the caller itself where
+// the goal is armed, unbound, and the caller is the session that armed it, which
+// is the other route a claim point binds on, so the session about to hold the
+// leash is never held off by a boundary a bystander banked in that window; and
+// otherwise the session the record on disk names as its opener. Each verb
+// refuses on its own terms. `clear` refuses every caller that is not that
+// session, and removes nothing, so a boundary another seat declared stands.
+// `open` reads the binding itself and refuses every caller that is not the leash
+// holder while the goal is bound, whatever is on disk; while it is unbound it
+// refuses only where a record for this plan already names another opener, since
+// an unbound goal blesses nobody yet and a run banking a boundary before its
+// leash reaches it is the case that permission exists for.
+//
+// Nobody's boundary is the state where nothing at the checkpoint path can ever
+// land a compaction, and any caller may clear or replace it. Which readings and
+// which record shapes come to that state is one enumeration, and it lives at
+// blessedCheckpointSession below, which is the rule the two write verbs, `open`
+// and `clear`, read the answer from: a file the gate could never spend for
+// anybody is nobody's boundary however the goal is bound.
+//
+// All of that reads the goal state, so a goal state that is present and cannot
+// be read leaves the question unasked rather than answered: whether any session
+// holds the leash is exactly what could not be read. Both verbs refuse over one
+// and touch nothing, the readings being the goal library's own kinds, each of
+// which UNREADABLE_GOAL_PHRASES below words for a reader.
+// Two readings are read as no goal armed and no others: a settled-absent goal
+// state, and a state file the reader could read that names no plan and no bound
+// session. Every other present state, an array or a shape carrying a binding
+// beside no usable plan among them, is the unreadable reading. A `clear` over an
+// absent checkpoint path is the exit-0 no-op before any of this, since it removes
+// nothing from anybody.
+//
+// `open` refuses a caller whose own session id cannot be resolved, the id being
+// what would scope the record it writes. `clear` refuses one only over a record
+// it is guarding: a clear over nothing, or over a record that is nobody's
+// boundary, needs no caller id, and the clear over nothing is the no-op the
+// chapter-close ritual runs before it knows whether a boundary is open. Both
+// verbs refuse over a checkpoint path they cannot read at all, a scope guard
+// being able to protect only a scope it can see, and the two readings there
+// differ in whom they refuse. Something that is not a regular file at that path
+// refuses every caller, the leash holder included: it never becomes a
+// checkpoint and a clear removes nothing from it, so attributing it to a
+// binding would answer the one caller who could act with a cleared-nothing
+// success line and everybody else with a boundary that is not there. A read the
+// filesystem refused or an lstat that could not answer refuses only where the
+// record is the thing that would answer the question, the binding answering
+// over one instead, since a lock lifts and the record beneath it may be the
+// leash holder's own. A goalless seat's own boundary is the `boundary` verb.
+//
+// The record carries its opener and the gate honors it only for the session it
+// names, which is the read-side half of the same rule and what catches a record
+// an older kit wrote or a hand edit made.
+//
+// Neither half is a boundary against a determined writer, and the design does
+// not claim one: the id is self-reported environment, nothing about the record
+// is secret, and the granularity is the harness session, so a subagent
+// dispatched by the leash holder reports that session's id and passes as it.
+// What the check prevents is the accident it was built for, a seat following its
+// own instructions writing into another seat's compaction timing.
+//
 // `boundary` is the goalless seats' analogue of `open`: it opens the
 // role-boundary marker for a role session (coordinator, expert, admin) at its
 // own banked-and-empty moment, scoped by session rather than by plan, so no
@@ -71,7 +134,7 @@ const path = require('path');
 // inside the try is what puts that failure back on this file's own channel. The
 // sibling hook compact-deferral-nudge.js defers its kit requires into the guards
 // that use them for the same failure mode.
-let readGoal, sessionHoldsLeash;
+let readGoal, sessionHoldsLeash, goalPathKind;
 let readCheckpointResult, writeCheckpoint, clearCheckpoint, checkpointMatches,
     checkpointAdoptable, storableCheckpointOwner,
     readGateStateResult, gateStatePath, gateEpisodeOpen, pendingOfferCorroborated, checkpointOwner,
@@ -98,7 +161,7 @@ let readCheckpointResult, writeCheckpoint, clearCheckpoint, checkpointMatches,
 let ORDINARY_MINUTES, PENDING_HOURS, BOUNDARY_HOURS, CONSENT_HOURS;
 
 function loadKitLibraries() {
-    ({ readGoal, sessionHoldsLeash } = require('./kit-goal-lib.js'));
+    ({ readGoal, sessionHoldsLeash, goalPathKind } = require('./kit-goal-lib.js'));
     ({
         readCheckpointResult, writeCheckpoint, clearCheckpoint, checkpointMatches,
         checkpointAdoptable, storableCheckpointOwner,
@@ -446,12 +509,13 @@ function usage() {
 
 // The calling session's own id, from the environment the harness sets for a
 // session's tool shell, or null when nothing usable is there. The variable is
-// an undocumented harness detail that can change or vanish upstream, and
-// inside a dispatched subagent's shell what it holds is unpinned (it may name
-// the subagent's session rather than the seat that dispatched it); the
-// refusal at the call sites is the designed degradation for both: where no id
-// is derivable, this CLI refuses to write a scoped marker rather than
-// writing an unscoped one.
+// an undocumented harness detail that can change or vanish upstream. A
+// dispatched subagent's shell carries the dispatching session's id rather than
+// one of its own, so a subagent running a scoped verb acts as the seat that
+// dispatched it, which is the granularity the file header states this guard has.
+// The refusal at the call sites is the designed degradation for the variable
+// vanishing: where no id is derivable, this CLI refuses to write a scoped marker
+// rather than writing an unscoped one.
 function callerSessionId() {
     return usableSessionId(process.env.CLAUDE_CODE_SESSION_ID);
 }
@@ -459,6 +523,15 @@ function callerSessionId() {
 function cmdOpen() {
     const goal = readGoal(process.cwd());
     if (!goal || typeof goal.plan !== 'string' || goal.plan === '') {
+        // A state file that is there and could not be read is not an absent one,
+        // and this refusal is the one place the difference is visible to a caller
+        // that has just been told nothing is armed. The reading is the guard's own
+        // spelling, so the two verbs answer the same question the same way.
+        const unreadable = unreadableGoalKind(process.cwd(), goal);
+        if (unreadable !== null) {
+            refuseUnreadableGoal(unreadable, 'nothing written');
+            return;
+        }
         emitErr('kit-compact-checkpoint: no kit goal is armed, so a checkpoint would never match; nothing written\n');
         // The goal family resolves its state from the current directory, and a
         // linked worktree is a directory of its own, so a goal armed in
@@ -469,6 +542,108 @@ function cmdOpen() {
         emitErr('kit-compact-checkpoint: the goal may be armed in another checkout: this CLI reads'
             + ' the goal state from the current directory (a linked worktree holds its own), so arm'
             + ' where you run\n');
+        process.exitCode = 1;
+        return;
+    }
+    // Who is asking. A checkpoint is one session's declaration that its chapter
+    // has closed, and the gate lands that session's next auto-compaction on it,
+    // so a caller who is not the session the record would bless is refused here
+    // rather than granted its slot: on a checkout several sessions share, an open
+    // run by the wrong seat otherwise declares a boundary on the leash holder's
+    // behalf and lands a compaction it never blessed, mid-chapter.
+    //
+    // A bound goal is the leash holder's, and only that session may declare its
+    // chapters. That is read off the binding directly and before the record,
+    // because it holds whatever is on disk: a stale wrong-plan record is nobody's
+    // boundary, so a guard that asked the file first would answer null over one and
+    // let a bystander's open through, writing the leash holder's plan and binding
+    // with the bystander as its opener, a record every session is refused at
+    // wrong-opener, and printing a success line at the caller least able to act on
+    // it. An UNBOUND goal blesses nobody yet, so the caller may bank a
+    // boundary of its own and becomes the opener: the record is adopted for
+    // whichever session claims the leash next, and the gate then holds it to this
+    // opener, so a boundary a bystander declared in that window releases nothing.
+    //
+    // What that permission cannot be is a licence to overwrite: an open here
+    // replaces the whole record, so a bystander opening over a boundary somebody
+    // else banked would leave the leash claimant a record it cannot spend (the
+    // adoption keeps the opener it finds, and the gate then refuses it), which is
+    // the deferral-to-the-safety-valve outcome this guard exists to prevent. So
+    // while the goal is unbound the record on disk is consulted too: a record for
+    // this plan naming another opener refuses, and the caller's own record is
+    // replaced like any other. The one caller that outranks such a record is the
+    // session that armed the plan, which is about to hold the leash by a route a
+    // claim point acts on; blessedCheckpointSession owns that ordering.
+    //
+    // The authorization read and the write are two syscalls with no lock across
+    // them, so two opens racing in the unbound window can both pass this guard
+    // and the second one's record is what stands. The residual is cmdClear's
+    // own, accepted on the same terms: the cost is one further deferral rather
+    // than a lost plan, and no compare-and-swap is built, the comparison and the
+    // rename being no more one syscall here than they are there.
+    //
+    // The record is read before the caller id is judged, which is cmdClear's
+    // order too: over one state, a shell with no id standing at a checkpoint path
+    // that cannot be read, the two verbs would otherwise report different reasons
+    // for the same refusal, and a shared refusal exists to prevent exactly that.
+    const caller = callerSessionId();
+    const blessed = blessedCheckpointSession(process.cwd(), goal, caller);
+    if (!blessed.ok) {
+        refuseUnansweredScope(blessed, 'nothing written');
+        return;
+    }
+    // An unresolvable id refuses, for the reason cmdBoundary's own refusal
+    // states: the id is what scopes the record, and a record scoped to nobody is
+    // one the gate can never honor, so writing it would be writing a dead
+    // checkpoint. The remedy named is the operator's rather than the session's,
+    // and the bound rides on the same line as the pointer: consent lands a
+    // compaction for a session named by id, which is what an operator standing in
+    // a bare shell wants, and it is a verb a session never runs on its own
+    // judgment. This channel is one a session reads, so the line names the verb
+    // and who runs it rather than handing over a runnable command form.
+    if (caller === null) {
+        emitErr('kit-compact-checkpoint: no usable session id in this shell'
+            + ' (CLAUDE_CODE_SESSION_ID is unset or not id-shaped), so whose chapter boundary'
+            + ' this would be cannot be established; nothing written\n');
+        emitErr('kit-compact-checkpoint: releasing a held session by id is the operator\'s own verb,'
+            + ' consent, which a session never runs on its own judgment: an operator standing in a'
+            + ' shell of their own runs it and names the session it acts for\n');
+        process.exitCode = 1;
+        return;
+    }
+    // The binding, whatever is on disk. Two remedies, each with the hold it
+    // answers named beside it, since the caller's own hold and the leash holder's
+    // are different questions. This checkpoint releases the leash holder's
+    // deferral, so there is nothing here for this caller to declare. A caller that
+    // is itself being held has its own boundary to bank, and the `boundary` verb
+    // is where it declares one: that marker is scoped by session, so it releases
+    // the hold on the caller alone and reaches this checkpoint not at all, and it
+    // is declared at the caller's own banked moment rather than on the strength of
+    // this refusal.
+    const bound = checkpointOwner(goal);
+    if (bound !== null && !sameSessionId(bound, caller)) {
+        emitErr('kit-compact-checkpoint: this project\'s kit goal is leashed to another session,'
+            + ' so this checkpoint would be that session\'s chapter boundary and would land its'
+            + ' next auto-compaction; it is not this session\'s to declare; nothing written\n');
+        emitErr('kit-compact-checkpoint: the deferral a boundary here releases is that session\'s,'
+            + ' so there is nothing here for this session to declare; ' + BOUNDARY_VERB_REMEDY
+            + '\n');
+        emitErr('kit-compact-checkpoint: a run resumed under a new session id, whose bound'
+            + ' predecessor is its own earlier session and is gone, may ' + REARM_REMEDY + '\n');
+        process.exitCode = 1;
+        return;
+    }
+    // What is left is the record leg, the binding having answered above and the
+    // arming leg only ever granting. The remedy is that leg's own too: this caller
+    // is waiting for a claim of its own, and an open replaces the record once that
+    // claim binds the leash, so nothing has to be moved by hand.
+    if (blessed.session !== null && !sameSessionId(blessed.session, caller)) {
+        emitErr('kit-compact-checkpoint: a chapter boundary another session declared for this'
+            + ' plan is already open here, and opening over it would leave that session a'
+            + ' boundary the gate refuses; it is not this session\'s to replace; nothing'
+            + ' written\n');
+        emitErr('kit-compact-checkpoint: once this session claims the leash, at its next stop or'
+            + ' auto-compaction offer, an open here replaces that record with its own\n');
         process.exitCode = 1;
         return;
     }
@@ -489,8 +664,11 @@ function cmdOpen() {
     // decision state is where the fact lives: an open deferral episode is a
     // recorded deny with no allow after it, and past the trigger the harness
     // re-offers every assistant turn, so the offers recur until one is allowed.
+    // The opener is passed as its own subject, which the writer requires of every
+    // caller: the owner cannot stand in for it here, since an open against an
+    // unbound goal records no owner and this caller as its opener.
     const hold = pendingHold(process.cwd(), goal);
-    const result = writeCheckpoint(process.cwd(), goal.plan, goal.boundSession, hold.held);
+    const result = writeCheckpoint(process.cwd(), goal.plan, goal.boundSession, hold.held, caller);
     if (result.ok) {
         // File-derived values print indented, never at column zero, keeping
         // sanitized untrusted data visually subordinate in a channel a model
@@ -505,12 +683,35 @@ function cmdOpen() {
         // and the value prints as itself, but reportCheckpoint prints the same
         // field back out of a user-writable file, where it is whatever a hand
         // edit made it.
+        //
+        // The unbound line states the condition the record carries rather than an
+        // unconditional landing. A record opened while the goal is unbound is
+        // adopted for whichever session claims the leash next and then held to its
+        // opener, so it releases a compaction only for the caller that opened it,
+        // and telling any caller here that the next auto-compaction lands on it
+        // would be the same false promise the gate's own release notes withdrew.
+        // The held-offer sentence is about which age bound the record takes, which
+        // is the same question either way, so its wording holds whether the goal is
+        // bound or not; what it gains while unbound is the condition above, since
+        // the record it describes is honored on exactly the same terms.
         emitOut('  compact checkpoint open for ' + displayPath(result.plan)
             + (hold.held
                 ? ' (the compaction gate is holding offers, so this waits for the next one rather than'
                     + ' aging out in ' + ORDINARY_MINUTES + ' minutes: for as long as the gate keeps'
-                    + ' deferring, and never past ' + PENDING_HOURS + ' hours)'
-                : ' (the next auto-compaction lands here)')
+                    + ' deferring, and never past ' + PENDING_HOURS + ' hours'
+                    // The record's condition is the same question either way, so
+                    // an unbound open states it here too: the age bound is what
+                    // this branch is about, and without the clause a caller reads
+                    // a wait for an offer as a promise that the offer lands here.
+                    + (bound === null
+                        ? '; honored once the leash binds this session, and a claim by another session'
+                            + ' leaves it refused'
+                        : '')
+                    + ')'
+                : (bound === null
+                    ? ' (honored once the leash binds this session, at its next stop or held offer;'
+                        + ' a claim by another session leaves it refused)'
+                    : ' (the next auto-compaction lands here)'))
             + '\n');
         // A state file that could not be read is not an absent one, and the
         // bound taken above is the conservative one either way. Saying so is
@@ -755,7 +956,406 @@ function cmdConsent(rest) {
     }
 }
 
+// The readings of the checkpoint path that a binding may answer over: a read the
+// filesystem refused, and an lstat that could not answer. Both leave nothing to
+// say about what is there and both are transient, a lock lifting to reveal a
+// fresh record that belongs to whichever session opened it, so under a binding
+// they are attributed to the leash holder, the one caller who may act on such a
+// file. This list is what that attribution is keyed on, and a write verb refuses
+// over either one where no binding answers.
+//
+// The third reading a write verb refuses over, something at the path that is not
+// a regular file, is not here: it is the opposite news and is attributed to
+// nobody, so blessedCheckpointSession answers it for every caller before it
+// reaches this list, and a directory or a FIFO at the checkpoint path is one
+// refusal for everybody rather than a boundary the leash holder is told it can
+// clear.
+//
+// An illegible file and one past the read cap are deliberately not here. Both
+// are regular files whose content the reader has settled: no session's
+// compaction can ever land on either, and a clear unlinks them, so refusing over
+// one would leave a state `status` says a clear removes with no CLI path out of
+// it. They read as nobody's boundary instead, and that reading holds whatever the
+// goal is bound to, since a binding cannot make a file no compaction can spend
+// into its holder's boundary.
+const OPAQUE_CHECKPOINT_READINGS = ['unreadable', 'lstat'];
+
+// The two remedies the bound leg carries, worded once here and emitted by both
+// write verbs: cmdOpen's refusal of a caller that is not the leash holder, and
+// cmdClear's refusal on its 'goal' leg. Each verb supplies its own lead-in, since
+// what the caller was refused differs, and the remedy itself does not: a reader
+// comparing the two refusals is reading one sentence, and neither verb can drift
+// from the other on what a held session may actually do.
+//
+// The pointer is for the caller that has a boundary of its own to bank. The
+// marker that verb writes is scoped by session, so it releases the hold on that
+// caller alone and reaches this checkpoint not at all, and it is declared at the
+// caller's own banked moment rather than on the strength of a refusal.
+const BOUNDARY_VERB_REMEDY = 'a session with a boundary of its own to bank declares it with the'
+    + ' boundary verb, once it has banked its own state at a natural boundary, which releases the'
+    + ' hold on that session alone';
+// The remedy for the state where the bound session is gone, a run resumed under a
+// new session id against a goal still bound to its dead predecessor, and the
+// sentences above name nobody who can act. Re-arming rebinds the goal, and two
+// bounds ride with it. The whole queue is named, because arming replaces the
+// queue rather than adding to it, so a resumed run that re-arms with one plan
+// path drops the rest of the queue it was carrying. And the act is the resumed
+// run's alone: a peer seat acting on it would take the leash holder's binding and
+// replace its queue at the same time.
+const REARM_REMEDY = 're-arm the goal with its whole queue, which rebinds it: arming replaces the'
+    + ' queue rather than adding to it, so a re-arm naming fewer plans drops the rest, and a session'
+    + ' that is not that run leaves the goal alone';
+
+// What is at the goal-state path when readGoal did not answer with a goal, or
+// null when the state is settled absent. readGoal answers the same way for a
+// state file that is absent and for one that is present and could not be read,
+// which is the one question it cannot answer (goalPathKind in the goal library
+// owns the reading), and every rule in this file about whose boundary a
+// checkpoint is derives from the goal: the binding, the arming route, and even
+// "no goal is armed, so nothing here can ever be spent". So a non-answer the
+// state file could not answer is refused rather than read as absence, in one
+// spelling both verbs take.
+//
+// What counts as an answer is narrower than a non-null object, because the
+// normalizer hands its argument back unchanged for every shape whose plan is not
+// a non-empty string: a state file holding `0`, `false` or `""` parses and
+// readGoal answers with that value, and so do a JSON array and an object carrying
+// a binding beside a plan that is not a usable string. A guard reading only for
+// null, or only for a non-null object, would take one of those as a state it had
+// read and let every no-goal leg treat a file sitting at the path as no goal
+// armed: `open` would say nothing is armed over a file still holding the
+// binding, and the blessing rule's no-plan leg would answer nobody's boundary
+// before the binding was consulted, so a bystander's clear would remove the leash
+// holder's live record. Read as a non-answer instead, each of those takes the
+// 'file' kind and the refusal that names contents this kit cannot use, which is
+// what it is.
+//
+// So an answer is a non-array object that either carries a usable plan, or
+// carries no binding at all. The second half is the ordinary no-goal state: a
+// file the reader read that names no plan and no session, which says nothing is
+// armed and about which the no-goal legs are true. A shape carrying something at
+// boundSession with no usable plan beside it is the case a binding could be lost
+// over, and it refuses.
+function unreadableGoalKind(cwd, goal) {
+    const readable = !!goal && typeof goal === 'object' && !Array.isArray(goal)
+        && ((typeof goal.plan === 'string' && goal.plan !== '')
+            || goal.boundSession === undefined || goal.boundSession === null);
+    if (readable) return null;
+    const kind = goalPathKind(cwd);
+    return kind === 'absent' ? null : kind;
+}
+
+// What each of goalPathKind's readings says in words. The kinds are that rule's
+// internal tokens, and 'file' is the one that reads as nothing at all on a
+// terminal: it means a regular, sane-sized state file whose contents readGoal
+// will not use, which is two shapes rather than one (JSON that does not parse,
+// and JSON that parses and the goal library's own state normalizer then
+// rejects, a plan path that does not round-trip its normalization being the
+// case). So an operator told the state "could not be read (file)" has been
+// handed the reason least likely to be understood, and one told its contents do
+// not parse has been handed a reason that is false for the second shape. The
+// phrase is what prints instead, keyed by the token so a kind added there prints
+// as itself under the fallback below rather than silently as one of these.
+const UNREADABLE_GOAL_PHRASES = {
+    file: 'its contents are not a goal state this kit can use',
+    other: 'something that is not a regular file is at the path',
+    oversized: 'the file is past the read cap',
+    unreadable: 'the filesystem refused the read',
+    unresolvable: 'the path cannot resolve to a file'
+};
+
+// One reading of the goal state in words, for the two surfaces that print it:
+// the write verbs' refusal below and the status report's checkpoint line. The
+// map's phrase where the kind has one, and the token itself, gated, where it
+// does not; the kind arrives from goalPathKind rather than from a file, so the
+// vocabulary is closed either way and the gate covers a kind added there.
+function unreadableGoalPhrase(kind) {
+    return Object.prototype.hasOwnProperty.call(UNREADABLE_GOAL_PHRASES, kind)
+        ? UNREADABLE_GOAL_PHRASES[kind]
+        : sanitize(kind);
+}
+
+// The refusal both verbs emit over that state, worded off the kind and naming
+// what did not happen. Two remedies, because the kinds split two ways and this
+// sentence covers both: a lock or a scanner lifts, and a file the reader has
+// settled it cannot use needs a hand.
+//
+// The reading prints as its phrase, through the lookup above.
+function refuseUnreadableGoal(kind, whatDidNotHappen) {
+    emitErr('kit-compact-checkpoint: the kit goal state is present but could not be read ('
+        + unreadableGoalPhrase(kind) + '), so whether any session holds the leash cannot be established; retry'
+        + ' once it is readable, or repair the file by hand (' + whatDidNotHappen + ')\n');
+    process.exitCode = 1;
+}
+
+// Whose chapter boundary a checkpoint here would be, as { ok:true, session,
+// from, present } where session is null for nobody's, from names the leg that
+// answered ('goal' for the binding, 'arming' for a caller about to hold the
+// leash, 'record' for the opener on disk, null for nobody's), and present says
+// whether a file is at the checkpoint path at all; or as { ok:false, reason }
+// where the question could not be asked. Both write verbs read the answer from
+// here, so the two of them cannot drift, and each words its own refusal from the
+// leg it names. `caller` is the calling session's own id, or null where none
+// resolves.
+//
+// One read of the record answers both questions, which is what keeps a clear
+// from deciding presence and ownership off two reads with a window between them.
+//
+// The order of the legs is what the rule is. An unreadable goal state answers
+// first, since every leg below reads the goal and none of them can be asked over
+// one (unreadableGoalKind above). Then something at the path that is not a
+// regular file, which is refused for every caller and so is answered before the
+// binding has a chance to claim it. Then the two transient readings that leave
+// nothing to say, which the binding does answer over, both of them the
+// { ok:false } state below. Then the files that gate nothing,
+// tested before the binding, since no scope guard has anything to protect over
+// one: a settled illegible or oversized file whatever the binding, a legible
+// record naming a plan other than the armed one, and a legible record met with no
+// goal armed at all, which can never be spent either, `open` refusing outright
+// while no goal is armed, so it is always a leftover. Then the binding, because a
+// record adopted for the leash holder is that session's to clear whoever
+// declared it, which is what lets a run clean up a boundary it cannot spend; the
+// binding answers for a legible same-plan record only where the record's own
+// opener IS that binding and the owner it carries is that binding or none, since
+// the gate refuses another opener at wrong-opener and another owner at
+// wrong-session, and a record nothing can spend is nobody's however the goal is
+// bound. Then the caller where it holds the leash by the arming route, which
+// outranks the record's opener: with the goal armed and unbound, a same-plan
+// record a bystander banked would otherwise refuse the very session about to
+// bind, on both verbs, leaving it nothing to do but wait for a claim point. That
+// leg can only grant, the session it answers with being the caller itself, so
+// neither verb's refusal is ever worded from it. And last the record's own
+// opener, which is what scopes the question while no leash and no arming session
+// answer it; the refusal a true bystander meets there stands.
+//
+// A null session is nobody's, which is several states coming to the same thing:
+// no legible record at all, a record for another plan, a record met with no goal
+// armed, a file the reader settled as illegible or oversized, a record carrying
+// no opener, which is what an older kit or a hand edit leaves and what the gate
+// already treats as absent, a record whose recorded owner is not its own opener,
+// which the gate refuses whichever of the two sessions meets it, and a same-plan
+// record under a bound goal whose opener, or whose recorded owner, is a session
+// other than that binding. None of them is a
+// boundary a session could spend, so there is nothing here for a scope guard to
+// protect.
+//
+// { ok:false } is the different state where the question could not be asked.
+// Three readings produce it, and they divide over whether a binding may answer
+// instead. Something IS at the checkpoint path and the read was refused by the
+// filesystem or the lstat could not answer (OPAQUE_CHECKPOINT_READINGS above):
+// there the binding answers first, so the one caller who can act on such a file,
+// the session it would belong to, is not the one turned away from it, and a
+// transient lock over a fresh record is the case that earns it. Something at the
+// path is not a regular file: that never becomes a checkpoint, the clear rule in
+// the lib refuses to unlink a non-regular file by design, and so no binding makes
+// it the leash holder's boundary; it refuses every caller, which is why it is
+// answered above the binding rather than beneath it. And the goal state is
+// present and could not be read, which leaves every leg here unasked, carried as
+// reason 'goal-unreadable' with the kind beside it, and over which there is no
+// binding to answer with. All three are an unanswered question rather than
+// nobody's boundary, so cancelBoundary's reading of the same question holds here:
+// the guard can only protect a scope it can see, and where it cannot see one the
+// file is left alone.
+function blessedCheckpointSession(cwd, goal, caller) {
+    const read = readCheckpointResult(cwd);
+    const present = read.reason !== 'absent';
+    const nobody = { ok: true, session: null, from: null, present };
+    // An absent checkpoint path first, and only then the goal: a clear over
+    // nothing removes nothing from anybody, which is the no-op the section loop's
+    // step 0 runs, and it stays one whatever the goal state says.
+    if (present) {
+        const unreadable = unreadableGoalKind(cwd, goal);
+        if (unreadable !== null) return { ok: false, reason: 'goal-unreadable', kind: unreadable };
+    }
+    // Something that is not a regular file, before the binding: the clear rule
+    // refuses to unlink one, so a binding that claimed it would answer the leash
+    // holder's clear with "no compact checkpoint was open" at exit 0 while the
+    // obstruction stayed where it was, and every other caller with a boundary
+    // that does not exist. One refusal for everybody instead, on the reading
+    // itself.
+    if (present && read.reason === 'kind') return { ok: false, reason: 'kind' };
+    const bound = checkpointOwner(goal);
+    if (present && OPAQUE_CHECKPOINT_READINGS.includes(read.reason)) {
+        return bound !== null
+            ? { ok: true, session: bound, from: 'goal', present }
+            : { ok: false, reason: read.reason };
+    }
+    const cp = read.cp;
+    const legible = !!cp && typeof cp === 'object' && !Array.isArray(cp);
+    const plan = (goal && typeof goal.plan === 'string' && goal.plan !== '') ? goal.plan : null;
+    // The files nothing can spend, tested before the binding, since attributing
+    // one to the leash holder would refuse a bystander tidying a file that gates
+    // nothing with a reason that is false for it. A file the reader has settled it
+    // cannot use, illegible or past the read cap, is one no compaction can ever
+    // land on whatever the goal is bound to; a wrong-plan record and a record met
+    // with no armed goal are both absent to the gate.
+    if (present && !legible) return nobody;
+    if (legible && (plan === null || cp.plan !== plan)) return nobody;
+    if (bound !== null) {
+        // Under a binding, a legible same-plan record is the bound session's only
+        // where that session is both the owner the record carries and its opener.
+        // The gate holds the record to both fields, refusing another owner at
+        // wrong-session and another opener at wrong-opener, so a record failing
+        // either leg is one the leash holder can no more spend than a bystander
+        // can: an owner naming some other session is as dead as an opener naming
+        // one, and a record carrying no opener at all is dead the same way. An
+        // ABSENT owner is the other news, the ownerless boundary a claim adopts for
+        // this binding, so it is not tested here. With no file at the path the
+        // binding answers on its own, which is the state `open` blesses.
+        if (legible) {
+            const recorded = storableCheckpointOwner(cp.boundSession).value;
+            if (recorded !== null && !sameSessionId(recorded, bound)) return nobody;
+            if (!sameSessionId(storableCheckpointOwner(cp.openedBy).value, bound)) return nobody;
+        }
+        return { ok: true, session: bound, from: 'goal', present };
+    }
+    if (caller !== null && caller !== undefined && sessionHoldsLeash(goal, caller)) {
+        return { ok: true, session: caller, from: 'arming', present };
+    }
+    if (!legible) return nobody;
+    // The opener is what this leg answers with, and what the gate holds a record
+    // to, so a record the gate can never honor for anybody is nobody's boundary
+    // here however legible it is. A record carrying an owner that is not its own
+    // opener is that record: the gate refuses it at wrong-session or at
+    // wrong-opener whichever session's offer meets it. The shape occurs, it is not
+    // hypothetical: a bystander's open against an unbound goal, a claim adopting
+    // the record for the session that binds, and then a re-arm nulling the
+    // binding leaves owner and opener two different sessions with no leash to
+    // answer for either. Read off the opener alone the record would protect
+    // itself against the very session it names as its owner.
+    const owner = storableCheckpointOwner(cp.boundSession).value;
+    const opener = storableCheckpointOwner(cp.openedBy).value;
+    // A record carrying no opener the storage rule can read is nobody's on this
+    // leg too, and it is answered as nobody rather than as this leg answering with
+    // a null session: `from` names the leg that answered, and nobody's boundary
+    // carries no leg, so returning the record leg with a null session would put a
+    // shape on the answer that the contract above says cannot occur.
+    if (opener === null) return nobody;
+    if (owner !== null && !sameSessionId(owner, opener)) return nobody;
+    return { ok: true, session: opener, from: 'record', present };
+}
+
+// What each of the reader's two transient readings says in words. They are
+// readCheckpointResult's own internal tokens, and both read as nothing at all on
+// a terminal: an operator told the path "cannot be read right now (lstat)" has
+// been handed the name of a syscall rather than a reason. Keyed by the token, so
+// a reading added there prints as itself under the fallback below rather than
+// silently as one of these.
+const UNREADABLE_CHECKPOINT_PHRASES = {
+    unreadable: 'the filesystem refused the read',
+    lstat: 'the filesystem would not say what is at the path'
+};
+
+// The refusal a write verb emits over a checkpoint path whose reading left
+// nothing to say, worded for the verb that met it and off the reading itself:
+// one sentence naming what is there, that the question could not be answered,
+// that the file is untouched, and the remedy that reading actually has. Shared
+// because open and clear meet the same path in the same state and a reader
+// comparing the two should not be reading two accounts of it.
+//
+// Two remedies, because the two readings are opposite news. Something that is
+// not a checkpoint file never becomes one, so it is moved aside by hand; a
+// refused read or an unanswerable lstat may be a lock over a perfectly good
+// record, so the remedy is to run the verb again once that lifts. Neither points
+// at `status`, which over these readings can only report what is already said
+// here.
+function refuseUnreadableCheckpoint(reason, whatDidNotHappen) {
+    const phrase = Object.prototype.hasOwnProperty.call(UNREADABLE_CHECKPOINT_PHRASES, reason)
+        ? UNREADABLE_CHECKPOINT_PHRASES[reason]
+        : sanitize(reason);
+    emitErr('kit-compact-checkpoint: ' + (reason === 'kind'
+        ? 'something that is not a checkpoint file is at the checkpoint path, so whose chapter'
+            + ' boundary it is cannot be established and it is left in place; no verb here removes'
+            + ' it, so move it aside by hand'
+        : 'the checkpoint path cannot be read right now (' + phrase + '), so whose chapter'
+            + ' boundary it is cannot be established and it is left in place; try again once whatever'
+            + ' holds it lets go')
+        + ' (' + whatDidNotHappen + ')\n');
+    process.exitCode = 1;
+}
+
+// The refusal for a { ok:false } blessing, whichever of the two questions went
+// unanswered. One spelling, so the two verbs cannot drift on which reading gets
+// which sentence.
+function refuseUnansweredScope(blessed, whatDidNotHappen) {
+    if (blessed.reason === 'goal-unreadable') refuseUnreadableGoal(blessed.kind, whatDidNotHappen);
+    else refuseUnreadableCheckpoint(blessed.reason, whatDidNotHappen);
+}
+
 function cmdClear() {
+    // The scope guard cmdOpen applies at the same door, for the opposite act: a
+    // clear by the wrong seat unmakes a boundary the leash holder legitimately
+    // declared, which defers its compaction to the safety valve near the context
+    // limit, the worst landing point there is.
+    //
+    // The record is read before any caller is refused, because a clear with no
+    // record on disk removes nothing from anybody: it is the no-op the section
+    // loop's own step 0 runs before it knows whether a boundary is open, and a
+    // refusal there would fail a run for tidying up. So an absent record falls
+    // through to the ordinary no-op below whoever calls, and the refusals below
+    // speak only over a record that exists.
+    //
+    // The authorization read and the unlink are two syscalls with no lock across
+    // them, so a boundary another session declares in that window is removed by
+    // a clear this guard already approved. The residual is the gate's own,
+    // accepted for the same reason (see adoptCheckpoint's verify in the lib): the
+    // cost is one further deferral rather than a lost plan, and a
+    // compare-and-delete would buy a narrower window rather than none, since the
+    // comparison and the unlink cannot be one syscall either.
+    const goal = readGoal(process.cwd());
+    // The caller is read before the record is judged, because it is one of the
+    // things that decides whose boundary the record is: a caller holding the
+    // leash by the arming route outranks the opener a bystander left on disk.
+    const caller = callerSessionId();
+    const blessed = blessedCheckpointSession(process.cwd(), goal, caller);
+    if (!blessed.ok) {
+        refuseUnansweredScope(blessed, 'nothing was cleared');
+        return;
+    }
+    // A caller with no usable id cannot be held against the record at all, so it
+    // is refused rather than trusted, over a record this guard is protecting;
+    // cancelBoundary's own reading of the same question is the sibling of this.
+    // No pointer at another verb: consent lands a compaction, which is the
+    // opposite of what a clear wants, and the boundary verb writes a different
+    // file, so the only true remedy is the session the record belongs to running
+    // this verb itself.
+    const guarded = blessed.present && blessed.session !== null;
+    if (guarded && caller === null) {
+        emitErr('kit-compact-checkpoint: no usable session id in this shell'
+            + ' (CLAUDE_CODE_SESSION_ID is unset or not id-shaped), so whose chapter boundary is'
+            + ' open here cannot be established; the record is left in place, and the session it'
+            + ' belongs to can clear it (nothing was cleared)\n');
+        process.exitCode = 1;
+        return;
+    }
+    if (guarded && !sameSessionId(blessed.session, caller)) {
+        emitErr('kit-compact-checkpoint: the chapter boundary here belongs to another session,'
+            // The record leg names the opener and claims nothing about the leash at
+            // the moment the boundary was declared: a re-arm from a bare shell nulls
+            // the binding and leaves the checkpoint where it is, so a record on this
+            // leg may have been declared under a leash that has since gone.
+            + (blessed.from === 'goal'
+                ? ' the one this project\'s kit goal is leashed to,'
+                : ' the one that declared it,')
+            + ' so clearing it would defer that session\'s compaction to its safety valve; the record'
+            + ' is left in place, and that session'
+            + (blessed.from === 'goal' ? '' : ', or whichever session claims the leash next,')
+            + ' can clear it'
+            + (blessed.from === 'goal'
+                ? ', or, where this run is that session\'s own resumption under a new session id,'
+                    + ' ' + REARM_REMEDY
+                : '')
+            + ' (nothing was cleared)\n');
+        // Where the binding answered, the caller's own hold has its own remedy, and
+        // naming it is what keeps this refusal from reading as a dead end. The
+        // record leg gets none, its caller being one whose own boundary is the
+        // checkpoint it is about to be able to declare rather than a marker.
+        if (blessed.from === 'goal') {
+            emitErr('kit-compact-checkpoint: ' + BOUNDARY_VERB_REMEDY + '\n');
+        }
+        process.exitCode = 1;
+        return;
+    }
     const result = clearCheckpoint(process.cwd());
     if (!result.ok) {
         // Nothing was removed, so this must not read as a successful clear. What
@@ -775,8 +1375,17 @@ function cmdClear() {
 // Every message states plainly that the gate treats the file as absent, so a
 // reader never mistakes an open-but-dead checkpoint for a live one. The
 // 'no-checkpoint' code has no entry because cmdStatus reports that state
-// before consulting the rule; an unknown future code falls back to the bare
+// before consulting the rule, and the three codes with more than one story
+// behind them are worded by their own producers instead ('expired' by
+// expiredReason, 'wrong-session' by unmatchedSessionReason, 'wrong-opener' by
+// unmatchedOpenerReason); an unknown future code falls back to the bare
 // treats-as-absent clause rather than printing nothing.
+//
+// The 'no-goal' entry words the settled reading alone, an absent goal state. The
+// match rule reports that code over a state file that is present and could not be
+// read as well, the goal reading null for both, and the report's own call site
+// tells the two apart and words the second one there, so this entry is never
+// printed over a file that is sitting at the path.
 const ABSENT_REASONS = {
     'no-goal': 'no kit goal is armed, so the gate treats it as absent',
     'wrong-plan': 'does not match the armed goal, so the gate treats it as absent',
@@ -785,7 +1394,7 @@ const ABSENT_REASONS = {
 };
 
 // Why a record the match rule refused on its session leg gates nothing, which
-// is three states rather than one. That rule compares the record's owner against
+// is four states rather than one. That rule compares the record's owner against
 // the goal's and reports one code whether the record names another session or
 // names none at all, and the two are opposite news for an operator: a record
 // with no owner is the boundary a run banked before anything held its leash,
@@ -794,12 +1403,25 @@ const ABSENT_REASONS = {
 // neither. A record with no owner beside a leash already held is genuinely dead,
 // because an adoption rides on a claim and a held leash is claimed.
 //
+// The fourth is a record with no owner AND no opener, which a claim adopts and
+// the gate then refuses on its opener leg, so the sentence over it withdraws the
+// promise outright: nothing can say whose boundary it was, and no session's claim
+// will ever make the gate honor it.
+//
+// That leaves the adoptable sentence itself carrying a condition rather than a
+// promise, because an adoption supplies the owner and never the opener: a
+// boundary a bystander declared while nothing held the leash is adopted like any
+// other and then refused on its opener, so the gate honors an adopted record
+// only where the session that claimed the leash is the one that opened it. The
+// unconditional promise was false over exactly that record, and on this surface a
+// false one sends an operator to wait for a boundary that is not coming.
+//
 // The report stays in step with the gate by asking the gate's own predicates
 // rather than a second copy of them: the verdict above is still checkpointMatches',
 // and the two questions here are storableCheckpointOwner's (does the record name
-// an owner, by the rule the writer stores one under) and checkpointAdoptable's
-// (would a claim take this record), which is the step the claim points run
-// between the match and the next verdict.
+// an owner, or an opener, by the rule the writer stores both under) and
+// checkpointAdoptable's (would a claim take this record), which is the step the
+// claim points run between the match and the next verdict.
 function unmatchedSessionReason(cp, goal) {
     if (storableCheckpointOwner(cp.boundSession).value !== null) {
         return 'names a session that does not hold the armed goal\'s leash, so the gate treats it as absent';
@@ -808,11 +1430,40 @@ function unmatchedSessionReason(cp, goal) {
         return 'records no session while the leash is held, so the gate treats it as absent;'
             + ' a boundary opened now records the binding';
     }
-    return checkpointAdoptable(cp, goal).ok
-        ? 'records no session, no session holding the leash when it opened; the claim that binds one'
-            + ' adopts this record, and the gate honors it from then, within the age bound it already carries'
-        : 'records no session and carries no opened timestamp a claim could adopt it by,'
+    if (!checkpointAdoptable(cp, goal).ok) {
+        return 'records no session and carries no opened timestamp a claim could adopt it by,'
             + ' so the gate treats it as absent';
+    }
+    // An adoption supplies the owner and never the opener, so a record with no
+    // opener is one a claim WILL take and the gate will still ignore. The
+    // promise below would be false over it, which on this surface sends an
+    // operator to wait for a boundary that is never going to land.
+    if (storableCheckpointOwner(cp.openedBy).value === null) {
+        return 'records no session and no opening session; the claim that binds one adopts this'
+            + ' record and the gate still treats it as absent, having nothing to say whose boundary'
+            + ' it was; declare the boundary again rather than waiting on this one';
+    }
+    return 'records no session, no session holding the leash when it opened; the claim that binds one'
+        + ' adopts this record, and the gate honors it from then where the session that claims the'
+        + ' leash is the one that opened it, within the age bound it already carries';
+}
+
+// Why a record the match rule refused on its OPENER leg gates nothing, which is
+// two states rather than one, and they name different remedies. A record with no
+// opener at all is one an older kit wrote or a hand edit made: nothing can say
+// whose boundary it was, and the fix is to declare the boundary again. A record
+// whose opener is some other session is a boundary a bystander declared, which
+// the leash holder's claim then adopted; the fix is for the session the goal is
+// leashed to to declare its own, since this one gates nothing however fresh it
+// is. The opener is read through the same storage rule the writer stores it under
+// and the match rule compares it by, so this report cannot call a value an owner
+// that the rule reads as none.
+function unmatchedOpenerReason(cp) {
+    return storableCheckpointOwner(cp.openedBy).value === null
+        ? 'records no opening session, so whose boundary it is cannot be established and the gate'
+            + ' treats it as absent; declaring the boundary again records one'
+        : 'was opened by a session other than the one it belongs to, so the gate treats it as'
+            + ' absent; the leashed session declares its own boundary';
 }
 
 // Why a record carrying the pending-offer flag was judged by the ordinary bound
@@ -908,10 +1559,11 @@ function reportCheckpoint(cwd) {
     // A checkpoint the gate would read as absent is worth flagging here, with
     // the reason: the file exists but gates nothing, which status alone would
     // misreport. The verdict comes from the same checkpointMatches rule the
-    // gate itself decides by, and the one refusal whose meaning depends on what
-    // happens after that rule runs, the session leg, is worded by the adoption's
-    // own predicates (see unmatchedSessionReason), so this report cannot drift
-    // from the gate's effective answer either.
+    // gate itself decides by, and the two refusals that carry more than one
+    // story, the session leg and the opener leg, are worded by their own
+    // producers off the same predicates the rule uses (unmatchedSessionReason,
+    // which asks the adoption's, and unmatchedOpenerReason), so this report
+    // cannot drift from the gate's effective answer either.
     const goal = readGoal(cwd);
     const hold = pendingHold(cwd, goal);
     // The same corroboration the gate applies, from the same predicate, so this
@@ -919,10 +1571,30 @@ function reportCheckpoint(cwd) {
     const corroborated = pendingOfferCorroborated(cp, hold.state, Date.now(), hold.owner);
     const verdict = checkpointMatches(cp, goal, Date.now(), corroborated);
     if (!verdict.ok) {
+        // Asked once here, whatever the verdict was. unreadableGoalKind answers
+        // with a kind only where readGoal did not answer with a usable goal, and
+        // with null otherwise, so the legs below read it rather than re-deriving
+        // that condition.
+        const goalUnreadable = unreadableGoalKind(cwd, goal);
         let why;
         if (verdict.reason === 'expired') why = expiredReason(cp, hold, corroborated);
         else if (verdict.reason === 'wrong-session') why = unmatchedSessionReason(cp, goal);
-        else why = ABSENT_REASONS[verdict.reason] || 'the gate treats it as absent';
+        else if (verdict.reason === 'wrong-opener') why = unmatchedOpenerReason(cp);
+        else if (verdict.reason === 'no-goal' && goalUnreadable !== null) {
+            // The match rule takes the goal readGoal answered with, and that null
+            // reads the same for a state file that is absent and for one that is
+            // present and could not be read, so the no-goal verdict arrives over
+            // both. Only the first of them is absence, and the write verbs refuse
+            // over the second in the unreadable-state wording, so printing "no kit
+            // goal is armed" here would have status contradict them about a file
+            // sitting right there. The reading is asked once, off the same rule
+            // both verbs ask, and the verdict is worded from it. status still
+            // reports rather than refuses: it writes nothing and exits 0 whatever
+            // it read.
+            why = 'the kit goal state is present but could not be read ('
+                + unreadableGoalPhrase(goalUnreadable)
+                + '), so whether the gate would honor it cannot be established';
+        } else why = ABSENT_REASONS[verdict.reason] || 'the gate treats it as absent';
         line += ' - ' + why;
     } else {
         // A live checkpoint stands on one of two age bounds, and an operator

@@ -1171,7 +1171,7 @@ test('the claim at a stop adopts an ownerless checkpoint, and leaves another ses
     try {
         const tx = path.join(repo, 'self-armed.jsonl');
         writeBareTranscript(tx, [assistantEntry('Working the section.')]);
-        assert.strictEqual(writeCheckpoint(repo, planRel, null).ok, true, 'test setup: checkpoint should write');
+        assert.strictEqual(writeCheckpoint(repo, planRel, null, false, ARM_SESSION).ok, true, 'test setup: checkpoint should write');
         runHook({ cwd: repo, transcript_path: tx, session_id: ARM_SESSION }, local);
         assert.strictEqual(readBoundSession(repo), ARM_SESSION, 'the stop claimed the binding');
         assert.strictEqual(readCheckpoint(repo).boundSession, ARM_SESSION,
@@ -1190,7 +1190,7 @@ test('a claim at a stop leaves a checkpoint belonging to another session alone',
     try {
         const tx = path.join(repo, 'self-armed.jsonl');
         writeBareTranscript(tx, [assistantEntry('Working the section.')]);
-        assert.strictEqual(writeCheckpoint(repo, planRel, OTHER_SESSION).ok, true,
+        assert.strictEqual(writeCheckpoint(repo, planRel, OTHER_SESSION, false, OTHER_SESSION).ok, true,
             'test setup: checkpoint should write');
         runHook({ cwd: repo, transcript_path: tx, session_id: ARM_SESSION }, local);
         assert.strictEqual(readBoundSession(repo), ARM_SESSION, 'the stop claimed the binding');
@@ -3223,13 +3223,16 @@ test('a queue advance rewrites a matching open compaction checkpoint to the new 
     const { repo, plans, transcript, local } = armedQueueRepo(['Closed the final chapter.'], ['Status: Complete']);
     try {
         assert.strictEqual(bindSession(repo, 'sess-queue').ok, true);
-        assert.strictEqual(writeCheckpoint(repo, plans[0], 'sess-queue').ok, true);
+        assert.strictEqual(writeCheckpoint(repo, plans[0], 'sess-queue', false, 'sess-queue').ok, true);
         const res = runHook({ cwd: repo, transcript_path: transcript, session_id: 'sess-queue' }, local);
         assert.strictEqual(JSON.parse(res.stdout).decision, 'block', 'setup: the advance held the stop');
         assert.strictEqual(readState(repo).plan, plans[1], 'setup: the advance landed');
         const cp = readCheckpoint(repo);
         assert.strictEqual(cp.plan, plans[1], 'the open checkpoint follows the advance');
         assert.strictEqual(cp.boundSession, 'sess-queue');
+        assert.strictEqual(cp.openedBy, 'sess-queue',
+            'and names the bound session as its opener, which is what the gate\'s wrong-opener leg'
+                + ' holds it to: a record whose opener is not the compacting session is refused');
     } finally {
         rmDir(repo);
         rmDir(local);
@@ -3278,13 +3281,13 @@ test('the queue advance re-derives the pending-offer flag from the live gate sta
         try {
             assert.strictEqual(bindSession(repo, 'sess-queue').ok, true);
             if (c.stored === undefined) {
-                // The pre-flag shape, hand-written: three fields, no key.
+                // The pre-flag shape, hand-written: no pendingOffer key.
                 writeFile(checkpointPath(repo), JSON.stringify({
-                    plan: plans[0], boundSession: 'sess-queue', openedAt: new Date().toISOString()
+                    plan: plans[0], boundSession: 'sess-queue', openedBy: 'sess-queue', openedAt: new Date().toISOString()
                 }) + '\n');
                 assert.ok(!('pendingOffer' in readCheckpoint(repo)), 'setup: the key is absent');
             } else {
-                assert.strictEqual(writeCheckpoint(repo, plans[0], 'sess-queue', c.stored).ok, true);
+                assert.strictEqual(writeCheckpoint(repo, plans[0], 'sess-queue', c.stored, 'sess-queue').ok, true);
                 assert.strictEqual(readCheckpoint(repo).pendingOffer, c.stored, 'setup: the flag is on disk');
             }
             if (c.hold) holdOffersFor(repo, c.hold);
@@ -3316,7 +3319,7 @@ test('an advance on the claim path uses the binding it just took, not the stale 
     const { repo, plans, transcript, local } = armedQueueRepo(['Closed the final chapter.'], ['Status: Complete']);
     try {
         assert.strictEqual(readState(repo).boundSession, null, 'setup: the goal starts unbound');
-        assert.strictEqual(writeCheckpoint(repo, plans[0], 'sess-queue', false).ok, true);
+        assert.strictEqual(writeCheckpoint(repo, plans[0], 'sess-queue', false, 'sess-queue').ok, true);
         runHook({ cwd: repo, transcript_path: transcript, session_id: 'sess-queue' }, local);
         assert.strictEqual(readState(repo).boundSession, 'sess-queue', 'setup: the claim bound the goal');
         assert.strictEqual(readState(repo).plan, plans[1], 'setup: the advance landed');
@@ -3341,7 +3344,7 @@ test('a checkpoint only the long bound keeps alive still follows the advance', (
         assert.strictEqual(bindSession(repo, 'sess-queue').ok, true);
         const openedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         writeFile(checkpointPath(repo), JSON.stringify({
-            plan: plans[0], boundSession: 'sess-queue', openedAt, pendingOffer: true
+            plan: plans[0], boundSession: 'sess-queue', openedBy: 'sess-queue', openedAt, pendingOffer: true
         }) + '\n');
         // The hold predates the record, which is what makes it corroborating.
         holdOffersFor(repo, 'sess-queue', 61 * 60 * 1000);
@@ -3364,7 +3367,7 @@ test('the advance leaves a non-matching checkpoint alone and creates none when n
     const orphan = armedQueueRepo(['Done all sections.'], ['Status: Complete']);
     try {
         assert.strictEqual(bindSession(orphan.repo, 'sess-queue').ok, true);
-        assert.strictEqual(writeCheckpoint(orphan.repo, orphan.plans[0], 'sess-other').ok, true);
+        assert.strictEqual(writeCheckpoint(orphan.repo, orphan.plans[0], 'sess-other', false, 'sess-other').ok, true);
         runHook({ cwd: orphan.repo, transcript_path: orphan.transcript, session_id: 'sess-queue' }, orphan.local);
         assert.strictEqual(readState(orphan.repo).plan, orphan.plans[1], 'setup: the advance landed');
         const cp = readCheckpoint(orphan.repo);

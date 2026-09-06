@@ -395,7 +395,7 @@ test('silent when a matching checkpoint is already open', () => {
     const repo = makeRepo();
     try {
         const { writeCheckpoint } = require('../plugins/claude-kit/hooks/kit-compact-lib.js');
-        const written = writeCheckpoint(repo, PLAN_REL, SESSION, false);
+        const written = writeCheckpoint(repo, PLAN_REL, SESSION, false, SESSION);
         assert.strictEqual(written.ok, true, 'test setup: the checkpoint should write');
         const before = stateBytes(repo);
         assertSilent(runHook(firePayload(repo)), 'matching checkpoint open');
@@ -411,11 +411,16 @@ test('fires when the checkpoint on disk no longer matches', () => {
     // the boundary it declared is no longer honored and the hold is real. A
     // guard that stood down on the mere presence of a file would go silent
     // here, which is the exact case the operator most needs the nudge for.
+    //
+    // The opener is the bound session, so the record reaches the age leg this
+    // case is named for: the match rule refuses a record with no opener before it
+    // looks at the age at all, which would fire the nudge for the wrong reason.
     const repo = makeRepo();
     try {
         writeFile(checkpointFile(repo), JSON.stringify({
             plan: PLAN_REL,
             boundSession: SESSION,
+            openedBy: SESSION,
             openedAt: iso(30 * 60 * 1000),
             pendingOffer: false
         }, null, 2) + '\n');
@@ -574,7 +579,7 @@ test('silent when the boundary this run banked before its claim is already open'
     const repo = selfArmedRepo(ARM_SESSION, ARM_SESSION);
     try {
         const { writeCheckpoint } = require('../plugins/claude-kit/hooks/kit-compact-lib.js');
-        const written = writeCheckpoint(repo, PLAN_REL, null);
+        const written = writeCheckpoint(repo, PLAN_REL, null, false, ARM_SESSION);
         assert.strictEqual(written.ok, true, 'test setup: checkpoint should write');
         assertSilent(runHook(firePayload(repo, { session_id: ARM_SESSION })), 'boundary already banked');
     } finally {
@@ -588,7 +593,7 @@ test('fires when the checkpoint banked in that window names another plan', () =>
     const repo = selfArmedRepo(ARM_SESSION, ARM_SESSION);
     try {
         const { writeCheckpoint } = require('../plugins/claude-kit/hooks/kit-compact-lib.js');
-        const written = writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null);
+        const written = writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null, false, ARM_SESSION);
         assert.strictEqual(written.ok, true, 'test setup: checkpoint should write');
         assertFires(runHook(firePayload(repo, { session_id: ARM_SESSION })), 'another plan\'s checkpoint');
     } finally {
@@ -851,6 +856,7 @@ test('silent when a CORROBORATED pending checkpoint is open', () => {
         writeFile(checkpointFile(repo), JSON.stringify({
             plan: PLAN_REL,
             boundSession: SESSION,
+            openedBy: SESSION,
             openedAt: iso(20 * 60 * 1000),
             pendingOffer: true
         }, null, 2) + '\n');
@@ -869,6 +875,7 @@ test('the corroboration argument is what decides that case, both directions', ()
         writeFile(checkpointFile(repo), JSON.stringify({
             plan: PLAN_REL,
             boundSession: SESSION,
+            openedBy: SESSION,
             openedAt: iso(20 * 60 * 1000),
             pendingOffer: true
         }, null, 2) + '\n');

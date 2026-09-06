@@ -26,7 +26,17 @@ const os = require('os');
 
 const HOOK = path.join(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-compact-gate.js');
 const CLI = path.join(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-compact-checkpoint.js');
-const { armGoal, bindSession, readGoal } = require('../plugins/claude-kit/hooks/kit-goal-lib.js');
+// The goal CLI, which the boundary note names as where a bound session's id is
+// printed: the checkpoint CLI's own status never prints the binding, its
+// checkpoint, gate-state and hold-stamp reports carrying no session id at all and
+// its marker legs naming each marker's own session instead, so a note that sent
+// the operator there for the id consent needs would send them to a report that
+// does not carry it.
+const GOAL_CLI = path.join(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-goal.js');
+// The lib source, read as text by the pin that holds the gate record's reason
+// vocabulary against the match rule's own literals.
+const LIB_SOURCE = path.join(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-compact-lib.js');
+const { armGoal, bindSession, readGoal, goalPathKind } = require('../plugins/claude-kit/hooks/kit-goal-lib.js');
 const {
     checkpointPath, writeCheckpoint, automationInEffect, stripLocalCommandOutput,
     commandArgsSpans, readTranscriptCapped, userCommandArgsClaimPlan,
@@ -37,7 +47,8 @@ const {
     roleBoundaryPath, consentPath, writeRoleBoundary, writeConsent, markerMatches,
     roleBoundarySessionsResult, sweepRoleBoundaryMarkers, ROLE_BOUNDARY_MAX_NAMES,
     ROLE_BOUNDARY_MAX_AGE_MS,
-    markerMomentHolds, transcriptPosition, sessionTranscriptPath
+    markerMomentHolds, transcriptPosition, sessionTranscriptPath, GATE_REASONS,
+    checkpointMatches
 } = require('../plugins/claude-kit/hooks/kit-compact-lib.js');
 
 // The session id the fixtures bind the goal to; payloads default to it so the
@@ -147,6 +158,14 @@ function writeRefusingPreload(dir) {
 // shim above because a case needs one without the other: a claim whose binding
 // lands and whose adoption does not is exactly the state the deny note has to
 // describe.
+//
+// The error carries the absolute path of the file the syscall was refused on,
+// which is the shape Node's own errno errors take and what unlinkRefusingPreload
+// below stages for the same reason: the reasons a failed write prints are
+// composed from err.message, so the cases about what this channel does with a
+// path in one need a path in it. A refusal is the only way to stage this at all,
+// a non-regular file at the checkpoint path being answered by its own reading
+// before any write is attempted.
 function checkpointWriteRefusingPreload(dir) {
     const shim = path.join(dir, 'refuse-checkpoint-write.js');
     writeFile(shim, [
@@ -155,7 +174,7 @@ function checkpointWriteRefusingPreload(dir) {
         'const realOpenSync = fs.openSync;',
         'fs.openSync = function (target) {',
         "    if (String(target).includes('compact-checkpoint.json.tmp')) {",
-        "        const err = new Error('EPERM: the fixture refuses this write');",
+        "        const err = new Error('EPERM: operation not permitted, open \\'' + target + '\\'');",
         "        err.code = 'EPERM';",
         '        throw err;',
         '    }',
@@ -361,6 +380,16 @@ function runCli(args, cwd, extraEnv) {
     });
 }
 
+// The same run with a calling session id in the environment. The CLI's write
+// verbs are scoped to the session the checkpoint blesses, so `open` and `clear`
+// refuse a caller they cannot resolve or cannot match; a fixture exercising
+// anything else about those verbs names its caller, and SESSION is the session
+// armedRepo binds. Every other verb takes runCli directly, since scrubbing the
+// id is what several of those cases are about.
+function runCliAs(args, cwd, session, extraEnv) {
+    return runCli(args, cwd, { CLAUDE_CODE_SESSION_ID: session, ...(extraEnv || {}) });
+}
+
 // Build a JSONL transcript whose newest main-thread assistant row carries a
 // usage object summing to `consumed`, followed by a couple of non-assistant
 // records (mirroring the live shape, where the newest usage row sits a few
@@ -484,12 +513,40 @@ const DENY_NOTE = 'kit-compact-gate: auto-compaction deferred to the next chapte
 const INTERACTIVE_NOTE = 'kit-compact-gate: auto-compaction deferred to the context safety ceiling';
 // Distinctive fragments of the boundary note's still-firing diagnostic, pinned
 // separately so a regression that drops the diagnostic sentences (while leaving
-// the lead intact) still fails this suite. There are two causes now, and both
-// are pinned: a checkpoint that was never opened, and one that was opened and
-// is no longer honored, which is the case this section's corroboration rule
-// created and the one an operator has no other way to guess at.
+// the lead intact) still fails this suite. The note names three causes and each
+// one is pinned: a checkpoint that was never opened, one that was opened and is
+// no longer honored, which is the case the corroboration rule created and the one
+// an operator has no other way to guess at, and one a session other than the
+// leash holder opened, which is also how a record carrying no opener at all
+// reads.
 const DIAGNOSTIC_FRAGMENT = 'boundary checkpoint was never opened';
 const DIAGNOSTIC_UNCORROBORATED = 'no deferral episode vouches for';
+const DIAGNOSTIC_WRONG_OPENER = 'a session other than the leash holder opened';
+
+// Whether a note actually sends the operator to a checkpoint verb. The notes
+// reach a verb only by printing it after the CLI path it would be run with, so
+// this is the shape that says a note points there, whatever prose sits around it:
+// the CLI path as the notes print it (forward slashes on every platform),
+// then the closing quote and whitespace the composition puts between the two,
+// then the verb as a whole word. Built from the path constant rather than pinned
+// to one quoting spelling, so a note that quotes the path differently cannot slip
+// a verb past a check reading for the old spelling.
+function invokesCheckpointVerb(text, verb) {
+    const printed = CLI.split(path.sep).join('/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(printed + '["\']?\\s*' + verb + '\\b').test(text);
+}
+
+// Every verb a note invokes, read off the class's own shape rather than off one
+// CLI constant: a node script path ends in .js, the composition puts a closing
+// quote and whitespace after it, and the verb follows as a whole word. The
+// reading above is anchored on the checkpoint CLI's path, so a note that grew a
+// second script constant would slip past it while this one sees the invocation
+// whatever path it carries. The two are a pair: that one says the checkpoint CLI
+// is not invoked with a given verb, this one says which verbs the note invokes at
+// all.
+function invokedVerbs(text) {
+    return Array.from(text.matchAll(/\.js["']?\s*([a-z][a-z-]*)\b/g), (m) => m[1]);
+}
 
 function assertDeny(res) {
     assert.strictEqual(res.status, 2, 'expected deny (exit 2); stderr: ' + res.stderr);
@@ -502,6 +559,44 @@ function assertDeny(res) {
     assert.ok(res.stderr.includes(DIAGNOSTIC_FRAGMENT), 'boundary note must carry the skipped-checkpoint diagnostic; stderr: ' + res.stderr);
     assert.ok(res.stderr.includes(DIAGNOSTIC_UNCORROBORATED),
         'boundary note must also name the uncorroborated-checkpoint cause; stderr: ' + res.stderr);
+    assert.ok(res.stderr.includes(DIAGNOSTIC_WRONG_OPENER),
+        'boundary note must also name the foreign-opener cause; stderr: ' + res.stderr);
+    // The remedy the note hands the operator must be a verb an operator can run:
+    // open is scoped to the calling session, so the release path is consent.
+    assert.ok(res.stderr.includes('consent --session'),
+        'boundary note must name consent --session as the operator release path; stderr: ' + res.stderr);
+    // Structural rather than spelled, and claimed no wider than it reads: what
+    // this covers is the checkpoint CLI's path followed by the open verb, which is
+    // the shape a note reaches that verb by. Prose naming the verb without a path
+    // in front of it is not that shape and is not what this leg speaks to (the
+    // note names open to say the release is not it).
+    assert.ok(!invokesCheckpointVerb(res.stderr, 'open'),
+        'boundary note must print no open verb after the checkpoint CLI path, which the operator\'s'
+            + ' shell cannot run; stderr: ' + res.stderr);
+    // The control for that silence: the same reading over a string that does
+    // invoke the verb must speak. Without it an absence proves the note clean and
+    // a pattern that matches nothing at all equally well. Its instance is composed
+    // from the same path constant the pattern is built from, so what it withholds
+    // and proves is the shape between the path and the verb rather than the path
+    // itself, and the leg below is what covers the class the constant cannot.
+    assert.ok(invokesCheckpointVerb('node "' + CLI.split(path.sep).join('/') + '" open', 'open'),
+        'the reading above must match a real invocation of the verb it looks for');
+    // The class rather than the constant: every verb the note invokes after any
+    // script path it prints, so a note that reached open through a second CLI
+    // constant is caught by a reading that names no constant at all. What the note
+    // is allowed to invoke is the operator's own verbs, and open is not one.
+    assert.ok(!invokedVerbs(res.stderr).includes('open'),
+        'boundary note must invoke open after no script path it prints, and it invokes: '
+            + invokedVerbs(res.stderr).join(', ') + '; stderr: ' + res.stderr);
+    // Its control, on an instance the reading was not handed: a path the pattern
+    // holds no literal of, matched on the shape alone.
+    assert.ok(invokedVerbs('node "/tmp/some-other-cli.js" open --now').includes('open'),
+        'the reading above must find the verb in an invocation of a path it knows nothing about');
+    // Where the session id consent needs is printed. The checkpoint CLI's status
+    // carries no session id on any leg, so the note names the goal CLI's status,
+    // by its own absolute installed path for the reason the path above is pinned.
+    assert.ok(res.stderr.includes('"' + GOAL_CLI.split(path.sep).join('/') + '" status'),
+        'boundary note must name the goal CLI\'s status as where the session id is printed; stderr: ' + res.stderr);
     // The remedy names a command the operator is meant to run, and the gate
     // ships as a plugin into every project, so the path must be the hook's own
     // absolute location rather than a repo-relative one that resolves only
@@ -645,7 +740,11 @@ test('gate: a boundary opened while the goal was unbound is honored by the claim
     // matching checkpoint.
     const { repo, planRel, transcript } = armedRepo({ unbound: true, claiming: true });
     try {
-        const wrote = writeCheckpoint(repo, planRel, null);
+        // Ownerless, and opened BY this run: what the CLI writes for a boundary
+        // declared before anything held the leash. The adoption supplies the
+        // owner, and the opener the record already carries is what the match
+        // rule then holds it to.
+        const wrote = writeCheckpoint(repo, planRel, null, false, SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         assertAllow(runGate(gatePayload(repo, transcript)));
         assert.ok(!fs.existsSync(checkpointPath(repo)), 'the adopted checkpoint is consumed by the allow');
@@ -662,7 +761,7 @@ test('gate: an adoption that cannot be written denies, says so, and leaves the c
     // stands, and the next boundary the run opens records it.
     const { repo, planRel, transcript } = armedRepo({ unbound: true, claiming: true });
     try {
-        const wrote = writeCheckpoint(repo, planRel, null);
+        const wrote = writeCheckpoint(repo, planRel, null, false, SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         const res = runGate(gatePayload(repo, transcript),
             { NODE_OPTIONS: checkpointWriteRefusingPreload(repo) });
@@ -696,7 +795,7 @@ test('gate: a claim leaves a checkpoint belonging to another session alone, and 
     // claim arriving beside it neither rewrites it nor is opened by it.
     const { repo, transcript } = armedRepo({ unbound: true, claiming: true });
     try {
-        const wrote = writeCheckpoint(repo, 'docs/plans/example.md', 'ses-some-other-run');
+        const wrote = writeCheckpoint(repo, 'docs/plans/example.md', 'ses-some-other-run', false, 'ses-some-other-run');
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         assertDeny(runGate(gatePayload(repo, transcript)));
         assert.strictEqual(readCheckpoint(repo).boundSession, 'ses-some-other-run',
@@ -712,7 +811,7 @@ test('gate: a claim leaves an ownerless checkpoint naming another plan alone, an
     // spend this run's first offer.
     const { repo, transcript } = armedRepo({ unbound: true, claiming: true });
     try {
-        const wrote = writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null);
+        const wrote = writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null, false, SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         assertDeny(runGate(gatePayload(repo, transcript)));
         assert.strictEqual(readCheckpoint(repo).boundSession, null, 'the stale record is untouched');
@@ -834,7 +933,7 @@ test('gate: a boundary a self-armed run banked while unbound is honored when it 
     // that boundary instead of deferring a further chapter.
     const { repo, planRel, transcript } = selfArmedRepo(ARMING_SESSION);
     try {
-        const wrote = writeCheckpoint(repo, planRel, null);
+        const wrote = writeCheckpoint(repo, planRel, null, false, ARMING_SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         assertAllow(runGate(gatePayload(repo, transcript, { session_id: ARMING_SESSION })));
         assert.ok(!fs.existsSync(checkpointPath(repo)), 'the adopted checkpoint is consumed by the allow');
@@ -850,7 +949,7 @@ test('gate: a bystander meeting an ownerless checkpoint adopts nothing and is no
     // still ownerless afterwards for the session that can.
     const { repo, planRel, transcript } = selfArmedRepo(ARMING_SESSION);
     try {
-        const wrote = writeCheckpoint(repo, planRel, null);
+        const wrote = writeCheckpoint(repo, planRel, null, false, ARMING_SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         assertInteractiveDeny(runGate(gatePayload(repo, transcript, { session_id: BYSTANDER_SESSION })));
         assert.strictEqual(readCheckpoint(repo).boundSession, null, 'the record keeps no owner');
@@ -1406,11 +1505,16 @@ test('gate: >1MB transcript, above ceiling: allow (valve trips off the capped ta
 // field.
 
 // Hand-write an ownerless checkpoint with an arbitrary openedAt, which is the
-// record a boundary declared while the goal was unbound leaves behind.
-function writeOwnerlessCheckpoint(repo, planRel, openedAt, pendingOffer) {
+// record a boundary declared while the goal was unbound leaves behind. It
+// carries an opener, because the session that declared the boundary is known
+// even where no binding is: `openedBy` is what the CLI records at the open and
+// what the match rule holds the adopted record to. The cases that mean to test
+// a record with no opener at all write their own.
+function writeOwnerlessCheckpoint(repo, planRel, openedAt, pendingOffer, openedBy) {
     writeFile(checkpointPath(repo), JSON.stringify({
         plan: planRel,
         boundSession: null,
+        openedBy: openedBy === undefined ? SESSION : openedBy,
         openedAt,
         pendingOffer: pendingOffer === true
     }) + '\n');
@@ -1419,15 +1523,16 @@ function writeOwnerlessCheckpoint(repo, planRel, openedAt, pendingOffer) {
 test('adoptCheckpoint: an ownerless record gains the owner and keeps its age and its pending flag', () => {
     // The age is the record's own, carried over verbatim: an adoption gives a
     // boundary an owner and nothing else, so a record cannot buy a fresh lease
-    // by being adopted late.
+    // by being adopted late. The opener is carried over on the same terms, an
+    // adoption answering who owns a boundary and never who declared it.
     const { repo, planRel } = armedRepo();
     try {
         const openedAt = new Date(Date.now() - 4 * 60 * 1000).toISOString();
-        writeOwnerlessCheckpoint(repo, planRel, openedAt, true);
+        writeOwnerlessCheckpoint(repo, planRel, openedAt, true, ARMING_SESSION);
         const result = adoptCheckpoint(repo, { plan: planRel }, SESSION);
         assert.deepStrictEqual(result, { ok: true, adopted: true, reason: null });
         assert.deepStrictEqual(readCheckpoint(repo), {
-            plan: planRel, boundSession: SESSION, openedAt, pendingOffer: true
+            plan: planRel, boundSession: SESSION, openedBy: ARMING_SESSION, openedAt, pendingOffer: true
         });
     } finally {
         rmDir(repo);
@@ -1461,7 +1566,7 @@ test('adoptCheckpoint: a record replaced under the write is left alone rather th
         assert.strictEqual(result.ok, false, 'the adoption reports that it did not land');
         assert.strictEqual(result.adopted, false, 'and adopted nothing');
         assert.deepStrictEqual(readCheckpoint(repo), {
-            plan: planRel, boundSession: null, openedAt: newer, pendingOffer: false
+            plan: planRel, boundSession: null, openedBy: SESSION, openedAt: newer, pendingOffer: false
         }, 'the newer boundary is untouched');
     } finally {
         fs.openSync = realOpenSync;
@@ -1469,10 +1574,115 @@ test('adoptCheckpoint: a record replaced under the write is left alone rather th
     }
 });
 
+test('adoptCheckpoint: a record another session opened at the same instant is left alone rather than republished', () => {
+    // The verify identifies the record by the fields every writer of this file
+    // writes at once, and the opener is one of them: two opens against an unbound
+    // goal inside one millisecond agree on plan, timestamp and ownerlessness and
+    // differ only in openedBy. Without the opener in the comparison the adoption
+    // republishes the record it read, so the session that just claimed the leash
+    // gets a boundary carrying the OTHER caller's opener, which the gate refuses at
+    // wrong-opener, and the newer boundary that would have been honored is gone.
+    const { repo, planRel } = armedRepo();
+    const realOpenSync = fs.openSync;
+    const openedAt = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+    // The control runs the same shim with the same opener, which is the record
+    // being replaced by an identical one: the adoption lands there, so what
+    // refuses the case above is the opener and not the concurrent write.
+    try {
+        for (const leg of [
+            { what: 'a different opener', opener: ARMING_SESSION, adopted: false },
+            { what: 'the same opener', opener: BYSTANDER_SESSION, adopted: true }
+        ]) {
+            try {
+                writeOwnerlessCheckpoint(repo, planRel, openedAt, false, BYSTANDER_SESSION);
+                fs.openSync = function (target) {
+                    if (String(target).includes('compact-checkpoint.json.tmp')) {
+                        fs.openSync = realOpenSync;
+                        writeOwnerlessCheckpoint(repo, planRel, openedAt, false, leg.opener);
+                    }
+                    return realOpenSync.apply(fs, arguments);
+                };
+                const result = adoptCheckpoint(repo, { plan: planRel }, SESSION);
+                assert.strictEqual(result.adopted, leg.adopted, leg.what + ': the adoption\'s own reading');
+                assert.strictEqual(result.ok, leg.adopted, leg.what + ': and whether it reports landing');
+                assert.strictEqual(readCheckpoint(repo).openedBy, leg.opener,
+                    leg.what + ': the opener on disk is the newer boundary\'s');
+                assert.strictEqual(readCheckpoint(repo).boundSession, leg.adopted ? SESSION : null,
+                    leg.what + ': and the owner is written only where the adoption landed');
+            } finally {
+                fs.openSync = realOpenSync;
+            }
+        }
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('lib: every reason either producer can return is one the gate record may carry', () => {
+    // GATE_REASONS is paired by hand with the two things that produce a reason
+    // reaching gateRecord, and gateRecord maps a reason outside that list to null,
+    // so an unpaired code lands a deny with no clause on it: the monitoring record
+    // for the defect this section exists to make visible would read as a deny with
+    // no reason at all. The pairing is read off both producers' own source, so a
+    // leg added to either with a new code fails here rather than going quiet in
+    // the log.
+    //
+    // The two producers are the checkpoint match rule, whose codes a boundary deny
+    // carries, and the gate hook itself, whose clause names its own reason on
+    // every other verdict it takes (its decide() records straight through
+    // recordGateDecision). One closed vocabulary covers both.
+    //
+    // The literals are pulled from the whole right-hand side of each `reason:`
+    // rather than from a quote sitting immediately after it, because the hook's
+    // interactive deny picks between two of them in a ternary; a pattern anchored
+    // on `reason: '` reads that leg as no literal at all.
+    const reasonLiterals = (text) => [...text.matchAll(/reason: ([^,}\n]+)/g)]
+        .flatMap((m) => [...m[1].matchAll(/'([^']*)'/g)].map((q) => q[1]));
+
+    const src = fs.readFileSync(LIB_SOURCE, 'utf8');
+    const start = src.indexOf('\nfunction checkpointMatches(');
+    assert.ok(start > 0, 'the match rule is found in the source');
+    const end = src.indexOf('\n}', start);
+    assert.ok(end > start, 'and its body ends');
+    const body = src.slice(start, end);
+    // The slice is bounded by the first line-leading brace after the declaration,
+    // which is the body's close only if no nested block inside it closes at column
+    // zero first. The rule's terminal line is what proves the whole body was
+    // captured: a slice that stopped early would not carry the match every other
+    // leg falls through to, and every code below it would be read as absent.
+    assert.ok(body.includes('return { ok: true, reason: null };'),
+        'and the slice reaches the rule\'s own terminal match, so the whole body was captured');
+    const matchReasons = reasonLiterals(body);
+    // The instrument speaks before its silence is trusted: an empty match set, or
+    // one missing the code the opener leg returns, means the parse missed the body
+    // rather than that the vocabulary is paired.
+    assert.ok(matchReasons.length >= 5,
+        'the parse finds the rule\'s reason codes: ' + JSON.stringify(matchReasons));
+    assert.ok(matchReasons.includes('wrong-opener'),
+        'including the opener leg\'s: ' + JSON.stringify(matchReasons));
+
+    const hookReasons = reasonLiterals(fs.readFileSync(HOOK, 'utf8'));
+    // The same control on the second producer, and its second half is the one the
+    // ternary leg answers: 'checkpoint' is written as a plain literal, while
+    // 'bystander' is one arm of the interactive deny's choice, so finding both
+    // says the parse reaches the shape a simpler pattern misses.
+    assert.ok(hookReasons.length >= 10,
+        'the parse finds the hook\'s own clause reasons: ' + JSON.stringify(hookReasons));
+    assert.ok(hookReasons.includes('checkpoint'),
+        'including a plainly written one: ' + JSON.stringify(hookReasons));
+    assert.ok(hookReasons.includes('bystander'),
+        'and one written as an arm of a ternary: ' + JSON.stringify(hookReasons));
+
+    for (const reason of new Set([...matchReasons, ...hookReasons])) {
+        assert.ok(GATE_REASONS.includes(reason),
+            reason + ' is a reason a producer returns and the gate record must be able to carry it');
+    }
+});
+
 test('adoptCheckpoint: a record already naming a session is never rewritten', () => {
     const { repo, planRel } = armedRepo();
     try {
-        const wrote = writeCheckpoint(repo, planRel, 'ses-some-other-run');
+        const wrote = writeCheckpoint(repo, planRel, 'ses-some-other-run', false, 'ses-some-other-run');
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         const result = adoptCheckpoint(repo, { plan: planRel }, SESSION);
         assert.deepStrictEqual(result, { ok: true, adopted: false, reason: 'owned' });
@@ -1497,6 +1707,52 @@ test('adoptCheckpoint: an owner the writer could not have stored reads as no own
             assert.deepStrictEqual(adoptCheckpoint(repo, { plan: planRel }, SESSION),
                 { ok: true, adopted: true, reason: null }, JSON.stringify(planted) + ' reads as no owner');
             assert.strictEqual(readCheckpoint(repo).boundSession, SESSION);
+        }
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('adoptCheckpoint: an opener the writer could not have stored adopts as no opener rather than failing', () => {
+    // The opener passes the same rule on its way back out that it passed going in,
+    // so a hand-edited value the writer would refuse reads as no opener here
+    // instead of failing the whole adoption: the claim is what the run needs, and
+    // a record nothing can say the ownership of is one the gate refuses on its own
+    // opener leg, which is the belt-and-braces check working rather than a gap.
+    const { repo, planRel, transcript } = armedRepo({ unbound: true, claiming: true });
+    try {
+        writeFile(checkpointPath(repo), JSON.stringify({
+            plan: planRel, boundSession: null, openedBy: 42,
+            openedAt: new Date().toISOString(), pendingOffer: false
+        }) + '\n');
+        assert.deepStrictEqual(adoptCheckpoint(repo, { plan: planRel }, SESSION),
+            { ok: true, adopted: true, reason: null }, 'the adoption lands');
+        assert.strictEqual(readCheckpoint(repo).boundSession, SESSION, 'with the owner supplied');
+        assert.strictEqual(readCheckpoint(repo).openedBy, null,
+            'and the unstorable opener stored as none');
+
+        // And the gate's own reading of that adopted record: refused on the opener
+        // leg, which is the outcome the adoption's own header describes.
+        assertDeny(runGate(gatePayload(repo, transcript)));
+        assert.strictEqual(readState(repo).lastDecision.reason, 'wrong-opener',
+            'the deny names the opener leg rather than a failed adoption');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('lib: a checkpoint write with no opening session named is refused', () => {
+    // The opener has no default at the write door. A caller that omits it is one
+    // that did not distinguish the opener from the owner, and standing the owner
+    // in for it would store a real-looking declaration for a caller that never
+    // made one, on the one field that exists to refuse a record.
+    const { repo, planRel } = armedRepo();
+    try {
+        for (const omitted of [undefined, null]) {
+            const res = writeCheckpoint(repo, planRel, SESSION, false, omitted);
+            assert.strictEqual(res.ok, false, JSON.stringify(omitted) + ' is refused');
+            assert.ok(/opening session/.test(res.reason), 'and says which field: ' + res.reason);
+            assert.ok(!fs.existsSync(checkpointPath(repo)), 'and nothing is written');
         }
     } finally {
         rmDir(repo);
@@ -1570,7 +1826,7 @@ test('gate: an ownerless boundary older than the age bound is adopted by the cla
 test('gate: matching checkpoint open: allow AND consume; the next attempt is denied again', () => {
     const { repo, planRel, transcript } = armedRepo();
     try {
-        const wrote = writeCheckpoint(repo, planRel, SESSION);
+        const wrote = writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: checkpoint should write');
         const cpFile = checkpointPath(repo);
         assert.ok(fs.existsSync(cpFile), 'setup: checkpoint on disk');
@@ -1588,7 +1844,7 @@ test('gate: matching checkpoint open: allow AND consume; the next attempt is den
 test('gate: checkpoint naming a different plan reads as absent: deny, stale file left in place', () => {
     const { repo, transcript } = armedRepo();
     try {
-        const wrote = writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION);
+        const wrote = writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION, false, SESSION);
         assert.strictEqual(wrote.ok, true, 'test setup: stale checkpoint should write');
         assertDeny(runGate(gatePayload(repo, transcript)));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'stale checkpoint is not consumed');
@@ -1604,7 +1860,7 @@ test('gate: checkpoint bound to a different session reads as absent: deny, orpha
     // mid-chapter compaction.
     const { repo, planRel, transcript } = armedRepo();
     try {
-        const wrote = writeCheckpoint(repo, planRel, 'ses-crashed-previous-run');
+        const wrote = writeCheckpoint(repo, planRel, 'ses-crashed-previous-run', false, 'ses-crashed-previous-run');
         assert.strictEqual(wrote.ok, true, 'test setup: orphan checkpoint should write');
         assertDeny(runGate(gatePayload(repo, transcript)));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'orphan checkpoint is not consumed');
@@ -1662,10 +1918,21 @@ function openEpisodeFor(repo, session, sinceMsAgo) {
 
 // Hand-write a plan-and-session-matching checkpoint with an arbitrary
 // openedAt value (or none), isolating the freshness leg of the match.
-// pendingOffer is written only when given, so the default fixture is the
-// three-field shape the kit wrote before the flag existed.
-function writeCheckpointAt(repo, planRel, openedAt, pendingOffer) {
-    const record = { plan: planRel, boundSession: SESSION };
+// pendingOffer is written only when given, so the default fixture omits that
+// key, which is how a record written before the flag existed reads.
+//
+// The opener IS written by default, naming the bound session, because that is
+// what a real open records and what the match rule requires: without it every
+// case here would be refused on the opener leg rather than reaching the leg it
+// names. So this helper never produces the record an older kit left, which
+// carries neither key; that shape has a case of its own below. `openedBy`
+// overrides, for the cases that mean to test the opener leg.
+function writeCheckpointAt(repo, planRel, openedAt, pendingOffer, openedBy) {
+    const record = {
+        plan: planRel,
+        boundSession: SESSION,
+        openedBy: openedBy === undefined ? SESSION : openedBy
+    };
     if (openedAt !== undefined) record.openedAt = openedAt;
     if (pendingOffer !== undefined) record.pendingOffer = pendingOffer;
     writeFile(checkpointPath(repo), JSON.stringify(record) + '\n');
@@ -2026,7 +2293,7 @@ test('gate: a future-dated pending-offer checkpoint reads as future, not honored
     }
 });
 
-test('gate: an older three-field checkpoint keeps the ten-minute bound exactly', () => {
+test('gate: a checkpoint carrying no pendingOffer key keeps the ten-minute bound exactly', () => {
     // Records written before the flag existed carry no pendingOffer key, and
     // reading an absent key as pending would give every one of them the long
     // bound. Every repo here stages a hold that is standing, owned, and older
@@ -2039,7 +2306,7 @@ test('gate: an older three-field checkpoint keeps the ten-minute bound exactly',
         openEpisodeFor(fresh.repo, SESSION, 6 * 60 * 1000);
         writeCheckpointAt(fresh.repo, fresh.planRel, new Date(Date.now() - 5 * 60 * 1000).toISOString());
         const cp = JSON.parse(fs.readFileSync(checkpointPath(fresh.repo), 'utf8'));
-        assert.ok(!('pendingOffer' in cp), 'setup: the fixture is the three-field shape');
+        assert.ok(!('pendingOffer' in cp), 'setup: the fixture carries no pendingOffer key');
         assertAllow(runGate(gatePayload(fresh.repo, fresh.transcript)));
         assert.ok(!fs.existsSync(checkpointPath(fresh.repo)), 'inside ten minutes it still matches');
     } finally {
@@ -2075,6 +2342,31 @@ test('gate: an older three-field checkpoint keeps the ten-minute bound exactly',
     }
 });
 
+test('gate: the record an older kit wrote, carrying neither the flag nor an opener, is refused on the opener leg', () => {
+    // The shape an older kit writes: three fields, carrying no opener and so
+    // nothing to say whose boundary it was. Its fate is the same however
+    // fresh it is, because the opener leg is decided before the age legs, and
+    // that is the whole point of the read-side check: a record no session's write
+    // door ever validated blesses nobody's compaction. Both ages are run so the
+    // case cannot pass by having expired instead.
+    for (const ageMs of [5 * 60 * 1000, 11 * 60 * 1000]) {
+        const { repo, planRel, transcript } = armedRepo();
+        try {
+            writeFile(checkpointPath(repo), JSON.stringify({
+                plan: planRel,
+                boundSession: SESSION,
+                openedAt: new Date(Date.now() - ageMs).toISOString()
+            }) + '\n');
+            assertDeny(runGate(gatePayload(repo, transcript)));
+            assert.strictEqual(readState(repo).lastDecision.reason, 'wrong-opener',
+                'the opener leg refuses it at ' + (ageMs / 60000) + ' minutes old, not the age leg');
+            assert.ok(fs.existsSync(checkpointPath(repo)), 'and a record the gate ignores is not consumed');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
 // ---------------------------------------------------------------------------
 // What the checkpoint reader will open at all.
 //
@@ -2095,7 +2387,7 @@ test('gate: a checkpoint path reported as a symlink is not read, though reading 
     const { repo, planRel, transcript } = armedRepo();
     const shimDir = makeDir('kit-compact-gate-shim-');
     try {
-        writeCheckpoint(repo, planRel, SESSION, false);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         const res = runGate(gatePayload(repo, transcript),
             { NODE_OPTIONS: symlinkReportingPreload(shimDir, 'compact-checkpoint.json') });
         assertDeny(res);
@@ -2137,7 +2429,7 @@ test('gate: bystander verdict does NOT consume a matching checkpoint', () => {
     // exclusive to the bound run's boundary-driven allow.
     const { repo, planRel, transcript } = armedRepo();
     try {
-        writeCheckpoint(repo, planRel, SESSION);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         assertInteractiveDeny(runGate(gatePayload(repo, transcript, { session_id: 'ses-someone-else' })));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'the bound run still needs its checkpoint');
     } finally {
@@ -2148,7 +2440,7 @@ test('gate: bystander verdict does NOT consume a matching checkpoint', () => {
 test('gate: external-engine stand-down does NOT consume a matching checkpoint', () => {
     const { repo, planRel, transcript } = armedRepo();
     try {
-        writeCheckpoint(repo, planRel, SESSION);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         assertAllow(runGate(gatePayload(repo, transcript), { KIT_EXTERNAL_ENGINE: '1' }));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'stand-down precedes the checkpoint clause');
     } finally {
@@ -2159,7 +2451,7 @@ test('gate: external-engine stand-down does NOT consume a matching checkpoint', 
 test('gate: manual-trigger allow does NOT consume a matching checkpoint', () => {
     const { repo, planRel, transcript } = armedRepo();
     try {
-        writeCheckpoint(repo, planRel, SESSION);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         assertAllow(runGate(gatePayload(repo, transcript, { trigger: 'manual' })));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'manual compaction never touches the checkpoint');
     } finally {
@@ -2170,7 +2462,7 @@ test('gate: manual-trigger allow does NOT consume a matching checkpoint', () => 
 test('gate: valve allow (over ceiling, no matching checkpoint) does NOT consume a stale checkpoint', () => {
     const { repo, transcript } = armedRepo({ consumed: CEILING + 20000 });
     try {
-        writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION);
+        writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION, false, SESSION);
         assertAllow(runGate(gatePayload(repo, transcript)));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'a stale checkpoint is never the gate\'s to delete');
     } finally {
@@ -2184,7 +2476,7 @@ test('gate: matching checkpoint open AND over the ceiling: allow is checkpoint-d
     // does not leak an extra mid-chapter allow after the compaction lands.
     const { repo, planRel, transcript } = armedRepo({ consumed: CEILING + 20000 });
     try {
-        writeCheckpoint(repo, planRel, SESSION);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         assertAllow(runGate(gatePayload(repo, transcript)));
         assert.ok(!fs.existsSync(checkpointPath(repo)), 'checkpoint consumed even with the valve tripped');
     } finally {
@@ -2199,7 +2491,7 @@ test('gate: matching checkpoint open AND over the ceiling: allow is checkpoint-d
 test('cli: open with an armed goal writes the checkpoint atomically for that plan', () => {
     const { repo, planRel } = armedRepo();
     try {
-        const res = runCli(['open'], repo);
+        const res = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(res.status, 0, 'open succeeds; stderr: ' + res.stderr);
         assert.ok(res.stdout.includes(planRel), 'output names the plan');
         const cp = JSON.parse(fs.readFileSync(checkpointPath(repo), 'utf8'));
@@ -2233,12 +2525,165 @@ test('cli: open with no goal armed refuses and writes nothing', () => {
     }
 });
 
-test('cli: open with an unparseable goal state refuses', () => {
+// The checkpoint CLI's own source text. The CLI exports nothing, its module body
+// being argument parsing that runs on require, so a pin on a value it words once
+// is read off the source rather than imported.
+function cliSource() {
+    return fs.readFileSync(CLI, 'utf8');
+}
+
+// The value of a string const declared in a source text, joined from the quoted
+// segments of its declaration. The capture is bounded on the end of the statement,
+// the line that closes with a quote and a semicolon, rather than on the first
+// semicolon in the text: a sentence worded with a semicolon inside its quotes
+// would otherwise be read as its own prefix, and every assertion made on the
+// result would hold on that prefix while the tail drifted unread.
+function stringConstValue(src, name) {
+    const m = src.match(new RegExp('\\nconst ' + name + ' = ([\\s\\S]*?\';)\\r?\\n'));
+    assert.ok(m, name + ' is declared as a string const in the source');
+    const segments = [...m[1].matchAll(/'([^']*)'/g)].map((q) => q[1]);
+    // The instrument speaks before its reading is trusted. Both of the CLI consts
+    // read here are written as concatenations across several lines, so a parse that
+    // found one segment read the first line alone and every assertion below it
+    // would hold on a prefix while proving nothing about the rest of the sentence.
+    assert.ok(segments.length >= 2,
+        name + ' parses as the multi-line concatenation it is written as, rather than as its first'
+            + ' line: ' + JSON.stringify(segments));
+    const value = segments.join('');
+    // And the reading reaches the end of the declaration. The statement's last
+    // quoted segment is read independently, by walking the declaration's own lines
+    // to the first one that closes with a quote and a semicolon, so a capture that
+    // stopped somewhere earlier ends on some other segment and this leg speaks.
+    const decl = src.slice(src.indexOf('\nconst ' + name + ' = ') + 1).split('\n');
+    const lastLine = decl[decl.findIndex((line) => /';\s*$/.test(line))];
+    const lastSegment = [...lastLine.matchAll(/'([^']*)'/g)].pop()[1];
+    assert.ok(value.endsWith(lastSegment),
+        name + ' reconstructs through the last quoted segment of its declaration, '
+            + JSON.stringify(lastSegment) + ', rather than stopping short: ' + JSON.stringify(value));
+    return value;
+}
+
+// The entries of an object-literal const declared in a source text, as a map from
+// each key to its quoted phrase, one entry to a line. Bounded on the brace and
+// semicolon that close the declaration, and every key the literal declares must
+// come back with a phrase: the count is read a second time off the keys alone, so
+// an entry this reader cannot parse is a refusal rather than a map that is quietly
+// one phrase short.
+function objectConstEntries(src, name) {
+    const m = src.match(new RegExp('\\nconst ' + name + ' = \\{\\r?\\n([\\s\\S]*?)\\r?\\n\\};'));
+    assert.ok(m, name + ' is declared as an object-literal const in the source');
+    const entries = {};
+    for (const entry of m[1].matchAll(/^[ \t]*(\w+):[ \t]*'([^']*)'/gm)) entries[entry[1]] = entry[2];
+    const declaredKeys = (m[1].match(/^[ \t]*\w+:/gm) || []).length;
+    assert.strictEqual(Object.keys(entries).length, declaredKeys,
+        name + ' comes back with a phrase for every key its declaration carries: '
+            + JSON.stringify(entries));
+    return entries;
+}
+
+// What each reading of an unreadable goal state prints as, read off the one place
+// the CLI words them. The kinds are the goal library's internal tokens
+// (plantUnreadableGoalState below plants the three a fixture can produce), and the
+// CLI maps each to a phrase at the print site: the token 'file' means a regular,
+// sane-sized state file whose contents the goal reader will not use, which as a
+// bare parenthetical tells an operator nothing at all. Deriving the map rather
+// than copying it is what keeps a phrase reworded at the print site from passing
+// here against a stale copy of its old wording.
+const UNREADABLE_GOAL_PHRASE = objectConstEntries(cliSource(), 'UNREADABLE_GOAL_PHRASES');
+
+// The same for the checkpoint reader's two transient readings. Their tokens are
+// that reader's own vocabulary, 'lstat' naming a syscall rather than a reason, so
+// each prints as a phrase at the refusal site too.
+const UNREADABLE_CHECKPOINT_PHRASE = objectConstEntries(cliSource(), 'UNREADABLE_CHECKPOINT_PHRASES');
+
+test('test instrument: the source-const readers read a whole declaration, on fixtures shaped to defeat them', () => {
+    // Both readers above are patterns over source text, and a pattern that stops
+    // early returns a plausible short answer rather than an error. So each is run
+    // here against a fixture holding exactly the shape that would defeat a naive
+    // read, matched on the declaration's shape like any real one.
+    //
+    // A sentence worded with a semicolon inside its quotes, placed on the third
+    // line: a capture bounded on the first semicolon returns the text up to it,
+    // which is two whole segments and so passes the multi-line leg above while being
+    // a prefix of the sentence, with the tail unread.
+    const semicoloned = '\nconst FIXTURE = \'a remedy that begins plainly\'\n'
+        + '    + \' and continues on a second line\'\n'
+        + '    + \' before a clause worded with a semicolon; and the rest of that clause\'\n'
+        + '    + \' and one more line after it\';\nconst LATER = \'another declaration\';\n';
+    assert.strictEqual(stringConstValue(semicoloned, 'FIXTURE'),
+        'a remedy that begins plainly and continues on a second line before a clause worded with a'
+            + ' semicolon; and the rest of that clause and one more line after it',
+        'the string reader reconstructs a declaration whose quoted text carries a semicolon');
+    // Two entries, because a reader that took the first line of the literal would
+    // return one and every phrase leg keyed on the other would then read undefined.
+    const twoEntries = '\nconst FIXTURE_MAP = {\n    alpha: \'the first phrase\',\n'
+        + '    beta: \'the second phrase\'\n};\n';
+    assert.deepStrictEqual(objectConstEntries(twoEntries, 'FIXTURE_MAP'),
+        { alpha: 'the first phrase', beta: 'the second phrase' },
+        'the object reader reconstructs every entry of a literal');
+    // And the count leg speaks: an entry whose phrase sits on the line below its
+    // key is one this reader cannot parse, and it refuses rather than handing back a
+    // map that is silently a key short.
+    const unparseableEntry = '\nconst FIXTURE_MAP = {\n    alpha: \'the first phrase\',\n'
+        + '    beta:\n        \'the second phrase\'\n};\n';
+    assert.throws(() => objectConstEntries(unparseableEntry, 'FIXTURE_MAP'),
+        /every key its declaration carries/,
+        'and refuses a literal it can only read part of');
+});
+
+test('cli: open with an unparseable goal state refuses on the unreadable-state rule, not as no goal armed', () => {
+    // A goal state that is present and cannot be read is not an absent one, and
+    // the leash question cannot be answered over it: whether the file says this
+    // session holds the leash, another does, or nothing does is exactly what could
+    // not be read. So the refusal names the state rather than telling the caller
+    // nothing is armed, which over a hand-mangled file would be a false reading.
     const { repo } = armedRepo();
     try {
         writeFile(path.join(repo, '.kit', 'goal-state.json'), '{{{');
-        const res = runCli(['open'], repo);
+        const res = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(res.status, 1, 'open refuses');
+        assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+            'the refusal names the rule that refused it: ' + res.stderr);
+        assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE.file + ')'),
+            'and the reading it took, in words rather than as the kind rule\'s own token: '
+                + res.stderr);
+        assert.ok(!res.stderr.includes('(file)'),
+            'and never that token, which on a terminal reads as nothing: ' + res.stderr);
+        assert.ok(res.stderr.includes('whether any session holds the leash cannot be established'),
+            'and why that matters: ' + res.stderr);
+        assert.ok(!res.stderr.includes('no kit goal is armed'),
+            'and never reads a present state as an absent one: ' + res.stderr);
+        assert.ok(!fs.existsSync(checkpointPath(repo)), 'nothing written');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a goal state that parses and is not a usable goal state takes the same refusal, worded for both shapes', () => {
+    // The second shape the 'file' reading covers, and the one the phrase has to be
+    // true of: the JSON parses, and the goal library's state normalizer then
+    // rejects it, a plan path that does not round-trip its own normalization being
+    // the case a hand edit produces. readGoal answers null exactly as it does for
+    // JSON that does not parse, and the kind rule answers 'file' for both, so the
+    // phrase printed for that reading must not promise a parse failure.
+    const { repo } = armedRepo();
+    try {
+        writeFile(path.join(repo, '.kit', 'goal-state.json'),
+            JSON.stringify({ plan: '../outside-the-repo.md', boundSession: SESSION }) + '\n');
+        assert.strictEqual(readGoal(repo), null,
+            'test setup: the goal reader will not use this state');
+        assert.strictEqual(goalPathKind(repo), 'file',
+            'test setup: and the kind rule reads it as a regular file, the same reading');
+        const res = runCliAs(['open'], repo, SESSION);
+        assert.strictEqual(res.status, 1, 'open refuses');
+        assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+            'the refusal names the rule that refused it, the unreadable-state rule: ' + res.stderr);
+        assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE.file + ')'),
+            'and the reading in words, which is true of a file that parses too: ' + res.stderr);
+        assert.ok(!res.stderr.includes('do not parse'),
+            'and never a parse failure, which is false for this file: ' + res.stderr);
+        assert.ok(!res.stderr.includes('no kit goal is armed'),
+            'and never reads a present state as an absent one: ' + res.stderr);
         assert.ok(!fs.existsSync(checkpointPath(repo)), 'nothing written');
     } finally {
         rmDir(repo);
@@ -2253,7 +2698,7 @@ test('cli: open under the leash\'s own deferral episode records a pending offer 
     const { repo } = armedRepo();
     try {
         openEpisodeFor(repo, SESSION);
-        const res = runCli(['open'], repo);
+        const res = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(res.status, 0, 'open succeeds; stderr: ' + res.stderr);
         assert.strictEqual(openedCheckpoint(repo).pendingOffer, true, 'the pending offer is recorded');
         assert.ok(res.stdout.includes('holding offers'), 'and named to the reader: ' + res.stdout);
@@ -2262,6 +2707,10 @@ test('cli: open under the leash\'s own deferral episode records a pending offer 
         // goes idle first. The sentence must not promise the cap.
         assert.ok(res.stdout.includes('for as long as the gate keeps deferring'),
             'the real bound is the hold, not the cap: ' + res.stdout);
+        // The other side of the unbound condition: this caller holds the leash, so
+        // the boundary is honored outright and the line states no condition on it.
+        assert.ok(!res.stdout.includes('a claim by another session leaves it refused'),
+            'and no condition a bound record does not carry: ' + res.stdout);
     } finally {
         rmDir(repo);
     }
@@ -2270,7 +2719,7 @@ test('cli: open under the leash\'s own deferral episode records a pending offer 
 test('cli: open with no episode open records no pending offer', () => {
     const { repo } = armedRepo();
     try {
-        const res = runCli(['open'], repo);
+        const res = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(res.status, 0, 'open succeeds; stderr: ' + res.stderr);
         assert.strictEqual(openedCheckpoint(repo).pendingOffer, false, 'the ordinary boundary');
         assert.ok(res.stdout.includes('the next auto-compaction lands here'),
@@ -2296,6 +2745,15 @@ test('cli: open while unbound records the pending offer of the hold the caller i
         assert.strictEqual(res.status, 0, 'open succeeds; stderr: ' + res.stderr);
         assert.strictEqual(openedCheckpoint(repo).pendingOffer, true, 'the pending offer is recorded');
         assert.ok(res.stdout.includes('holding offers'), 'and named to the reader: ' + res.stdout);
+        // The condition an unbound record carries rides in this branch too. The
+        // sentence is about which age bound the record takes, and without the
+        // condition beside it a caller reads a wait for the next offer as a promise
+        // that the offer lands on this boundary, which for an unbound record holds
+        // only if the caller is the session the leash binds to.
+        assert.ok(res.stdout.includes('honored once the leash binds this session'),
+            'and the condition the unbound record carries: ' + res.stdout);
+        assert.ok(res.stdout.includes('a claim by another session leaves it refused'),
+            'in both of its directions: ' + res.stdout);
     } finally {
         rmDir(repo);
     }
@@ -2324,7 +2782,7 @@ test('cli: an episode another session is held under is not this boundary\'s pend
     const { repo } = armedRepo();
     try {
         openEpisodeFor(repo, 'ses-99998888-dddd-eeee-ffff-777766665555');
-        assert.strictEqual(runCli(['open'], repo).status, 0);
+        assert.strictEqual(runCliAs(['open'], repo, SESSION).status, 0);
         assert.strictEqual(openedCheckpoint(repo).pendingOffer, false,
             'another session\'s episode is not read as this one\'s');
     } finally {
@@ -2340,10 +2798,1370 @@ test('cli: an unbound goal records no pending offer whatever episode stands', ()
     const { repo } = armedRepo({ unbound: true });
     try {
         openEpisodeFor(repo, SESSION);
-        assert.strictEqual(runCli(['open'], repo).status, 0);
+        assert.strictEqual(runCliAs(['open'], repo, SESSION).status, 0);
         const cp = openedCheckpoint(repo);
         assert.strictEqual(cp.boundSession, null, 'setup: the goal is unbound');
         assert.strictEqual(cp.pendingOffer, false, 'and an unconsumable checkpoint claims no pending offer');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The write verbs' caller scope.
+//
+// A checkpoint is one session's word that its chapter has closed, and the gate
+// lands that session's next auto-compaction on it, so on a checkout several
+// sessions share, an open or a clear run by the wrong seat writes into another
+// session's compaction timing. The write door refuses the caller; the record
+// carries its opener and the gate refuses it there too, which is what catches a
+// record an older kit or a hand edit produced. Each refusal case asserts the
+// words the refusal used, since an exit code alone cannot say which rule fired.
+// ---------------------------------------------------------------------------
+
+// The pointer at the per-session boundary verb, single-sourced because two legs
+// read it in opposite directions and a literal spelled twice can go quiet on one
+// of them: the bound-goal refusals must carry it, since a caller held under its
+// own leash has a boundary of its own to bank, and the record-leg refusal must
+// not, since that caller's own boundary is the checkpoint it is about to be able
+// to declare. The positive pins are the control for the negative ones: one
+// spelling, so a spelling that stops matching the CLI reddens the positive leg
+// rather than quietly passing the negative one.
+const BOUNDARY_VERB_POINTER = 'declares it with the boundary verb';
+
+test('cli: the leash holder\'s own open records it as the opener, and the gate honors that boundary', () => {
+    const { repo, transcript } = armedRepo();
+    try {
+        const res = runCliAs(['open'], repo, SESSION);
+        assert.strictEqual(res.status, 0, 'the bound session\'s open succeeds; stderr: ' + res.stderr);
+        assert.strictEqual(openedCheckpoint(repo).openedBy, SESSION,
+            'the record names the session that declared the boundary');
+        assertAllow(runGate(gatePayload(repo, transcript)));
+        assert.ok(!fs.existsSync(checkpointPath(repo)), 'and the allow consumes it like any other match');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a bystander\'s open is refused, naming the leash and the boundary verb, with nothing written', () => {
+    const { repo } = armedRepo();
+    try {
+        const res = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 1, 'the open refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('leashed to another session'),
+            'the refusal names the rule that refused it: ' + res.stderr);
+        assert.ok(res.stderr.includes('not this session\'s to declare'),
+            'and says whose boundary it would have been: ' + res.stderr);
+        // The remedy is worded per leg: a bystander of a bound goal has no
+        // compaction held by this leash, so this checkpoint is nothing for it to
+        // declare.
+        assert.ok(res.stderr.includes('nothing here for this session to declare'),
+            'and that this checkpoint is not the caller\'s to declare: ' + res.stderr);
+        // The remedy a caller with a hold of its own does have, which the spec
+        // prescribes this refusal name: the boundary verb, which is already
+        // per-session, so it releases the hold on this session alone and reaches
+        // the leash holder's checkpoint not at all. The bound rides with it, since
+        // a marker is declared at the caller's own banked moment rather than on the
+        // strength of a refusal.
+        assert.ok(res.stderr.includes(BOUNDARY_VERB_POINTER),
+            'and points a caller with its own boundary to bank at the verb that declares one: '
+                + res.stderr);
+        assert.ok(res.stderr.includes('releases the hold on that session alone'),
+            'and says how far that verb reaches: ' + res.stderr);
+        assert.ok(res.stderr.includes('banked its own state at a natural boundary'),
+            'and when it is declared: ' + res.stderr);
+        // The bound session may be gone, a run resumed under a new id against a
+        // goal still bound to the dead one, and then the remedies above name nobody
+        // who can act. The clear's refusal on the same leg carries this clause and
+        // this one must too, or a resumed run reads a refusal with no way out. Two
+        // bounds are asserted with it. The whole queue is named, because arming
+        // replaces the queue rather than adding to it, so a resumed run that
+        // followed a bare "re-arm the goal" with one plan path would drop the rest
+        // of the queue it was carrying. And it is conditioned on being that run,
+        // since a peer seat acting on it would take the leash holder's binding.
+        assert.ok(res.stderr.includes('re-arm the goal with its whole queue, which rebinds it'),
+            'and the remedy that works where the bound session is gone, naming the whole queue: '
+                + res.stderr);
+        assert.ok(res.stderr.includes('resumed under a new session id, whose bound predecessor is its'
+            + ' own earlier session and is gone'),
+            'and whose remedy that is: ' + res.stderr);
+        assert.ok(res.stderr.includes('arming replaces the queue rather than adding to it, so a'
+            + ' re-arm naming fewer plans drops the rest'),
+            'and what a re-arm that named less than the whole queue would cost: ' + res.stderr);
+        assert.ok(res.stderr.includes('a session that is not that run leaves the goal alone'),
+            'and what a session that is not that run would take by acting on it: ' + res.stderr);
+        assert.ok(!fs.existsSync(checkpointPath(repo)), 'nothing written');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: under a bound goal a bystander\'s open is refused whatever is on disk, and the leash holder\'s replaces it', () => {
+    // The binding is consulted first and directly rather than through whose
+    // boundary the file on disk would be. A stale wrong-plan record is nobody's
+    // boundary, so reading the file first answers null there and would let a
+    // bystander's open through under a bound goal: it would write the leash
+    // holder's plan and binding with the bystander as opener, a record every
+    // session is refused at wrong-opener, and print the success line at the caller
+    // that can least act on it. The leash holder's own open over the same record
+    // is the control, and it stands.
+    const { repo, planRel } = armedRepo();
+    try {
+        assert.strictEqual(
+            writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null, false, ARMING_SESSION).ok, true,
+            'test setup: a stale record for another plan is on disk');
+        const before = fs.readFileSync(checkpointPath(repo));
+        const res = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 1, 'the open refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('leashed to another session'),
+            'the refusal names the rule that refused it, the binding: ' + res.stderr);
+        assert.ok(res.stderr.includes('not this session\'s to declare'),
+            'and whose boundary it would have been: ' + res.stderr);
+        assert.ok(!res.stderr.includes('already open here'),
+            'and never words it off the record, which gates nothing: ' + res.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+            'and the record is byte-unchanged');
+
+        const own = runCliAs(['open'], repo, SESSION);
+        assert.strictEqual(own.status, 0, 'the leash holder\'s open stands; stderr: ' + own.stderr);
+        const cp = openedCheckpoint(repo);
+        assert.strictEqual(cp.plan, planRel, 'and the record is the armed plan\'s');
+        assert.strictEqual(cp.openedBy, SESSION, 'opened by the session that declared it');
+        assert.strictEqual(cp.boundSession, SESSION, 'and owned by the binding');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: an open with no resolvable caller id is refused, naming consent as the operator\'s verb, with nothing written', () => {
+    // Two shapes reach the same refusal, which is cmdBoundary's own reading of
+    // the same question: no variable at all (runCli scrubs it), and a value the
+    // shape rule refuses. Neither can be held against the record, so neither
+    // writes one. The remedy is addressed to the operator, since consent is a
+    // verb no session runs on its own judgment.
+    for (const leg of [
+        { what: 'no session id in the shell', run: (repo) => runCli(['open'], repo) },
+        { what: 'a value the shape rule refuses', run: (repo) => runCliAs(['open'], repo, '-dash-led') }
+    ]) {
+        const { repo } = armedRepo();
+        try {
+            const res = leg.run(repo);
+            assert.strictEqual(res.status, 1, leg.what + ': the open refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('no usable session id in this shell'),
+                leg.what + ': the refusal names the rule that refused it: ' + res.stderr);
+            // The pointer at the operator's release carries its bound on the same
+            // line, because this channel is one a session reads: the verb is named
+            // and so is who runs it, and no runnable command form is printed for a
+            // session to act on.
+            assert.ok(res.stderr.includes('releasing a held session by id is the operator\'s own verb,'
+                + ' consent, which a session never runs on its own judgment'),
+                leg.what + ': and names the operator\'s release path as the operator\'s, with the'
+                    + ' bound on the same line: ' + res.stderr);
+            // The runnable form is absent here and present in the gate's own
+            // boundary note, which assertDeny pins on this same spelling: that
+            // positive pin is the control for this silence, the note being a channel
+            // the operator alone reads.
+            assert.ok(!res.stderr.includes('consent --session'),
+                leg.what + ': and hands a session no runnable form of it: ' + res.stderr);
+            assert.ok(!fs.existsSync(checkpointPath(repo)), leg.what + ': nothing written');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+test('cli: a bystander\'s clear is refused and the boundary on disk is left byte-for-byte', () => {
+    // Which verbs the refusal reaches for is the assertion as much as the exit code
+    // is. Clearing this record stays the blessed session's, so no verb here is a
+    // way around that: consent lands a compaction, which is the opposite of what a
+    // clear wants, and boundary --cancel retracts a different file. What the
+    // refusal does name, on the bound leg cmdOpen's own refusal names it on, is the
+    // boundary verb as the way a caller declares a boundary of its own, which
+    // releases the hold on that caller alone and leaves this record where it is.
+    const { repo } = armedRepo();
+    try {
+        assert.strictEqual(runCliAs(['open'], repo, SESSION).status, 0,
+            'test setup: the leash holder declares its boundary');
+        const before = fs.readFileSync(checkpointPath(repo));
+        const res = runCliAs(['clear'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 1, 'the clear refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('belongs to another session'),
+            'the refusal names the rule that refused it: ' + res.stderr);
+        assert.ok(res.stderr.includes('the one this project\'s kit goal is leashed to'),
+            'and which session that is: ' + res.stderr);
+        assert.ok(res.stderr.includes('the record is left in place, and that session can clear it'),
+            'and what is left standing and who may clear it: ' + res.stderr);
+        // The pointer the bound leg carries on both verbs, for the caller that has a
+        // boundary of its own to bank.
+        assert.ok(res.stderr.includes(BOUNDARY_VERB_POINTER),
+            'and points a caller with its own boundary to bank at the verb that declares one: '
+                + res.stderr);
+        assert.ok(res.stderr.includes('releases the hold on that session alone'),
+            'and says how far that verb reaches: ' + res.stderr);
+        // The bound session may be gone, a resume that never re-armed, and then
+        // that remedy names nobody who can act. This is the condition under which
+        // the clear offers the second one, and the clause it offers is pinned by the
+        // identity test below ('the two bound-leg remedies are worded once'), which
+        // reads REARM_REMEDY off the CLI source and requires both write verbs to
+        // emit that value whole, so the clause itself is not re-asserted here.
+        assert.ok(res.stderr.includes('where this run is that session\'s own resumption under a new'
+            + ' session id'),
+            'and the condition under which the re-arm remedy is offered: ' + res.stderr);
+        assert.ok(res.stderr.includes('nothing was cleared'),
+            'and does not read as a successful retraction: ' + res.stderr);
+        assert.ok(!res.stderr.includes('boundary --cancel'),
+            'and points at no verb that retracts a different file: ' + res.stderr);
+        assert.ok(!res.stderr.includes('consent'),
+            'nor at the verb that lands a compaction: ' + res.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+            'the leash holder\'s record is byte-unchanged');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+// The value of a string const in the checkpoint CLI's source.
+function cliConstValue(name) {
+    return stringConstValue(cliSource(), name);
+}
+
+test('cli: the two bound-leg remedies are worded once and both write verbs emit that wording', () => {
+    // Each verb's own refusal test pins these sentences against its stderr, and
+    // either would keep passing if the two verbs drifted into two wordings of the
+    // same remedy. This is the leg that says they cannot: the value is read off the
+    // single place the CLI words it, and both verbs' stderr must carry that value
+    // whole. A caller comparing the open's refusal with the clear's is reading one
+    // sentence about what a held session may do, and neither verb can promise
+    // something the other does not.
+    const remedies = {
+        BOUNDARY_VERB_REMEDY: cliConstValue('BOUNDARY_VERB_REMEDY'),
+        REARM_REMEDY: cliConstValue('REARM_REMEDY')
+    };
+    const open = armedRepo();
+    let openErr;
+    try {
+        const res = runCliAs(['open'], open.repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 1, 'a bystander\'s open refuses; stdout: ' + res.stdout);
+        openErr = res.stderr;
+    } finally {
+        rmDir(open.repo);
+    }
+    const clear = armedRepo();
+    let clearErr;
+    try {
+        assert.strictEqual(runCliAs(['open'], clear.repo, SESSION).status, 0,
+            'test setup: the leash holder declares its boundary');
+        const res = runCliAs(['clear'], clear.repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 1, 'a bystander\'s clear refuses; stdout: ' + res.stdout);
+        clearErr = res.stderr;
+    } finally {
+        rmDir(clear.repo);
+    }
+    for (const [name, value] of Object.entries(remedies)) {
+        assert.ok(openErr.includes(value),
+            'the open\'s refusal carries ' + name + ' as the source words it: ' + openErr);
+        assert.ok(clearErr.includes(value),
+            'and the clear\'s refusal carries the same value: ' + clearErr);
+    }
+});
+
+// A goal state that is there and cannot be read, in the three shapes the goal
+// library's own kind rule tells apart: something that is not a regular file, a
+// regular file that does not parse, and one past the read cap every reader of
+// that file enforces. readGoal answers null for all three exactly as it does for
+// an absent file, which is the one question it cannot answer, so a surface that
+// reads its null as "nothing is armed" is guessing over every one of them.
+function plantUnreadableGoalState(repo, shape) {
+    const target = path.join(repo, '.kit', 'goal-state.json');
+    fs.rmSync(target, { force: true });
+    if (shape === 'other') fs.mkdirSync(target, { recursive: true });
+    else if (shape === 'file') writeFile(target, 'this is not a goal state\n');
+    else writeFile(target, JSON.stringify({ plan: 'docs/plans/example.md', padding: 'x'.repeat(128 * 1024) }));
+}
+
+test('cli: neither write verb acts over a goal state that is present and unreadable', () => {
+    // Whose boundary a checkpoint here would be is answered off the goal: the
+    // binding, or the caller holding the leash by the arming route, or the record's
+    // own opener where neither answers. A goal state that cannot be read leaves
+    // every one of those unasked, so treating its null as no goal armed would
+    // answer "nobody's boundary" for any legible record and let a bystander, or an
+    // id-less shell, unlink the leash holder's live boundary during a transient
+    // lock or over a hand-mangled file.
+    //
+    // The record planted here is one that WOULD be clearable on a settled reading:
+    // a same-plan record naming an opener that is neither the caller nor the bound
+    // session is nobody's boundary, which the bound-goal opener case below pins
+    // going the other way. So what refuses these runs is the unreadable state and
+    // nothing else about the fixture.
+    for (const shape of ['other', 'file', 'oversized']) {
+        for (const leg of [
+            { what: 'a bystander', run: (repo) => runCliAs(['clear'], repo, BYSTANDER_SESSION) },
+            { what: 'a shell with no session id', run: (repo) => runCli(['clear'], repo) }
+        ]) {
+            const { repo, planRel } = armedRepo();
+            const label = shape + ', ' + leg.what;
+            try {
+                assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false, ARMING_SESSION).ok, true,
+                    label + ': test setup: a same-plan record naming a foreign opener is on disk');
+                const before = fs.readFileSync(checkpointPath(repo));
+                plantUnreadableGoalState(repo, shape);
+                const res = leg.run(repo);
+                assert.strictEqual(res.status, 1, label + ': the clear refuses; stdout: ' + res.stdout);
+                assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+                    label + ': the refusal names the rule that refused it, the unreadable goal state: '
+                        + res.stderr);
+                assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE[shape] + ')'),
+                    label + ': and the reading it took, in words rather than as the kind rule\'s'
+                        + ' own token: ' + res.stderr);
+                assert.ok(!res.stderr.includes('(' + shape + ')'),
+                    label + ': and never that token: ' + res.stderr);
+                assert.ok(res.stderr.includes('whether any session holds the leash cannot be established'),
+                    label + ': and why that answers nothing: ' + res.stderr);
+                assert.ok(res.stderr.includes('nothing was cleared'),
+                    label + ': and does not read as a successful clear: ' + res.stderr);
+                assert.ok(!res.stderr.includes('belongs to another session'),
+                    label + ': and never names a session the state could not name: ' + res.stderr);
+                assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+                    label + ': and the record is byte-unchanged');
+            } finally {
+                rmDir(repo);
+            }
+        }
+        // With nothing at the checkpoint path the clear removes nothing from
+        // anybody, so it stays the no-op the section loop's step 0 runs before it
+        // knows whether a boundary is open: an unreadable goal state must not fail
+        // a run for tidying up, and the reading is asked only over a file that is
+        // there to protect.
+        const nothingThere = armedRepo();
+        try {
+            plantUnreadableGoalState(nothingThere.repo, shape);
+            const res = runCli(['clear'], nothingThere.repo);
+            assert.strictEqual(res.status, 0,
+                shape + ', nothing on disk: the clear is a no-op; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('no compact checkpoint was open'),
+                shape + ', nothing on disk: and says so: ' + res.stdout);
+            assert.ok(!res.stderr.includes('could not be read'),
+                shape + ', nothing on disk: and refuses over no reading: ' + res.stderr);
+        } finally {
+            rmDir(nothingThere.repo);
+        }
+        const { repo } = armedRepo();
+        const label = shape + ', open';
+        try {
+            plantUnreadableGoalState(repo, shape);
+            const res = runCliAs(['open'], repo, SESSION);
+            assert.strictEqual(res.status, 1, label + ': the open refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+                label + ': the refusal names the rule that refused it: ' + res.stderr);
+            assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE[shape] + ')'),
+                label + ': and the reading, in words: ' + res.stderr);
+            assert.ok(!res.stderr.includes('(' + shape + ')'),
+                label + ': and never the kind rule\'s own token: ' + res.stderr);
+            assert.ok(!res.stderr.includes('no kit goal is armed'),
+                label + ': and never reads a present state as an absent one: ' + res.stderr);
+            assert.ok(!fs.existsSync(checkpointPath(repo)), label + ': nothing written');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+test('cli: a goal state that parses to a bare value is an unreadable state, not an absent one', () => {
+    // The reading both write verbs take is "readGoal did not answer with a goal",
+    // not "readGoal answered null". The goal library's state normalizer hands its
+    // argument straight back when it is not an object, so a state file holding a
+    // bare JSON value parses and readGoal answers with that value: a guard reading
+    // only for null would take `0`, `false` or `""` as a state it had read, and
+    // every no-goal leg would then treat a file sitting at the path as no goal
+    // armed, which is the one thing the unreadable-state rule exists to prevent.
+    // Both verbs must refuse over it in the unreadable wording instead, the kind
+    // being 'file': a regular, sane-sized file whose contents the reader will not
+    // use.
+    const statePath = (repo) => path.join(repo, '.kit', 'goal-state.json');
+    for (const bare of ['0', 'false', '""']) {
+        const open = armedRepo();
+        try {
+            writeFile(statePath(open.repo), bare);
+            const res = runCliAs(['open'], open.repo, SESSION);
+            assert.strictEqual(res.status, 1, bare + ', open: the open refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+                bare + ', open: the refusal names the rule that refused it, the unreadable goal'
+                    + ' state: ' + res.stderr);
+            assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE.file + ')'),
+                bare + ', open: and the reading it took, in words: ' + res.stderr);
+            assert.ok(!res.stderr.includes('no kit goal is armed'),
+                bare + ', open: and never reads a present state as an absent one: ' + res.stderr);
+            assert.ok(!fs.existsSync(checkpointPath(open.repo)), bare + ', open: nothing written');
+        } finally {
+            rmDir(open.repo);
+        }
+        // The clear leg over a record that IS somebody's boundary on a settled
+        // reading, so what refuses this run is the state file and nothing else
+        // about the fixture.
+        const clear = armedRepo();
+        try {
+            assert.strictEqual(
+                writeCheckpoint(clear.repo, clear.planRel, SESSION, false, SESSION).ok, true,
+                bare + ', clear: test setup: the leash holder\'s own record is on disk');
+            const before = fs.readFileSync(checkpointPath(clear.repo));
+            writeFile(statePath(clear.repo), bare);
+            const res = runCliAs(['clear'], clear.repo, BYSTANDER_SESSION);
+            assert.strictEqual(res.status, 1, bare + ', clear: the clear refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+                bare + ', clear: the refusal names the same rule: ' + res.stderr);
+            assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE.file + ')'),
+                bare + ', clear: and the reading it took, in words: ' + res.stderr);
+            assert.ok(res.stderr.includes('nothing was cleared'),
+                bare + ', clear: and does not read as a successful clear: ' + res.stderr);
+            assert.deepStrictEqual(fs.readFileSync(checkpointPath(clear.repo)), before,
+                bare + ', clear: and the record is byte-unchanged against the bytes read before the'
+                    + ' call');
+        } finally {
+            rmDir(clear.repo);
+        }
+    }
+    // The control, withheld from the predicate above and matched on its shape: a
+    // state file that parses to an object carrying no plan was read, it says
+    // nothing is armed, and the no-goal legs are true of it. Without this the
+    // refusals above would pass equally well over a guard that called every goal
+    // unreadable, which would refuse the ordinary no-goal case in wording that is
+    // false for it.
+    const control = armedRepo();
+    try {
+        writeFile(path.join(control.repo, '.kit', 'goal-state.json'), JSON.stringify({ queueIndex: 0 }));
+        const res = runCliAs(['open'], control.repo, SESSION);
+        assert.strictEqual(res.status, 1, 'no plan: the open refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('no kit goal is armed'),
+            'no plan: naming the no-goal rule, the state having been read: ' + res.stderr);
+        assert.ok(!res.stderr.includes('could not be read'),
+            'no plan: and not the unreadable-state rule: ' + res.stderr);
+        assert.ok(!fs.existsSync(checkpointPath(control.repo)), 'no plan: nothing written');
+    } finally {
+        rmDir(control.repo);
+    }
+});
+
+test('cli: a goal state shaped so no plan is usable is an unreadable state, not an absent one', () => {
+    // The reading both write verbs need is "readGoal answered with a goal the
+    // leash question can be asked of", and a non-null object is not that by
+    // itself. The goal library's state normalizer hands its argument straight back
+    // whenever plan is not a non-empty string, so a JSON array, and an object
+    // carrying a binding beside a plan that is not a usable string, both parse and
+    // both come back as objects. A guard reading only for a non-null object takes
+    // each of them as a state it had read: open prints "no kit goal is armed" over
+    // a file that still holds the binding, and the blessing rule's no-plan leg
+    // answers nobody's boundary before the binding is consulted, so a bystander's
+    // clear removes the leash holder's live record. Both verbs refuse in the
+    // unreadable wording instead, the kind being 'file': a regular, sane-sized
+    // file whose contents the reader will not use.
+    const statePath = (repo) => path.join(repo, '.kit', 'goal-state.json');
+    const shapes = [
+        { label: 'an array', json: '[]' },
+        {
+            label: 'a numeric plan beside the binding',
+            json: JSON.stringify({
+                plan: 123, boundSession: SESSION, queue: ['docs/plans/example.md'], queueIndex: 0
+            })
+        },
+        {
+            label: 'an empty plan beside the binding',
+            json: JSON.stringify({ plan: '', boundSession: SESSION })
+        }
+    ];
+    for (const shape of shapes) {
+        const open = armedRepo();
+        try {
+            writeFile(statePath(open.repo), shape.json);
+            const res = runCliAs(['open'], open.repo, SESSION);
+            assert.strictEqual(res.status, 1,
+                shape.label + ', open: the open refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+                shape.label + ', open: the refusal names the rule that refused it, the unreadable'
+                    + ' goal state: ' + res.stderr);
+            assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE.file + ')'),
+                shape.label + ', open: and the reading it took, in words: ' + res.stderr);
+            assert.ok(!res.stderr.includes('no kit goal is armed'),
+                shape.label + ', open: and never reads a present state as an absent one: '
+                    + res.stderr);
+            assert.ok(!fs.existsSync(checkpointPath(open.repo)),
+                shape.label + ', open: nothing written');
+        } finally {
+            rmDir(open.repo);
+        }
+        // The clear leg over the leash holder's own legible record, the record a
+        // reading that took these files as read calls nobody's boundary and hands
+        // to any caller: what refuses this run is the state file alone.
+        const clear = armedRepo();
+        try {
+            assert.strictEqual(
+                writeCheckpoint(clear.repo, clear.planRel, SESSION, false, SESSION).ok, true,
+                shape.label + ', clear: test setup: the leash holder\'s own record is on disk');
+            const before = fs.readFileSync(checkpointPath(clear.repo));
+            writeFile(statePath(clear.repo), shape.json);
+            const res = runCliAs(['clear'], clear.repo, BYSTANDER_SESSION);
+            assert.strictEqual(res.status, 1,
+                shape.label + ', clear: the clear refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('kit goal state is present but could not be read'),
+                shape.label + ', clear: the refusal names the same rule: ' + res.stderr);
+            assert.ok(res.stderr.includes('(' + UNREADABLE_GOAL_PHRASE.file + ')'),
+                shape.label + ', clear: and the reading it took, in words: ' + res.stderr);
+            assert.ok(res.stderr.includes('nothing was cleared'),
+                shape.label + ', clear: and does not read as a successful clear: ' + res.stderr);
+            assert.deepStrictEqual(fs.readFileSync(checkpointPath(clear.repo)), before,
+                shape.label + ', clear: and the record is byte-unchanged against the bytes read'
+                    + ' before the call');
+        } finally {
+            rmDir(clear.repo);
+        }
+    }
+    // The control, withheld from the predicate above and matched on its shape: an
+    // object carrying neither a plan nor a binding was read, it says nothing is
+    // armed, and the no-goal legs are true of it. Without it the refusals above
+    // would pass equally well over a guard that called every plan-less state
+    // unreadable, which would refuse the ordinary no-goal case in wording that is
+    // false for it.
+    const control = armedRepo();
+    try {
+        writeFile(statePath(control.repo), JSON.stringify({ queueIndex: 0 }));
+        const res = runCliAs(['open'], control.repo, SESSION);
+        assert.strictEqual(res.status, 1,
+            'no plan and no binding: the open refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('no kit goal is armed'),
+            'no plan and no binding: naming the no-goal rule, the state having been read: '
+                + res.stderr);
+        assert.ok(!res.stderr.includes('could not be read'),
+            'no plan and no binding: and not the unreadable-state rule: ' + res.stderr);
+        assert.ok(!fs.existsSync(checkpointPath(control.repo)),
+            'no plan and no binding: nothing written');
+    } finally {
+        rmDir(control.repo);
+    }
+});
+
+test('cli: a clear with no resolvable caller id is refused, pointing at no other verb, and removes nothing', () => {
+    const { repo } = armedRepo();
+    try {
+        assert.strictEqual(runCliAs(['open'], repo, SESSION).status, 0,
+            'test setup: the leash holder declares its boundary');
+        const before = fs.readFileSync(checkpointPath(repo));
+        const res = runCli(['clear'], repo);
+        assert.strictEqual(res.status, 1, 'the clear refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('no usable session id in this shell'),
+            'the refusal names the rule that refused it: ' + res.stderr);
+        assert.ok(res.stderr.includes('the record is left in place, and the session it belongs to can clear it'),
+            'and says what stands and who may clear it: ' + res.stderr);
+        assert.ok(!res.stderr.includes('consent'),
+            'and never points a clear at the verb that lands a compaction: ' + res.stderr);
+        assert.ok(!res.stderr.includes('boundary --cancel'),
+            'nor at the one that retracts a different file: ' + res.stderr);
+        assert.ok(res.stderr.includes('nothing was cleared'), res.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before, 'the record is byte-unchanged');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a clear with no record on disk is the no-op it has always been, whoever calls it', () => {
+    // The section loop's own step 0 runs a clear before it knows whether a
+    // boundary is open, so the scope guard reads the record before it refuses
+    // anybody: with nothing on disk there is nothing to protect, and a refusal
+    // there would fail a run for tidying up. A bystander and a shell with no id
+    // at all both get the no-op.
+    const { repo } = armedRepo();
+    try {
+        for (const leg of [
+            { what: 'a bystander', run: () => runCliAs(['clear'], repo, BYSTANDER_SESSION) },
+            { what: 'a shell with no session id', run: () => runCli(['clear'], repo) }
+        ]) {
+            const res = leg.run();
+            assert.strictEqual(res.status, 0, leg.what + ': the clear is a no-op; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('no compact checkpoint was open'),
+                leg.what + ': and says so: ' + res.stdout);
+        }
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a stale record for another plan is nobody\'s boundary, so a resuming run may clear or replace it', () => {
+    // The record a previous run left behind, beside a goal armed for a different
+    // plan and not yet bound. The gate treats such a record as absent whoever
+    // opened it, so it is nobody's boundary: refusing to clear it would leave a
+    // resuming session unable to tidy a file that gates nothing, and the open
+    // that follows replaces it.
+    const { repo } = armedRepo({ unbound: true });
+    try {
+        assert.strictEqual(
+            writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null, false, ARMING_SESSION).ok, true,
+            'test setup: a prior run\'s boundary is on disk');
+        const cleared = runCliAs(['clear'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(cleared.status, 0, 'the clear runs; stderr: ' + cleared.stderr);
+        assert.ok(cleared.stdout.includes('compact checkpoint cleared'), cleared.stdout);
+
+        assert.strictEqual(
+            writeCheckpoint(repo, 'docs/plans/some-prior-run.md', null, false, ARMING_SESSION).ok, true,
+            'test setup: and again, for the open');
+        const opened = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(opened.status, 0, 'the open runs; stderr: ' + opened.stderr);
+        assert.strictEqual(openedCheckpoint(repo).openedBy, BYSTANDER_SESSION,
+            'and the record is the caller\'s own');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: neither write verb touches a checkpoint path it cannot read', () => {
+    // A scope guard can only protect a scope it can see, so where the record is
+    // present and unreadable both verbs refuse rather than treating it as
+    // nobody's boundary: a lock lifts, and the fresh record under it belongs to
+    // whichever session opened it. The first legs run with the goal unbound,
+    // which is the state where the record is the only thing that can answer the
+    // question; the legs after them are the split the binding makes, where the
+    // transient readings become the leash holder's and the not-a-regular-file
+    // reading becomes nobody's.
+    const shimDir = makeDir('kit-compact-gate-shim-');
+    try {
+        // Both transient readings, each on both verbs: an lstat the filesystem
+        // refuses, which leaves even the path's kind unknown, and a read it
+        // refuses over a path whose kind it did answer.
+        for (const reading of [
+            { token: 'lstat', preload: (dir) => lstatRefusingPreload(dir, 'compact-checkpoint.json') },
+            { token: 'unreadable', preload: (dir) => readRefusingPreload(dir, 'compact-checkpoint.json') }
+        ]) {
+            for (const verb of ['open', 'clear']) {
+                const { repo, planRel } = armedRepo({ unbound: true });
+                const label = reading.token + ', ' + verb;
+                try {
+                    assert.strictEqual(writeCheckpoint(repo, planRel, null, false, ARMING_SESSION).ok, true,
+                        'test setup: a boundary is on disk');
+                    const before = fs.readFileSync(checkpointPath(repo));
+                    const res = runCliAs([verb], repo, BYSTANDER_SESSION,
+                        { NODE_OPTIONS: reading.preload(shimDir) });
+                    assert.strictEqual(res.status, 1, label + ' refuses; stdout: ' + res.stdout);
+                    assert.ok(res.stderr.includes('cannot be read'),
+                        label + ': the refusal names the rule that refused it: ' + res.stderr);
+                    assert.ok(res.stderr.includes('(' + UNREADABLE_CHECKPOINT_PHRASE[reading.token] + ')'),
+                        label + ': and the reading it took, in words rather than as the reader\'s own'
+                            + ' token: ' + res.stderr);
+                    assert.ok(!res.stderr.includes('(' + reading.token + ')'),
+                        label + ': and never that token, which on a terminal reads as nothing: '
+                            + res.stderr);
+                    assert.ok(res.stderr.includes('whose chapter boundary it is cannot be established'),
+                        label + ': and why that matters: ' + res.stderr);
+                    assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+                        label + ': and the record is byte-unchanged');
+                } finally {
+                    rmDir(repo);
+                }
+            }
+        }
+        // A directory at the checkpoint path under a BOUND goal. The reading is
+        // the not-a-regular-file one, which no binding can claim: such a path
+        // never becomes a checkpoint, and the lib's clear refuses to unlink
+        // anything but a regular file, so attributing it to the leash holder
+        // would answer the one caller who may act with "no compact checkpoint was
+        // open" at exit 0 over an obstruction still sitting there, and refuse
+        // every other caller over a boundary that does not exist. So every caller
+        // meets the same refusal, on both verbs.
+        for (const leg of [
+            { what: 'the leash holder\'s clear', verb: 'clear', session: SESSION },
+            { what: 'a bystander\'s clear', verb: 'clear', session: BYSTANDER_SESSION },
+            { what: 'the leash holder\'s open', verb: 'open', session: SESSION }
+        ]) {
+            const { repo } = armedRepo();
+            try {
+                fs.mkdirSync(checkpointPath(repo), { recursive: true });
+                assert.strictEqual(fs.lstatSync(checkpointPath(repo)).isDirectory(), true,
+                    leg.what + ': test setup: a directory is at the checkpoint path');
+                const res = runCliAs([leg.verb], repo, leg.session);
+                assert.strictEqual(res.status, 1, leg.what + ' refuses; stdout: ' + res.stdout);
+                assert.ok(res.stderr.includes('something that is not a checkpoint file is at the'
+                    + ' checkpoint path'),
+                    leg.what + ': the refusal names the rule that refused it, the'
+                        + ' not-a-checkpoint-file reading: ' + res.stderr);
+                assert.ok(res.stderr.includes('no verb here removes it, so move it aside by hand'),
+                    leg.what + ': and the only remedy that reading has, with the reason it is the'
+                        + ' only one: no verb of this CLI removes what is at that path: ' + res.stderr);
+                assert.ok(!res.stderr.includes('belongs to another session'),
+                    leg.what + ': and never a scope boundary that does not exist over this file: '
+                        + res.stderr);
+                assert.ok(!res.stdout.includes('no compact checkpoint was open'),
+                    leg.what + ': and never reads as a clear that found nothing: ' + res.stdout);
+                assert.strictEqual(fs.lstatSync(checkpointPath(repo)).isDirectory(), true,
+                    leg.what + ': and the directory is still there');
+            } finally {
+                rmDir(repo);
+            }
+        }
+        // The control on that split, which is what says the bound attribution was
+        // narrowed rather than dropped: the same bound goal met with a transient
+        // reading keeps it. An lstat the filesystem refuses over the leash
+        // holder's own record is the leash holder's, so a bystander meets the
+        // scope refusal there and not the reading's.
+        const { repo, planRel } = armedRepo();
+        try {
+            assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false, SESSION).ok, true,
+                'test setup: the leash holder\'s own boundary is on disk');
+            const before = fs.readFileSync(checkpointPath(repo));
+            const res = runCliAs(['clear'], repo, BYSTANDER_SESSION,
+                { NODE_OPTIONS: lstatRefusingPreload(shimDir, 'compact-checkpoint.json') });
+            assert.strictEqual(res.status, 1, 'the bystander\'s clear refuses; stdout: ' + res.stdout);
+            assert.ok(res.stderr.includes('belongs to another session'),
+                'on the binding\'s own scope rule rather than on the reading: ' + res.stderr);
+            assert.ok(res.stderr.includes('kit goal is leashed to'),
+                'naming the leash as the leg that answered: ' + res.stderr);
+            assert.ok(!res.stderr.includes('something that is not a checkpoint file'),
+                'and never the reading a binding cannot answer over: ' + res.stderr);
+            assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+                'and the record is byte-unchanged');
+        } finally {
+            rmDir(repo);
+        }
+    } finally {
+        rmDir(shimDir);
+    }
+});
+
+test('cli: an unbound goal with no record on disk admits any caller\'s open, and the gate then refuses a boundary the leash holder did not declare', () => {
+    // An unbound goal blesses nobody yet, so with nothing on disk a bystander may
+    // still open: that is the existing behaviour, and it is what lets a run bank a
+    // boundary before its own leash reaches it. The read-side check is what makes
+    // the permission safe. The claim adopts the record for the session it binds
+    // and the gate holds it to the opener it carries, so a boundary somebody else
+    // declared releases nothing.
+    const { repo, transcript } = selfArmedRepo(ARMING_SESSION);
+    try {
+        const res = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 0, 'an unbound goal blesses nobody yet; stderr: ' + res.stderr);
+        // What the success line may promise here is bounded by the same read-side
+        // check: a record opened while the goal is unbound is honored only if the
+        // caller is the session the leash binds to, so the line says that rather
+        // than telling a bystander the next auto-compaction lands here.
+        assert.ok(res.stdout.includes('honored once the leash binds this session'),
+            'the success line states the condition on it: ' + res.stdout);
+        assert.ok(res.stdout.includes('a claim by another session leaves it refused'),
+            'and the other direction of that condition: ' + res.stdout);
+        assert.ok(!res.stdout.includes('the next auto-compaction lands here'),
+            'and never promises the unconditional landing: ' + res.stdout);
+        assert.strictEqual(openedCheckpoint(repo).openedBy, BYSTANDER_SESSION,
+            'the record names who declared it');
+        assert.strictEqual(openedCheckpoint(repo).boundSession, null,
+            'and no owner, the goal being unbound');
+        assertDeny(runGate(gatePayload(repo, transcript, { session_id: ARMING_SESSION })));
+        assert.strictEqual(readState(repo).lastDecision.reason, 'wrong-opener',
+            'the deny names the opener leg rather than a session mismatch that did not happen');
+        assert.ok(fs.existsSync(checkpointPath(repo)), 'a record the gate ignores is not consumed');
+        assert.strictEqual(readCheckpoint(repo).openedBy, BYSTANDER_SESSION,
+            'and the adoption left the opener as it found it');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: an open against an unbound goal will not overwrite another session\'s boundary for this plan', () => {
+    // The other direction of the permission above, and the reason it is not a
+    // licence to overwrite: an open replaces the whole record, so a bystander
+    // opening over a boundary somebody else banked would leave the session that
+    // claims the leash a record the gate refuses at wrong-opener, which is the
+    // deferral-to-the-safety-valve outcome the guard exists to prevent. The
+    // caller's own record is replaced like any other, which is what says the
+    // refusal is scoped to a foreign opener rather than to the file existing.
+    const { repo, planRel } = selfArmedRepo(ARMING_SESSION);
+    try {
+        assert.strictEqual(runCliAs(['open'], repo, ARMING_SESSION).status, 0,
+            'test setup: the arming run banks its own boundary while unbound');
+        const before = fs.readFileSync(checkpointPath(repo));
+        const res = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 1, 'the bystander\'s open refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('a chapter boundary another session declared for this plan is'
+            + ' already open here'),
+            'the refusal names the rule that refused it: ' + res.stderr);
+        assert.ok(res.stderr.includes('not this session\'s to replace'),
+            'and what it would have done: ' + res.stderr);
+        // The record leg's own remedy: this caller is waiting for a claim of its
+        // own, and once that binds the leash its open replaces the record. The
+        // boundary verb is not that path, so the refusal names none.
+        assert.ok(res.stderr.includes('once this session claims the leash'),
+            'and the remedy this leg actually has: ' + res.stderr);
+        // And not the bound legs' pointer, which is wrong for this caller: its own
+        // boundary is the checkpoint it will be able to declare once its claim
+        // binds, rather than a per-session marker. The bound-goal refusal's own
+        // positive pin on this same constant is the control for this silence.
+        assert.ok(!res.stderr.includes(BOUNDARY_VERB_POINTER),
+            'and points a caller whose own boundary is this checkpoint at no marker verb: '
+                + res.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+            'and the record is byte-unchanged');
+
+        const own = runCliAs(['open'], repo, ARMING_SESSION);
+        assert.strictEqual(own.status, 0, 'the opener\'s own re-open stands; stderr: ' + own.stderr);
+        assert.strictEqual(openedCheckpoint(repo).openedBy, ARMING_SESSION,
+            'and the record is still its own');
+        assert.strictEqual(openedCheckpoint(repo).plan, planRel, 'for the armed plan');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: an open against an unbound goal replaces a record that carries no opener at all', () => {
+    // The record an older kit left is nobody's boundary: nothing can say whose it
+    // was, the gate refuses it whoever claims the leash, and refusing to replace
+    // it would leave a run unable to declare a boundary at all until somebody
+    // moved the file by hand.
+    const { repo, planRel } = selfArmedRepo(ARMING_SESSION);
+    try {
+        writeFile(checkpointPath(repo), JSON.stringify({
+            plan: planRel, boundSession: null, openedAt: new Date().toISOString()
+        }) + '\n');
+        const res = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 0, 'the open stands; stderr: ' + res.stderr);
+        assert.strictEqual(openedCheckpoint(repo).openedBy, BYSTANDER_SESSION,
+            'and the record is the caller\'s own');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: the session that armed an unbound goal opens over a boundary a bystander banked', () => {
+    // The arming session holds the leash by the route a claim point acts on, so a
+    // record a bystander banked in the unbound window is not its boundary to be
+    // held off by: refusing it there would leave the session about to bind unable
+    // to declare its own chapter close until some claim point ran, and the verb it
+    // would be sent to instead writes a marker the gate never reads on a leashed
+    // session's route.
+    const { repo, planRel } = selfArmedRepo(ARMING_SESSION);
+    try {
+        assert.strictEqual(runCliAs(['open'], repo, BYSTANDER_SESSION).status, 0,
+            'test setup: a bystander banks a boundary for this plan while nothing holds the leash');
+        assert.strictEqual(openedCheckpoint(repo).openedBy, BYSTANDER_SESSION,
+            'test setup: and the record is that bystander\'s');
+        const res = runCliAs(['open'], repo, ARMING_SESSION);
+        assert.strictEqual(res.status, 0, 'the arming session\'s open stands; stderr: ' + res.stderr);
+        const cp = openedCheckpoint(repo);
+        assert.strictEqual(cp.openedBy, ARMING_SESSION, 'and the record now names it as the opener');
+        assert.strictEqual(cp.plan, planRel, 'for the armed plan');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: the session that armed an unbound goal clears a boundary a bystander banked', () => {
+    // The other verb on the same state. Step 0 of the section loop clears before
+    // it knows whether a boundary is open, so a refusal here fails the run of the
+    // session that is about to hold the leash.
+    const { repo } = selfArmedRepo(ARMING_SESSION);
+    try {
+        assert.strictEqual(runCliAs(['open'], repo, BYSTANDER_SESSION).status, 0,
+            'test setup: a bystander banks a boundary for this plan');
+        const res = runCliAs(['clear'], repo, ARMING_SESSION);
+        assert.strictEqual(res.status, 0, 'the arming session\'s clear stands; stderr: ' + res.stderr);
+        assert.ok(res.stdout.includes('compact checkpoint cleared'), res.stdout);
+        assert.ok(!fs.existsSync(checkpointPath(repo)), 'and the record is gone');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a session that neither armed the goal nor opened the record is refused by both verbs', () => {
+    // The control for the two cases above: the permission is the arming session's,
+    // not everybody's, so a third seat meets the record's own opener exactly as
+    // before. Both refusals name the rule that refused them, since an exit code
+    // cannot say which one fired.
+    //
+    // A third id of the harness's own shape, distinct from the arming session and
+    // from the opener, which is the whole point of the case.
+    const THIRD_PARTY_SESSION = 'a41f6c8e-2d05-4b19-8e73-9c0417be25d1';
+    const { repo } = selfArmedRepo(ARMING_SESSION);
+    try {
+        assert.strictEqual(runCliAs(['open'], repo, BYSTANDER_SESSION).status, 0,
+            'test setup: a bystander banks a boundary for this plan');
+        const before = fs.readFileSync(checkpointPath(repo));
+
+        const opened = runCliAs(['open'], repo, THIRD_PARTY_SESSION);
+        assert.strictEqual(opened.status, 1, 'the open refuses; stdout: ' + opened.stdout);
+        assert.ok(opened.stderr.includes('a chapter boundary another session declared for this plan is'
+            + ' already open here'),
+            'the refusal names the rule that refused it, the record\'s own opener: ' + opened.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+            'and the record is byte-unchanged');
+
+        const cleared = runCliAs(['clear'], repo, THIRD_PARTY_SESSION);
+        assert.strictEqual(cleared.status, 1, 'the clear refuses; stdout: ' + cleared.stdout);
+        // The record leg names the opener and stops there. It does not claim the
+        // opener declared it while nothing held the leash: a bare shell's re-arm
+        // nulls the binding and leaves the checkpoint untouched, so a record on
+        // this leg may well have been declared under a leash that has since gone.
+        assert.ok(cleared.stderr.includes('the one that declared it,'),
+            'the refusal names the rule that refused it, the record\'s own opener: ' + cleared.stderr);
+        assert.ok(!cleared.stderr.includes('while nothing held the leash'),
+            'and claims nothing about the leash at the moment it was declared: ' + cleared.stderr);
+        assert.ok(cleared.stderr.includes('nothing was cleared'),
+            'and does not read as a successful clear: ' + cleared.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+            'and the record is byte-unchanged');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a record whose owner is not its own opener is nobody\'s boundary, so it protects itself against neither', () => {
+    // The record leg answers with the opener, and a record can carry an owner that
+    // is not that opener: a bystander opens against an unbound goal, the claim that
+    // binds adopts the record for the session it binds (owner), leaving the
+    // bystander as opener, and a re-arm from a bare shell then nulls the binding
+    // and leaves the checkpoint where it is. Nothing can ever spend such a record,
+    // the owner no longer matching the goal, so it is nobody's boundary; read off
+    // the opener alone it would refuse the very session it names as its owner, over
+    // a file that gates nothing for anybody.
+    //
+    // A third id of the harness's own shape, for the caller that is neither.
+    const THIRD_PARTY_SESSION = 'a41f6c8e-2d05-4b19-8e73-9c0417be25d1';
+    for (const leg of [
+        { what: 'the owner\'s clear', session: SESSION },
+        { what: 'a third session\'s clear', session: THIRD_PARTY_SESSION }
+    ]) {
+        const { repo, planRel } = armedRepo({ unbound: true });
+        try {
+            assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false, BYSTANDER_SESSION).ok, true,
+                leg.what + ': test setup: a same-plan record owned by one session and opened by another');
+            // The premise, read off the match rule itself rather than assumed: the
+            // record's owner is not the goal's binding, so no session's offer can
+            // spend it and there is nothing here for a scope guard to protect.
+            assert.strictEqual(
+                checkpointMatches(readCheckpoint(repo), readGoal(repo), Date.now(), false).reason,
+                'wrong-session',
+                leg.what + ': test setup: the gate can honor this record for nobody');
+            const res = runCliAs(['clear'], repo, leg.session);
+            assert.strictEqual(res.status, 0, leg.what + ' runs; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('compact checkpoint cleared'),
+                leg.what + ': and removes the file: ' + res.stdout);
+            assert.ok(!res.stderr.includes('belongs to another session'),
+                leg.what + ': on no scope rule, there being no scope to protect: ' + res.stderr);
+            assert.strictEqual(fs.existsSync(checkpointPath(repo)), false,
+                leg.what + ': and nothing is left at the checkpoint path');
+        } finally {
+            rmDir(repo);
+        }
+    }
+    // The control, withheld from the rule above: an OWNERLESS record with the same
+    // foreign opener is a boundary a claim can still adopt and the gate can then
+    // honor, so the record leg guards it and refuses the same caller. What makes
+    // the legs above nobody's is the owner that is not the opener, and nothing else
+    // about the fixture.
+    const { repo, planRel } = armedRepo({ unbound: true });
+    try {
+        assert.strictEqual(writeCheckpoint(repo, planRel, null, false, BYSTANDER_SESSION).ok, true,
+            'test setup: an ownerless record with the same foreign opener');
+        const before = fs.readFileSync(checkpointPath(repo));
+        const res = runCliAs(['clear'], repo, SESSION);
+        assert.strictEqual(res.status, 1, 'the clear refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('belongs to another session'),
+            'the refusal names the rule that refused it, the record\'s own opener: ' + res.stderr);
+        assert.ok(res.stderr.includes('the one that declared it,'),
+            'and names that leg rather than a leash: ' + res.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+            'and the record is byte-unchanged');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a same-plan record carrying neither owner nor opener is nobody\'s boundary', () => {
+    // The record leg is the one that answers while no leash and no arming session
+    // do, and it answers with the record's own opener, so a record carrying none
+    // is nobody's rather than the record leg's with nobody named. That shape is
+    // what an older kit wrote (three fields, no opener) and what a hand edit
+    // leaves, and the gate can honor it for no session at all, so there is nothing
+    // at that path for a scope guard to protect. Both callers a shell can be are
+    // tried, since neither has anything to protect.
+    for (const leg of [
+        { what: 'a bystander', run: (repo) => runCliAs(['clear'], repo, BYSTANDER_SESSION) },
+        { what: 'a shell with no session id', run: (repo) => runCli(['clear'], repo) }
+    ]) {
+        const { repo, planRel } = armedRepo({ unbound: true });
+        try {
+            writeFile(checkpointPath(repo), JSON.stringify({
+                plan: planRel, openedAt: new Date().toISOString(), pendingOffer: false
+            }) + '\n');
+            // The premise, read off the match rule itself rather than assumed: no
+            // session's offer can spend this record.
+            assert.strictEqual(
+                checkpointMatches(readCheckpoint(repo), readGoal(repo), Date.now(), false).ok, false,
+                leg.what + ': test setup: the gate can honor this record for nobody');
+            assert.strictEqual(fs.existsSync(checkpointPath(repo)), true,
+                leg.what + ': test setup: and the record is on disk before the clear');
+            const res = leg.run(repo);
+            assert.strictEqual(res.status, 0, leg.what + ': the clear runs; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('compact checkpoint cleared'),
+                leg.what + ': and removes the file: ' + res.stdout);
+            assert.ok(!res.stderr.includes('belongs to another session'),
+                leg.what + ': on no scope rule, there being no scope to protect: ' + res.stderr);
+            assert.strictEqual(fs.existsSync(checkpointPath(repo)), false,
+                leg.what + ': and nothing is left at the checkpoint path');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+// A file at the checkpoint path whose content the reader has settled and cannot
+// use: one that does not parse, and one past the size the reader accepts. Both
+// are regular files, so a clear unlinks them, which is what status promises over
+// each; neither can ever gate a compaction. The oversized fixture is a record the
+// reader would otherwise have accepted, padded past the cap, so the case rests on
+// the reading rather than on the content being nonsense.
+function writeIllegibleCheckpoint(repo) {
+    writeFile(checkpointPath(repo), 'this is not a checkpoint record\n');
+}
+
+function writeOversizedCheckpoint(repo, planRel) {
+    writeFile(checkpointPath(repo), JSON.stringify({
+        plan: planRel, boundSession: null, openedBy: BYSTANDER_SESSION,
+        openedAt: new Date().toISOString(), pendingOffer: false,
+        padding: 'x'.repeat(128 * 1024)
+    }) + '\n');
+}
+
+test('cli: clear removes a checkpoint file the reader has settled it cannot use, goal or no goal', () => {
+    // status says a clear removes both of these, and before this it did not: the
+    // two readings went down the refusal leg, so the file the report named as
+    // removable was refused with nothing removed and no CLI path led out of the
+    // state at all. Neither reading is anybody's boundary, so no caller id is
+    // needed either, which is why every leg runs from a shell carrying none.
+    const legs = [
+        {
+            what: 'no goal armed, an illegible file',
+            repo: () => ({ repo: makeDir('kit-compact-gate-repo-'), planRel: 'docs/plans/example.md' }),
+            plant: writeIllegibleCheckpoint
+        },
+        {
+            what: 'no goal armed, an oversized file',
+            repo: () => ({ repo: makeDir('kit-compact-gate-repo-'), planRel: 'docs/plans/example.md' }),
+            plant: writeOversizedCheckpoint
+        },
+        {
+            what: 'an armed, unbound goal and an illegible file',
+            repo: () => selfArmedRepo(ARMING_SESSION),
+            plant: writeIllegibleCheckpoint
+        },
+        {
+            what: 'an armed, unbound goal and an oversized file',
+            repo: () => selfArmedRepo(ARMING_SESSION),
+            plant: writeOversizedCheckpoint
+        },
+        // The bound legs, which is what makes the case's name true: a binding does
+        // not make an unreadable file its holder's boundary. Nothing at this path
+        // can gate a compaction on either reading, so attributing it to the leash
+        // holder would refuse a bystander tidying a file that gates nothing, and
+        // leave the state status says a clear removes with no way out of it.
+        {
+            what: 'a bound goal and an illegible file',
+            repo: () => armedRepo(),
+            plant: writeIllegibleCheckpoint
+        },
+        {
+            what: 'a bound goal and an oversized file',
+            repo: () => armedRepo(),
+            plant: writeOversizedCheckpoint
+        }
+    ];
+    for (const leg of legs) {
+        const { repo, planRel } = leg.repo();
+        try {
+            leg.plant(repo, planRel);
+            const res = runCli(['clear'], repo);
+            assert.strictEqual(res.status, 0, leg.what + ': the clear runs; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('compact checkpoint cleared'), leg.what + ': ' + res.stdout);
+            assert.ok(!fs.existsSync(checkpointPath(repo)), leg.what + ': and the file is gone');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+test('cli: an open under an unbound goal replaces a checkpoint file that does not parse', () => {
+    // The write verb on the same reading. A file nothing can spend must not hold a
+    // session off its own boundary, and an open replaces the whole record anyway.
+    const { repo, planRel } = selfArmedRepo(ARMING_SESSION);
+    try {
+        writeIllegibleCheckpoint(repo);
+        const res = runCliAs(['open'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 0, 'the open stands; stderr: ' + res.stderr);
+        const cp = openedCheckpoint(repo);
+        assert.strictEqual(cp.openedBy, BYSTANDER_SESSION, 'and the record is the caller\'s own');
+        assert.strictEqual(cp.plan, planRel, 'for the armed plan');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: a bystander clears a wrong-plan record while the leash is held', () => {
+    // The binding does not make every record its holder's. This one names another
+    // plan, so the gate treats it as absent whoever opened it, and refusing a
+    // bystander's clear of it would name a rule that is false for the file: no
+    // compaction of the leash holder's can ever land on it.
+    const { repo } = armedRepo();
+    try {
+        assert.strictEqual(
+            writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION, false, SESSION).ok, true,
+            'test setup: a record for another plan, owned and opened by the leash holder');
+        const res = runCliAs(['clear'], repo, BYSTANDER_SESSION);
+        assert.strictEqual(res.status, 0, 'the clear runs; stderr: ' + res.stderr);
+        assert.ok(res.stdout.includes('compact checkpoint cleared'), res.stdout);
+        assert.ok(!fs.existsSync(checkpointPath(repo)), 'and the record is gone');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: under a bound goal, a bystander clears every file at the checkpoint path that is nobody\'s boundary', () => {
+    // The binding answers whose boundary a checkpoint is only for a record that
+    // could be the bound session's: a legible same-plan record it opened. Every
+    // other file at that path is nobody's, whatever the binding says, because
+    // nothing there can ever land that session's compaction. An illegible file and
+    // an oversized one are settled readings no compaction can spend; a same-plan
+    // record whose opener is another session, or which carries no opener the
+    // storage rule can read, is one the gate refuses at wrong-opener, so it can
+    // never be spent either. Attributing any of them to the leash holder refuses a
+    // bystander for tidying a file that gates nothing, on a reason that is false
+    // for the file, and leaves no CLI path out of the state at all.
+    for (const leg of [
+        { what: 'an illegible file', plant: (repo) => writeIllegibleCheckpoint(repo) },
+        { what: 'an oversized file', plant: (repo, planRel) => writeOversizedCheckpoint(repo, planRel) },
+        {
+            what: 'a same-plan record naming a foreign opener',
+            plant: (repo, planRel) => {
+                assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false, ARMING_SESSION).ok, true,
+                    'test setup: the record writes');
+            }
+        },
+        {
+            what: 'a same-plan record carrying no opener at all',
+            plant: (repo, planRel) => writeFile(checkpointPath(repo), JSON.stringify({
+                plan: planRel, boundSession: SESSION, openedAt: new Date().toISOString(), pendingOffer: false
+            }) + '\n')
+        }
+    ]) {
+        const { repo, planRel } = armedRepo();
+        try {
+            leg.plant(repo, planRel);
+            const res = runCliAs(['clear'], repo, BYSTANDER_SESSION);
+            assert.strictEqual(res.status, 0, leg.what + ': the clear runs; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('compact checkpoint cleared'), leg.what + ': ' + res.stdout);
+            assert.ok(!fs.existsSync(checkpointPath(repo)), leg.what + ': and the file is gone');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+test('cli: under a bound goal a same-plan record owned by another session is nobody\'s, both directions', () => {
+    // The binding is one of TWO fields the gate holds a same-plan record to, and
+    // the scope guard reads both. A record whose recorded owner is some other
+    // session is refused at wrong-session whatever its opener says, so attributing
+    // it to the binding because the leash holder opened it would refuse every
+    // other caller over a file no compaction can ever land on, and leave no CLI
+    // path out of the state. The shape occurs on a re-arm: an adoption writes the
+    // owner of the day, and a later re-arm binds the goal to a different session.
+    //
+    // A third id of the harness's own shape, for the caller that is neither the
+    // binding nor the owner on disk.
+    const THIRD_PARTY_SESSION = 'a41f6c8e-2d05-4b19-8e73-9c0417be25d1';
+    const foreign = armedRepo();
+    try {
+        assert.strictEqual(
+            writeCheckpoint(foreign.repo, foreign.planRel, ARMING_SESSION, false, SESSION).ok, true,
+            'test setup: a same-plan record owned by another session and opened by the leash holder');
+        // The premise, read off the match rule itself rather than assumed: the
+        // record's owner is not the goal's binding, so no session's offer can spend
+        // it and there is nothing here for a scope guard to protect.
+        assert.strictEqual(
+            checkpointMatches(readCheckpoint(foreign.repo), readGoal(foreign.repo), Date.now(), false).reason,
+            'wrong-session',
+            'test setup: the gate can honor this record for nobody');
+        assert.strictEqual(fs.existsSync(checkpointPath(foreign.repo)), true,
+            'test setup: and the record is on disk before the clear');
+        const res = runCliAs(['clear'], foreign.repo, THIRD_PARTY_SESSION);
+        assert.strictEqual(res.status, 0, 'the third session\'s clear runs; stderr: ' + res.stderr);
+        assert.ok(res.stdout.includes('compact checkpoint cleared'),
+            'and removes the file: ' + res.stdout);
+        assert.ok(!res.stderr.includes('belongs to another session'),
+            'on no scope rule, there being no scope to protect: ' + res.stderr);
+        assert.strictEqual(fs.existsSync(checkpointPath(foreign.repo)), false,
+            'and nothing is left at the checkpoint path');
+    } finally {
+        rmDir(foreign.repo);
+    }
+    // The control, withheld from the rule above: the same record carrying the
+    // binding as its owner is the leash holder's own boundary, which the gate can
+    // honor, so the same caller meets the scope rule and the record stands. What
+    // makes the leg above nobody's is the owner that is not the binding, and
+    // nothing else about the fixture.
+    const owned = armedRepo();
+    try {
+        assert.strictEqual(
+            writeCheckpoint(owned.repo, owned.planRel, SESSION, false, SESSION).ok, true,
+            'test setup: the same record, owned and opened by the leash holder');
+        const before = fs.readFileSync(checkpointPath(owned.repo));
+        const res = runCliAs(['clear'], owned.repo, THIRD_PARTY_SESSION);
+        assert.strictEqual(res.status, 1, 'the clear refuses; stdout: ' + res.stdout);
+        assert.ok(res.stderr.includes('belongs to another session'),
+            'the refusal names the rule that refused it, the scope rule: ' + res.stderr);
+        assert.ok(res.stderr.includes('kit goal is leashed to'),
+            'and names the leash as the leg that answered: ' + res.stderr);
+        assert.deepStrictEqual(fs.readFileSync(checkpointPath(owned.repo)), before,
+            'and the record is byte-unchanged');
+    } finally {
+        rmDir(owned.repo);
+    }
+});
+
+test('cli: with no goal armed, any caller clears a record naming a foreign opener', () => {
+    // Nothing can ever spend such a record: `open` refuses outright while no goal
+    // is armed, so a record met in that state is always a leftover, and holding it
+    // to its opener made it unclearable through the CLI for the rest of its life.
+    // Both callers a shell can be are tried, since neither has anything to protect.
+    for (const leg of [
+        { what: 'a bystander', run: (repo) => runCliAs(['clear'], repo, BYSTANDER_SESSION) },
+        { what: 'a shell with no session id', run: (repo) => runCli(['clear'], repo) }
+    ]) {
+        const repo = makeDir('kit-compact-gate-repo-');
+        try {
+            assert.strictEqual(
+                writeCheckpoint(repo, 'docs/plans/example.md', SESSION, false, SESSION).ok, true,
+                'test setup: a record another session opened is on disk');
+            const res = leg.run(repo);
+            assert.strictEqual(res.status, 0, leg.what + ': the clear runs; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('compact checkpoint cleared'), leg.what + ': ' + res.stdout);
+            assert.ok(!fs.existsSync(checkpointPath(repo)), leg.what + ': and the record is gone');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+test('gate: a checkpoint whose opener is not the session it belongs to reads as absent, both directions', () => {
+    // The read-side half on its own fixture: everything else about the record
+    // matches, so only the opener can decide it. The corrected fixture is the
+    // control, run against the same repo, which is what says the deny came from
+    // this leg and not from the fixture being wrong in some other way.
+    const { repo, planRel, transcript } = armedRepo();
+    try {
+        writeCheckpointAt(repo, planRel, new Date().toISOString(), false, BYSTANDER_SESSION);
+        assertDeny(runGate(gatePayload(repo, transcript)));
+        assert.strictEqual(readState(repo).lastDecision.reason, 'wrong-opener',
+            'the deny is journaled under the opener leg');
+        assert.ok(fs.existsSync(checkpointPath(repo)), 'and a record the gate ignores is not consumed');
+
+        writeCheckpointAt(repo, planRel, new Date().toISOString(), false, SESSION);
+        assertAllow(runGate(gatePayload(repo, transcript)));
+        assert.ok(!fs.existsSync(checkpointPath(repo)),
+            'the same fixture with its own session as the opener is honored and consumed');
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('gate: a checkpoint carrying no opener the rule can read is ignored under the opener leg', () => {
+    // What an older kit wrote and what a hand edit leaves: the field absent
+    // altogether, and a value the storage rule cannot support, which reads as no
+    // opener rather than as one nothing can ever match. Both are records nothing
+    // here can say whose boundary they were, so neither blesses a compaction.
+    for (const planted of [undefined, '', 42]) {
+        const { repo, planRel, transcript } = armedRepo();
+        try {
+            const record = { plan: planRel, boundSession: SESSION, openedAt: new Date().toISOString(), pendingOffer: false };
+            if (planted !== undefined) record.openedBy = planted;
+            writeFile(checkpointPath(repo), JSON.stringify(record) + '\n');
+            assertDeny(runGate(gatePayload(repo, transcript)));
+            assert.strictEqual(readState(repo).lastDecision.reason, 'wrong-opener',
+                JSON.stringify(planted) + ' must read as no opener');
+            assert.ok(fs.existsSync(checkpointPath(repo)), 'and is not consumed');
+        } finally {
+            rmDir(repo);
+        }
+    }
+});
+
+test('cli: status parts the two states the opener leg refuses, and the gate agrees on each', () => {
+    const { repo, planRel, transcript } = armedRepo();
+    const statusLine = () => {
+        const res = runCli(['status'], repo);
+        assert.strictEqual(res.status, 0, 'status runs; stderr: ' + res.stderr);
+        return res.stdout.split('\n')[0];
+    };
+    try {
+        writeCheckpointAt(repo, planRel, new Date().toISOString(), false, BYSTANDER_SESSION);
+        let out = statusLine();
+        assert.ok(out.includes('opened by a session other than the one it belongs to'),
+            'a boundary somebody else declared is named as that: ' + out);
+        assert.ok(out.includes('treats it as absent'), out);
+        assertDeny(runGate(gatePayload(repo, transcript)));
+
+        writeFile(checkpointPath(repo), JSON.stringify({
+            plan: planRel, boundSession: SESSION, openedAt: new Date().toISOString(), pendingOffer: false
+        }) + '\n');
+        out = statusLine();
+        assert.ok(out.includes('records no opening session'),
+            'and a record with none is named as that instead: ' + out);
+        assert.ok(out.includes('declaring the boundary again records one'),
+            'with the remedy that works: ' + out);
+        assertDeny(runGate(gatePayload(repo, transcript)));
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('cli: status stops short of promising the gate will honor a record with no opener once adopted', () => {
+    // The adoptable sentence is a promise about what happens after the claim, and
+    // an adoption supplies the owner and never the opener. Over a record with no
+    // opener the promise is false, and on this surface a false one sends an
+    // operator to wait for a boundary that is never going to land. Over a record
+    // WITH one it holds only for the session that opened it, so the sentence
+    // carries that condition rather than an unqualified promise: a bystander's
+    // boundary adopts too, and the gate then refuses it at wrong-opener.
+    const { repo, planRel } = selfArmedRepo(ARMING_SESSION);
+    const statusLine = () => runCli(['status'], repo).stdout.split('\n')[0];
+    try {
+        writeOwnerlessCheckpoint(repo, planRel, new Date().toISOString(), false, ARMING_SESSION);
+        let out = statusLine();
+        assert.ok(out.includes('the gate honors it from then'),
+            'a record with an opener keeps the promise: ' + out);
+        assert.ok(out.includes('where the session that claims the leash is the one that opened it'),
+            'and states the condition the promise holds under: ' + out);
+
+        // The same sentence over a bystander's boundary, which is the record the
+        // unconditional promise was false about: the report is the same, because
+        // status cannot know which session will claim, and the condition is what
+        // makes it true either way.
+        writeOwnerlessCheckpoint(repo, planRel, new Date().toISOString(), false, BYSTANDER_SESSION);
+        out = statusLine();
+        assert.ok(out.includes('where the session that claims the leash is the one that opened it'),
+            'over a bystander\'s boundary the condition is what the reader is given: ' + out);
+
+        writeFile(checkpointPath(repo), JSON.stringify({
+            plan: planRel, boundSession: null, openedAt: new Date().toISOString(), pendingOffer: false
+        }) + '\n');
+        out = statusLine();
+        assert.ok(out.includes('records no session and no opening session'), out);
+        assert.ok(out.includes('the gate still treats it as absent'),
+            'the promise is withdrawn rather than repeated: ' + out);
+        assert.ok(!out.includes('the gate honors it from then'), out);
+    } finally {
+        rmDir(repo);
+    }
+});
+
+test('lib: a checkpoint write refuses an opener the record could not carry', () => {
+    // The opener passes the same storage gate the owner does, at the one writer
+    // of the file, so the field can never hold a value the match rule would read
+    // as no opener while a caller believed it had recorded one.
+    const { repo, planRel } = armedRepo();
+    try {
+        const res = writeCheckpoint(repo, planRel, SESSION, false, 'x'.repeat(129));
+        assert.strictEqual(res.ok, false, 'the write refuses');
+        assert.ok(/opening session/.test(res.reason), 'and says which field: ' + res.reason);
+        assert.ok(!fs.existsSync(checkpointPath(repo)), 'and nothing is written');
     } finally {
         rmDir(repo);
     }
@@ -2358,7 +4176,7 @@ test('cli: open says so when the gate state could not be read', () => {
     const shimDir = makeDir('kit-compact-gate-shim-');
     try {
         openEpisodeFor(repo, SESSION);
-        const res = runCli(['open'], repo,
+        const res = runCliAs(['open'], repo, SESSION,
             { NODE_OPTIONS: symlinkReportingPreload(shimDir, 'compact-gate.json') });
         assert.strictEqual(res.status, 0, 'the open still succeeds; stderr: ' + res.stderr);
         assert.strictEqual(openedCheckpoint(repo).pendingOffer, false, 'the conservative bound is taken');
@@ -2509,12 +4327,12 @@ test('cli: status reports an open checkpoint, a mismatched one, and none', () =>
     try {
         assert.ok(checkpointLine().includes('no compact checkpoint'), 'none open yet');
 
-        writeCheckpoint(repo, planRel, SESSION);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         let line = checkpointLine();
         assert.ok(line.includes(planRel), 'status names the plan');
         assert.ok(!line.includes('treats it as absent'), 'a matching checkpoint carries no mismatch note');
 
-        writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION);
+        writeCheckpoint(repo, 'docs/plans/some-prior-run.md', SESSION, false, SESSION);
         assert.ok(checkpointLine().includes('treats it as absent'), 'mismatch is flagged');
     } finally {
         rmDir(repo);
@@ -2535,7 +4353,7 @@ test('cli: status parts the three states the session leg refuses, and the gate a
         return res.stdout.split('\n')[0];
     };
     try {
-        writeCheckpoint(repo, planRel, null);
+        writeCheckpoint(repo, planRel, null, false, ARMING_SESSION);
         let out = statusLine();
         assert.ok(out.includes('the claim that binds one adopts this record'),
             'an ownerless record beside an unbound goal is reported as adoptable: ' + out);
@@ -2552,12 +4370,12 @@ test('cli: status parts the three states the session leg refuses, and the gate a
         assert.ok(out.includes('treats it as absent'), out);
 
         // The gate agrees on the adoptable fixture: it claims, adopts and lands.
-        writeCheckpoint(repo, planRel, null);
+        writeCheckpoint(repo, planRel, null, false, ARMING_SESSION);
         assertAllow(runGate(gatePayload(repo, transcript, { session_id: ARMING_SESSION })));
 
         // With the leash now held, an ownerless record is genuinely dead: no
         // claim is coming to adopt it.
-        writeCheckpoint(repo, planRel, null);
+        writeCheckpoint(repo, planRel, null, false, ARMING_SESSION);
         out = statusLine();
         assert.ok(out.includes('records no session while the leash is held'), out);
         assert.ok(out.includes('treats it as absent'), out);
@@ -2585,7 +4403,7 @@ test('cli: status names each state the gate ignores, and the gate agrees on the 
     };
     try {
         // Wrong session (the crash orphan).
-        writeCheckpoint(repo, planRel, 'ses-crashed-previous-run');
+        writeCheckpoint(repo, planRel, 'ses-crashed-previous-run', false, 'ses-crashed-previous-run');
         let out = statusLine();
         assert.ok(out.includes('names a session that does not hold the armed goal\'s leash'),
             'names the session mismatch: ' + out);
@@ -2621,7 +4439,7 @@ test('cli: status names each state the gate ignores, and the gate agrees on the 
         assertDeny(runGate(payload()));
 
         // A live checkpoint carries no absent note, and the gate consumes it.
-        const opened = runCli(['open'], repo);
+        const opened = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(opened.status, 0, 'open succeeds; stderr: ' + opened.stderr);
         out = statusLine();
         assert.ok(out.includes(planRel), out);
@@ -2652,7 +4470,7 @@ test('lib: a checkpoint write whose close fails after a good write reports the f
             err.code = 'EIO';
             throw err;
         };
-        const wrote = writeCheckpoint(repo, planRel, SESSION, false);
+        const wrote = writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         fs.closeSync = realCloseSync;
         assert.ok(closed > 0, 'setup: the write reached its close');
         assert.strictEqual(wrote.ok, false, 'a write whose close failed is not a write that succeeded');
@@ -2728,7 +4546,7 @@ test('cli: a clear that could not prove the checkpoint is there does not assert 
     const shimDir = makeDir('kit-compact-gate-shim-');
     try {
         writeCheckpointAt(repo, planRel, new Date().toISOString(), false);
-        const res = runCli(['clear'], repo,
+        const res = runCliAs(['clear'], repo, SESSION,
             { NODE_OPTIONS: lstatRefusingPreload(shimDir, 'compact-checkpoint.json') });
         assert.strictEqual(res.status, 1, 'a clear that released nothing exits nonzero');
         assert.ok(res.stderr.includes('could not clear checkpoint'), res.stderr);
@@ -2750,7 +4568,7 @@ test('lib: a checkpoint the gate consumes mid-clear reports none open, not a fai
     const { repo, planRel } = armedRepo();
     const realUnlinkSync = fs.unlinkSync;
     try {
-        assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false).ok, true, 'setup');
+        assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false, SESSION).ok, true, 'setup');
         fs.unlinkSync = function (target) {
             if (String(target) === checkpointPath(repo)) {
                 const err = new Error('ENOENT: no such file or directory, unlink');
@@ -2865,7 +4683,7 @@ test('cli: status reports an illegible checkpoint file instead of claiming absen
         assertDeny(runGate(gatePayload(repo, transcript)));
         assert.ok(fs.existsSync(checkpointPath(repo)), 'illegible file left in place');
         // clear is the remedy status points at.
-        const cleared = runCli(['clear'], repo);
+        const cleared = runCliAs(['clear'], repo, SESSION);
         assert.strictEqual(cleared.status, 0);
         assert.ok(!fs.existsSync(checkpointPath(repo)), 'clear removes it');
         // And with the file truly gone, status reports plain absence again.
@@ -2879,7 +4697,7 @@ test('cli: status reports an illegible checkpoint file instead of claiming absen
 test('cli: status on a checkpoint whose goal is gone says so, and the gate leaves it alone', () => {
     const { repo, transcript } = armedRepo();
     try {
-        const opened = runCli(['open'], repo);
+        const opened = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(opened.status, 0, 'open succeeds; stderr: ' + opened.stderr);
         // The goal is cleared out from under the checkpoint (a temp fixture
         // repo, never the real one).
@@ -2902,13 +4720,13 @@ test('cli: status on a checkpoint whose goal is gone says so, and the gate leave
 test('cli: clear removes an open checkpoint and is a no-op when none is open', () => {
     const { repo, planRel } = armedRepo();
     try {
-        writeCheckpoint(repo, planRel, SESSION);
-        let res = runCli(['clear'], repo);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
+        let res = runCliAs(['clear'], repo, SESSION);
         assert.strictEqual(res.status, 0);
         assert.ok(res.stdout.includes('cleared'));
         assert.ok(!fs.existsSync(checkpointPath(repo)), 'checkpoint removed');
 
-        res = runCli(['clear'], repo);
+        res = runCliAs(['clear'], repo, SESSION);
         assert.strictEqual(res.status, 0);
         assert.ok(res.stdout.includes('no compact checkpoint'));
     } finally {
@@ -3313,7 +5131,7 @@ test('gate: automation-detected allow does NOT consume a matching checkpoint', (
     // it (consumption is exclusive to the boundary-driven allow).
     const { repo, planRel } = armedRepo();
     try {
-        writeCheckpoint(repo, planRel, SESSION);
+        writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         const bystander = path.join(repo, 'bystander.jsonl');
         writeFile(bystander, [
             GOAL_ARMED,
@@ -3773,7 +5591,7 @@ test('round-trip: CLI open lets exactly one auto-compaction through the gate', (
         assertDeny(runGate(gatePayload(repo, transcript)));
 
         // Chapter boundary: the ritual opens the checkpoint via the CLI.
-        const opened = runCli(['open'], repo);
+        const opened = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(opened.status, 0, 'open succeeds; stderr: ' + opened.stderr);
 
         // The next attempt lands, consuming the checkpoint.
@@ -3886,7 +5704,7 @@ test('gate: two denies count two in one episode, and the allow that follows rese
 
         // A boundary checkpoint lands the compaction, which is what closes the
         // episode: every allow means a compaction, so the count starts over.
-        const opened = runCli(['open'], repo);
+        const opened = runCliAs(['open'], repo, SESSION);
         assert.strictEqual(opened.status, 0, 'open succeeds; stderr: ' + opened.stderr);
         assertAllow(runGate(gatePayload(repo, transcript)));
         const third = readState(repo);
@@ -3943,7 +5761,7 @@ test('gate: every verdict path records the clause that decided it', () => {
     // checkpoint: the boundary firing.
     f = armedRepo();
     try {
-        assert.strictEqual(runCli(['open'], f.repo).status, 0);
+        assert.strictEqual(runCliAs(['open'], f.repo, SESSION).status, 0);
         assertAllow(runGate(gatePayload(f.repo, f.transcript)));
         assert.strictEqual(recorded(f.repo, 'allow'), 'checkpoint');
     } finally { rmDir(f.repo); }
@@ -4682,15 +6500,24 @@ test('cli: no verb\'s failure leg carries the home directory\'s name into the ch
         {
             what: 'an open whose checkpoint write is refused',
             args: ['open'],
+            // The caller is named because the write verbs refuse a caller they
+            // cannot resolve, and this leg is about the write that follows. The
+            // write is refused at its temp file, with a path-carrying error: a
+            // non-regular file at the checkpoint path is answered by its own
+            // reading before any caller and never reaches the write, so it cannot
+            // stage this leg for anybody, the leash holder included.
+            env: {
+                CLAUDE_CODE_SESSION_ID: SESSION,
+                NODE_OPTIONS: checkpointWriteRefusingPreload(shimDir)
+            },
             fired: 'could not write checkpoint',
             elides: true,
             stage: (repo) => {
                 writeFile(path.join(repo, planRel), 'Status: In Progress\n\nbody\n');
                 assert.strictEqual(armGoal(repo, planRel).ok, true, 'test setup: goal should arm');
-                // A directory at the target: the atomic write's rename onto it
-                // is refused by the OS, which is a real fs error naming both
-                // paths.
-                fs.mkdirSync(checkpointPath(repo), { recursive: true });
+                // Bound to the caller, so the scope guard is answered by the
+                // binding and this leg is about the write.
+                assert.strictEqual(bindSession(repo, SESSION).ok, true, 'test setup: goal should bind');
             }
         },
         {
@@ -4735,13 +6562,16 @@ test('cli: no verb\'s failure leg carries the home directory\'s name into the ch
         {
             what: 'a clear whose checkpoint delete is refused',
             args: ['clear'],
-            env: { NODE_OPTIONS: unlinkRefusingPreload(shimDir, 'compact-checkpoint.json') },
+            env: {
+                NODE_OPTIONS: unlinkRefusingPreload(shimDir, 'compact-checkpoint.json'),
+                CLAUDE_CODE_SESSION_ID: SESSION
+            },
             fired: 'could not clear checkpoint',
             elides: true,
             stage: (repo) => {
                 writeFile(path.join(repo, planRel), 'Status: In Progress\n\nbody\n');
                 assert.strictEqual(armGoal(repo, planRel).ok, true, 'test setup: goal should arm');
-                assert.strictEqual(writeCheckpoint(repo, planRel, null).ok, true,
+                assert.strictEqual(writeCheckpoint(repo, planRel, null, false, SESSION).ok, true,
                     'test setup: checkpoint should write');
             }
         }
@@ -4814,17 +6644,22 @@ function homeAt(dir) {
 }
 
 // Stage a repo under the given home whose checkpoint write is refused, and
-// return everything the run emitted. The refusal is a directory at the target,
-// which the atomic write's rename meets as a real OS error naming the absolute
-// path the syscall was refused on: the shape that carries a path onto this
-// channel inside an error sentence rather than as a value known to be a path.
+// return everything the run emitted. The refusal is the write's own temp file
+// being declined with an error naming the absolute path the syscall was refused
+// on: the shape that carries a path onto this channel inside an error sentence
+// rather than as a value known to be a path. It has to be staged as a refusal,
+// since a non-regular file at the checkpoint path is answered by that reading
+// before any caller reaches the write.
 function refusedOpenUnderHome(home) {
     const repo = fs.mkdtempSync(path.join(home, 'leg-'));
     const planRel = 'docs/plans/example.md';
     writeFile(path.join(repo, planRel), 'Status: In Progress\n\nbody\n');
     assert.strictEqual(armGoal(repo, planRel).ok, true, 'test setup: goal should arm');
-    fs.mkdirSync(checkpointPath(repo), { recursive: true });
-    const res = runCli(['open'], repo, homeAt(home));
+    // Bound to the caller, so the scope guard is answered by the binding and the
+    // run reaches the write this case is about.
+    assert.strictEqual(bindSession(repo, SESSION).ok, true, 'test setup: goal should bind');
+    const res = runCliAs(['open'], repo, SESSION,
+        { ...homeAt(home), NODE_OPTIONS: checkpointWriteRefusingPreload(repo) });
     return res.stdout + res.stderr;
 }
 
@@ -5412,6 +7247,54 @@ test('cli: status names an oversized checkpoint file and offers the clear that d
         assert.ok(!out.includes('no compact checkpoint is open'), 'nor absent: ' + out);
     } finally {
         rmDir(repo);
+    }
+});
+
+test('cli: status over a goal state that cannot be read names that state rather than an absent goal', () => {
+    // The match rule takes the goal the reader answered with, and that null reads
+    // the same for a state file that is absent and for one that is present and
+    // could not be read, so the no-goal verdict arrives over both. Only the first
+    // is absence. Both write verbs refuse over the second in the unreadable-state
+    // wording, so status telling an operator no goal is armed would contradict them
+    // about a file sitting right at the path, over a record that may be perfectly
+    // live. status still reports rather than refusing: exit 0, and nothing written.
+    for (const shape of ['other', 'file', 'oversized']) {
+        const { repo, planRel } = armedRepo();
+        try {
+            assert.strictEqual(writeCheckpoint(repo, planRel, SESSION, false, SESSION).ok, true,
+                'test setup: a legible record for the armed plan is on disk');
+            const before = fs.readFileSync(checkpointPath(repo));
+            plantUnreadableGoalState(repo, shape);
+            const res = runCli(['status'], repo);
+            assert.strictEqual(res.status, 0,
+                shape + ': status reports rather than refusing; stderr: ' + res.stderr);
+            assert.ok(res.stdout.includes('kit goal state is present but could not be read'),
+                shape + ': and names the state that could not be read: ' + res.stdout);
+            assert.ok(res.stdout.includes('(' + UNREADABLE_GOAL_PHRASE[shape] + ')'),
+                shape + ': with that reading in words: ' + res.stdout);
+            assert.ok(!res.stdout.includes('no kit goal is armed'),
+                shape + ': and never reads a present state as an absent one: ' + res.stdout);
+            assert.deepStrictEqual(fs.readFileSync(checkpointPath(repo)), before,
+                shape + ': and the record is byte-unchanged, status writing nothing');
+        } finally {
+            rmDir(repo);
+        }
+    }
+    // The control, withheld from the rule above: with the goal state genuinely
+    // absent the same record takes the same verdict from the match rule, and there
+    // the no-goal sentence is true and is what prints. So the leg above turns on
+    // the state being present and unreadable, and nothing else about the fixture.
+    const gone = armedRepo();
+    try {
+        assert.strictEqual(writeCheckpoint(gone.repo, gone.planRel, SESSION, false, SESSION).ok, true,
+            'test setup: the same legible record');
+        fs.rmSync(path.join(gone.repo, '.kit', 'goal-state.json'), { force: true });
+        const out = runCli(['status'], gone.repo).stdout;
+        assert.ok(out.includes('no kit goal is armed'), 'absence reads as absence: ' + out);
+        assert.ok(!out.includes('could not be read'),
+            'and asserts nothing about a path with nothing at it: ' + out);
+    } finally {
+        rmDir(gone.repo);
     }
 });
 
@@ -6424,7 +8307,7 @@ test('gate: another session neither extends nor closes the episode it did not op
         // The owner still extends it, and its own allow still clears it.
         assertDeny(runGate(gatePayload(repo, transcript)));
         assert.strictEqual(readState(repo).episode.denials, 2, 'the owner extends its own episode');
-        assert.strictEqual(runCli(['open'], repo).status, 0);
+        assert.strictEqual(runCliAs(['open'], repo, SESSION).status, 0);
         assertAllow(runGate(gatePayload(repo, transcript)));
         assert.strictEqual(readState(repo).episode, null, 'and the owner\'s allow clears it');
     } finally {
@@ -6653,7 +8536,7 @@ test('cli: status renders the last gate decision and the open deferral episode',
         assert.ok(res.stdout.includes('held 1 offer over 0 minutes'), 'names the episode: ' + res.stdout);
         assert.ok(!res.stdout.includes('undefined'), res.stdout);
 
-        assert.strictEqual(runCli(['open'], repo).status, 0);
+        assert.strictEqual(runCliAs(['open'], repo, SESSION).status, 0);
         assertAllow(runGate(gatePayload(repo, transcript)));
         res = runCli(['status'], repo);
         assert.strictEqual(res.status, 0, 'status runs; stderr: ' + res.stderr);
@@ -6887,7 +8770,7 @@ test('lib: a checkpoint write that fails after its create leaves no temp behind'
     const { repo, planRel } = armedRepo();
     const restore = failWriteAfterCreate((p) => p.startsWith(checkpointPath(repo) + '.tmp.'));
     try {
-        const wrote = writeCheckpoint(repo, planRel, SESSION, false);
+        const wrote = writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         restore();
         assert.strictEqual(wrote.ok, false, 'the failed write is reported');
         assert.ok(/ENOSPC/.test(wrote.reason), 'and it fails for that reason: ' + wrote.reason);
@@ -6967,7 +8850,7 @@ test('lib: an atomic write refused by an occupied temp path deletes nothing', ()
         const planted = checkpointPath(repo) + '.tmp.' + process.pid + '.aabbccddeeff';
         writeFile(planted, 'not the writer\'s file\n');
 
-        const wrote = writeCheckpoint(repo, planRel, SESSION, false);
+        const wrote = writeCheckpoint(repo, planRel, SESSION, false, SESSION);
         assert.strictEqual(wrote.ok, false, 'the exclusive create fails on an occupied path');
         assert.ok(/EEXIST/.test(wrote.reason), 'and it fails for that reason: ' + wrote.reason);
         assert.strictEqual(fs.readFileSync(planted, 'utf8'), 'not the writer\'s file\n',
@@ -7304,7 +9187,7 @@ test('gate: a matching checkpoint lands ahead of consent, and the landing retire
     // deny inside its four-hour bound.
     let f = armedRepo();
     try {
-        assert.strictEqual(writeCheckpoint(f.repo, f.planRel, SESSION).ok, true, 'test setup: checkpoint should write');
+        assert.strictEqual(writeCheckpoint(f.repo, f.planRel, SESSION, false, SESSION).ok, true, 'test setup: checkpoint should write');
         assert.strictEqual(writeConsent(f.repo, SESSION).ok, true, 'test setup: consent should write');
         assertAllow(runGate(gatePayload(f.repo, f.transcript)));
         assert.strictEqual(readState(f.repo).lastDecision.reason, 'checkpoint', 'the checkpoint is the release that landed');
@@ -7315,7 +9198,7 @@ test('gate: a matching checkpoint lands ahead of consent, and the landing retire
     // A consent naming another session is not this landing's to retire.
     f = armedRepo();
     try {
-        assert.strictEqual(writeCheckpoint(f.repo, f.planRel, SESSION).ok, true, 'test setup: checkpoint should write');
+        assert.strictEqual(writeCheckpoint(f.repo, f.planRel, SESSION, false, SESSION).ok, true, 'test setup: checkpoint should write');
         assert.strictEqual(writeConsent(f.repo, OTHER_SESSION).ok, true, 'test setup: consent should write');
         assertAllow(runGate(gatePayload(f.repo, f.transcript)));
         assert.ok(fs.existsSync(consentFile(f.repo)), 'a foreign consent survives the landing');

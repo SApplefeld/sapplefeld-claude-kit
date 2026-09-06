@@ -9,7 +9,10 @@
 // auto-compaction offer until the gate's own safety valve fires near the context
 // limit, with no signal to anyone
 // who could fix it. The gate's own deny note cannot heal it, because
-// PreCompact stderr reaches the user only, never the model. This hook is the
+// PreCompact stderr is observed to reach the user only and never the model,
+// a property of the harness version this kit runs on rather than one it
+// guarantees (kit-compact-gate.js states what a change there would expose).
+// This hook is the
 // feedback loop: it detects a Chapter being appended to the armed plan doc on
 // a leashed run and puts the boundary steps in front of the model.
 //

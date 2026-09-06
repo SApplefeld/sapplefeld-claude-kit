@@ -135,8 +135,10 @@ const {
 // Chapter-only condition is silent for exactly the run the gate has been
 // holding longest. executing-work's interim board entry is that run's
 // boundary, and the gate's own episode is how a session sees the hold, since
-// the deny happens at a turn boundary where PreCompact stderr reaches the
-// operator and never the model.
+// the deny happens at a turn boundary where PreCompact stderr is observed to
+// reach the operator and never the model, a property of the harness version
+// this kit runs on rather than one it guarantees (kit-compact-gate.js states
+// what a change there would expose).
 const BOUNDARY_DIRECTIVE = 'If a Chapter has been closed since the last boundary, or the '
     + 'compaction gate has been holding auto-compaction offers and this turn is at a clean '
     + 'point (a review round adjudicated, a section closed, a finishing step done), complete '
@@ -530,7 +532,10 @@ function advanceAndHold(cwd, goal, sessionId, entry) {
             const corroborated = pendingOfferCorroborated(cp, state, now, owner);
             const holding = gateEpisodeOpen(state, now, owner) !== null;
             if (cp && checkpointMatches(cp, goal, now, corroborated).ok) {
-                writeCheckpoint(cwd, moved.plan, goal.boundSession, holding);
+                // The opener is the binding: this advance runs in the bound
+                // session, and the record it replaces matched, which the match
+                // rule grants only where the opener already was that session.
+                writeCheckpoint(cwd, moved.plan, goal.boundSession, holding, goal.boundSession);
             }
         } catch { /* the checkpoint is best-effort observability for the gate */ }
     }

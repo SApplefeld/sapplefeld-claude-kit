@@ -77,12 +77,15 @@ sweep is over what reaches a model-read channel carrying a path, not over the wo
 1. (2026-09-07, section 2) The hook canary loads nothing out of the plugin cache it probes, and
    `test/hook-canary.test.js` pins that (`the canary loads no file out of the cache it is probing`).
    The pin stands. The canary therefore reaches the shared renderer through one child process on
-   the failure path only: the report is composed in-process from raw values, then a single child
-   spawned from the same root requires `kit-compact-lib.js` and renders each line through
-   `sanitizeForOutput` (strip, elide, cap, marked). The parent owns the verdict sentence and the
-   failure count, checks the child returned exactly one line per line sent, and on a child
-   failure or a count mismatch withholds every detail line and says so once, so a tampered
-   library can blank the details and never the verdict. No in-process require of any cache file,
+   the failure path only: the report lines are composed in-process from raw values (no strip, no
+   cap, so no cut can bisect a home spelling), handed to a single child spawned from the same root
+   as JSON, and the child requires `kit-compact-lib.js` and renders each line through
+   `sanitizeForOutput` (strip, elide, cap, marked). The parent owns the verdict sentence, the
+   failure count and the instructions, and never sends them to the child; it refuses the
+   rendering whole when the child fails, exits nonzero, or returns a different number of lines,
+   and on that leg prints the same lines with every path-derived value taken back out
+   (`[path withheld]`) plus one note, so the diagnosis survives and a tampered library can blank
+   the paths and never write a report of its own. No in-process require of any cache file,
    guarded or not.
 
 ## Sections of Work
@@ -192,3 +195,9 @@ Section 2 in flight at 2026-09-07T06:19:09Z, on this main checkout at 79475ba (s
 Gate baseline: the whole gate reading from Chapter 1 stands (3405/3389/4/12 exit 1 measured 04:48:47Z to 04:56:27Z at c6143b2 with the section staged; after the build-stamp rebuild the effective baseline is that reading with the three canary reds cleared and the one permanent memory-session red). No new whole-gate reading yet this section; contention lane none defined. The heavy-process claim is the implementer's for its lane, released on this session's id.
 
 Next: read the second dispatch's report, verify its diff and lane, then the review round (code pair plus security lens at fable, both rounds bracketed), then docs/security-model.md rewritten in the main thread from the final residual list, then close gate, whole gate, Chapter 2, commit, push, checkpoint. This entry is committed with the plan doc alone and not pushed: the push owes the whole gate and lands with the section close.
+
+### Interim board 3 - 2026-09-07
+
+Section 2 at 2026-09-07T07:07:46Z on this main checkout at 224cd43: the second implementer-opus dispatch returned DONE_WITH_CONCERNS (its lane 2691/2683/1/7 exit 1 over 27 files, the one red the permanent memory-session case), and review round 1 is adjudicated. The dispatch folded Amendment 1 from whole-report withholding to per-value withholding on the child-failure leg (two pre-existing canary cases need the diagnosis kept), carried the lines as JSON rather than newline-delimited, and fixed three more memq.js sites printing a resolved absolute path; the amendment text was rewritten to the shape as built (approval-region edit, deliberate). Round 1 at fable through the Agent tool, both brackets clean: adversarial CHANGES_REQUIRED 0/3/4, blind CHANGES_REQUIRED 0/3/3, security CONCERNS 0/3/4. Majors adjudicated and sent to a fix round: memq.js projects-root line still unelided (two reviewers); memq shownPath dead cap of 260 because displayPath already caps at 120; the canary child renderer printing returned lines verbatim so a same-count replaced library can author rows (fix: parent-side strip, cap, maxBuffer and a fixed-prefix check per line, and the amendment claim narrowed to a shape-and-bound check); kit-registry-stamp.js stderr write followed by process.exit on win32 pipes; sweep coverage (the taint instrument follows declarations only, so the eleven additionalContext producers were unswept, and memory-session.js prints the memory directory whole, adjudicated exempt: the Write tool needs an absolute destination and the harness prompt already prints the home-anchored CLAUDE.md path; a control shaped like the miss, a re-sweep of the eleven producers, and the deny-reason enumeration are owed). Minors sent with it: p() registering error codes and short stdout, the probe runner fallback note once, a prose pin anchored to a path shape, memq raw err.message, the note naming a kit library. Live dispatch: implementer-opus fix round 1 at opus, brief at .kit/scratch/eliding/brief-s2-fix.md, dispatched 06:42Z, first-turn reading 62 assistant lines and 0 synthetic, awaited in-turn.
+
+Gate baseline unchanged from board 2. Next: read the fix report, verify, round 2 (the fix delta touches the child spawn and the sanitizing path, both security-trigger surfaces), then docs/security-model.md in the main thread, close gate, whole gate, Chapter 2, commit, push, checkpoint. This entry is committed with the plan doc alone and not pushed; the push lands with the section close.

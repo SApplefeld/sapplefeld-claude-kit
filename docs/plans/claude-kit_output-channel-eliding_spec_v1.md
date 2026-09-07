@@ -1,6 +1,6 @@
 # One way to render a path for a model-read channel, instead of three sanitizers that do not elide
 
-Status: Ready
+Status: In Progress
 Commit Model: Commit-and-Push
 Created: 2026-09-01
 
@@ -136,3 +136,13 @@ recorded baseline.
   configured model endpoint's own URL pathname onto four channels a model or an operator reads,
   memq's degrade line, the daemon's two gap records and the operator-pasteable rollup, so this
   plan's site enumeration meets a path that is a URL component rather than a filesystem one.
+
+## Chapters
+
+### Interim board 1 - 2026-09-07
+
+Run started on the armed queue (plan 3 of 12) at 698ac29, the scenario-probes plan's finishing commit. Header normalized from Ready to In Progress as part of starting, recorded here as the deliberate approval-region edit it is. Step 1's approach read, at the lines rather than the plan's authoring-time anchors: the checkpoint CLI's private renderer now spans printableAscii, a marked sanitize (strip, then the channel's home elision, then the cap, marks for a stripped middle and a cut tail), displayPath (path.relative containment, relative input never elided), homeElisions (the literal and flattened spellings, both built from the raw and the printable-ASCII home, boundary deny-lists on both edges, the root and ancestor refusals), scrub (whole-line elision) and floorNote (the no-knowable-home sentence), with emitOut and emitErr as the two descriptor writes and test/kit-compact-gate.test.js pinning that no other line reaches a descriptor. The shared library the hooks already depend on, kit-compact-lib.js (eight requirers), already exports sanitizeForOutput, a strip-and-cap whose home elision is a raw split on the home text, the prefix bug in both directions the spec names, and whose comment calls the checkpoint's copy the older spelling, which is backwards today; its only outside caller is kit-registry-stamp.js. So section 1 builds on that export rather than beside it: the checkpoint's machinery moves into kit-compact-lib.js, sanitizeForOutput becomes the marked strip-scrub-cap over it, displayPath and the home-known reading are exported beside it, and the CLI keeps its two emitters and floorNote calling the library. compact-deferral-nudge.js has a third home-aware renderer, commandClausePath, eliding to $HOME for a line meant to be run rather than read; it stays where it is under the plan's own out-of-scope line and is named for section 2's enumeration. Section 2's known caller is hook-canary.js's failure report, sanitize(hooksJson) at two sites in main() and the report builder, its sanitize replacing non-printables with a space and capping at 200 with no elision.
+
+Gate baseline: whole gate `node --test test/*.test.js` 3398/3385/1/12 exit 1, measured 2026-09-07 03:54:52Z to 04:02:27Z on this main checkout at 698ac29 (then 07cca83 plus the finishing delta, identical tree) with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md; the one red is the permanent test/memory-session.test.js case; contention lane none defined in this repo. Intake gaps routed: the library that receives the renderer (route a, the spec's own words plus sanitizeForOutput's comment placing the retirement there); whether sanitizeForOutput's one caller keeps unmarked output (route b, it takes the marks, since kit-registry-stamp.js writes the same model-read channel and the spec makes marking the channel's property); the print cap stays 120 with the existing max parameter.
+
+Next: dispatch section 1 to implementer-opus with the brief at .kit/scratch/eliding/brief-s1.md, red-first tests in test/kit-compact-gate.test.js or a new test/kit-output-channel.test.js, then the code pair at fable.

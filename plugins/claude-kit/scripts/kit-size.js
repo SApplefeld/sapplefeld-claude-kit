@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // kit-size: the size reading behind the kit's size ratchet. Its scope is the
-// five roots in ROOTS below: the skills, agents and output-styles directories
-// under plugins/claude-kit/, the markdown files directly under home/, and
-// test/. Each file it measures there is compared against a committed cap in
-// test/size-budget.json, and what changed is reported. A tracked file outside
-// those five roots is unmeasured, plugins/claude-kit/hooks/, this script's own
-// directory plugins/claude-kit/scripts/, plugins/claude-kit/doctor/ and every
-// tracked file at the repository top level among them.
+// six roots in ROOTS below: the skills, agents and output-styles directories
+// under plugins/claude-kit/, the markdown files directly under home/,
+// test/probes/, and test/. Each file it measures there is compared against a
+// committed cap in test/size-budget.json, and what changed is reported. A
+// tracked file outside those six roots is unmeasured, plugins/claude-kit/hooks/,
+// this script's own directory plugins/claude-kit/scripts/,
+// plugins/claude-kit/doctor/ and every tracked file at the repository top level
+// among them.
 // test/size-ratchet.test.js is the gate that consumes it; this file is also the
 // CLI a session runs by hand to read a section's size delta.
 //
@@ -253,6 +254,16 @@ const ROOTS = [
         root: 'home/',
         metric: 'words',
         shapes: [/^home\/[^/]+\.md$/]
+    },
+    {
+        // Ahead of test/ below because classify takes the first root that holds a
+        // path, and test/probes/ sits under test/ on disk. The probe set is
+        // curated prose, the frozen scenarios and rulings the cold-probe runner
+        // reads, so it is measured in words like the other curated roots rather
+        // than in lines like the test code beneath it.
+        root: 'test/probes/',
+        metric: 'words',
+        shapes: [/^test\/probes\/[^/]+\.md$/]
     },
     {
         root: 'test/',

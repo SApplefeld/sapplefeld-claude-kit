@@ -2,12 +2,12 @@
 // the gate over test/size-budget.json.
 //
 // Node's built-in test runner, no framework. Two subjects sit here rather than
-// one. The ratchet itself is the gate: every tracked file under the script's five
+// one. The ratchet itself is the gate: every tracked file under the script's six
 // measured roots is measured against its committed cap, so growth past a cap is a
 // red rather than a thing somebody notices at an audit. Those roots are the
 // skills, agents and output-styles directories under plugins/claude-kit/, the
-// markdown files directly under home/, and test/; a tracked file outside them is
-// unmeasured and this gate says nothing about it. The script's failure
+// markdown files directly under home/, test/probes/, and test/; a tracked file
+// outside them is unmeasured and this gate says nothing about it. The script's failure
 // reasons are the second subject, and each is driven separately, because a gate
 // that can only report "something failed" cannot tell a file over its cap from a
 // file the classifier never reached, and those two want opposite fixes.
@@ -369,12 +369,17 @@ test('the classifier gives each measured shape its root metric', () => {
         // a sibling beside that file would sit under no root at all and reach no
         // reading.
         'home/CLAUDE.md',
+        // test/probes/ sits ahead of test/ in ROOTS because classify takes the
+        // first root that holds a path and test/probes/ nests under test/ on
+        // disk; the frozen probe scenarios are curated prose measured in words,
+        // not the line-counted test code the root beneath them holds.
+        'test/probes/scenario.md',
         'test/one.test.js',
         'test/size-budget.json',
         'README.md',
         'docs/plans/whatever.md'
     ]);
-    assert.deepStrictEqual(entries.map((e) => e.metric), ['words', 'words', 'words', 'words', 'words', 'words', 'lines']);
+    assert.deepStrictEqual(entries.map((e) => e.metric), ['words', 'words', 'words', 'words', 'words', 'words', 'words', 'lines']);
     assert.deepStrictEqual(unclassified, []);
     assert.deepStrictEqual(excluded, ['test/size-budget.json']);
     // A path outside every measured root is not this tool's subject, so it is
@@ -398,6 +403,11 @@ test('a tracked file under a measured root that matches no shape lands unclassif
         // and measured by nothing, which is the state that must red.
         'home/nested/deep.md',
         'home/settings.json',
+        // Under test/probes/ too, where the shape is a markdown file directly
+        // inside it: a nested file and a non-markdown one are both held by the
+        // root and measured by nothing, which is the state that must red.
+        'test/probes/nested/deep.md',
+        'test/probes/notes.txt',
         'test/helpers/fixture-builder.js',
         'test/one.js'
     ];
@@ -407,6 +417,23 @@ test('a tracked file under a measured root that matches no shape lands unclassif
     const failures = kit.evaluate([], {}, unclassified);
     assert.deepStrictEqual(failures.map((f) => f.reason), withheld.map(() => kit.REASONS.UNCLASSIFIED));
     assert.deepStrictEqual(failures.map((f) => f.path), withheld);
+});
+
+// The probe root's coverage contract on its own, isolated from every other root:
+// a shaped path lands as one words entry with nothing left over.
+test('a test/probes/ markdown path classifies as one words entry with nothing unclassified', () => {
+    const { entries, unclassified } = kit.classify(['test/probes/x.md']);
+    assert.deepStrictEqual(entries, [{ path: 'test/probes/x.md', metric: 'words' }]);
+    assert.deepStrictEqual(unclassified, []);
+});
+
+// The mirror: a non-markdown file under test/probes/ is held by the root and
+// measured by no shape, so it reds as unclassified rather than being skipped as
+// though it sat under no root at all.
+test('a test/probes/ path that is not markdown lands unclassified', () => {
+    const { entries, unclassified } = kit.classify(['test/probes/x.txt']);
+    assert.deepStrictEqual(entries, []);
+    assert.deepStrictEqual(unclassified, ['test/probes/x.txt']);
 });
 
 // A root prefix spelled in another case is still under the root, so the
@@ -941,7 +968,7 @@ test('over a real repository the report prints totals only on a clean tree and a
     }
 });
 
-// The gate itself: this repository against its committed budget, over the five
+// The gate itself: this repository against its committed budget, over the six
 // measured roots and no further. Every tracked file under one of those roots is
 // classified or named on the exclusion list; a tracked file outside them is
 // unmeasured, and no assertion here says otherwise. What that leaves uncovered is
@@ -2364,7 +2391,7 @@ test('a project whose only measured file is untracked has a corpus rather than a
 });
 
 // init takes the same no-corpus refusal both reading verbs take. Without it a project
-// holding nothing under the five roots gets an empty budget written and a success
+// holding nothing under the six roots gets an empty budget written and a success
 // reported, and every later run over that file refuses on a budget holding no cap.
 test('init refuses a project holding nothing under the measured roots rather than writing an empty budget', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-size-nocorpus-'));

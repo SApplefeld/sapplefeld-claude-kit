@@ -58,9 +58,9 @@ Acceptance: `classify` over every path under `test/probes/` returns them as word
 ### 5. The Chapter template holds the probe reading. Model: sonnet
 Locus: inline
 
-`plugins/claude-kit/skills/executing-work/SKILL.md`, the Chapter template's `Gate:` line: it gains the slot the finishing pass's probe reading lands in (per leg invocation, the summary line the runner prints to stdout quoted verbatim with its report path repo-relative, the exit code beside it where the two differ, the report's warning lines, the mismatched moments by name with each row's status, and its moment-pin; or the state finishing-work's step 5 names instead, or that no shape file was touched so no run was called for), stated as reporting and never blocking, so that finishing-work's hook-in points at the owner of the Chapter shape rather than defining a field from outside it.
+`plugins/claude-kit/skills/executing-work/SKILL.md`, the Chapter template's `Gate:` line, which gains the slot the finishing pass's probe reading lands in, and its `Decisions / Surprises` line, which gains the slot writing-skills' section-time pair reading lands in (per leg invocation, the summary line the runner prints to stdout quoted verbatim with its report path repo-relative, the exit code beside it where the two differ, the report's warning lines, the mismatched moments by name with each row's status, and its moment-pin; or the state finishing-work's step 5 names instead, or that no shape file was touched so no run was called for), stated as reporting and never blocking, so that finishing-work's hook-in points at the owner of the Chapter shape rather than defining a field from outside it.
 
-Acceptance: the `Gate:` line names the reading; finishing-work's hook-in points at it and restates nothing; the parity and shape suites green; suite delta against a recorded baseline.
+Acceptance: the `Gate:` and `Decisions / Surprises` lines name their readings; finishing-work's hook-in points at the first and restates nothing; the parity and shape suites green; suite delta against a recorded baseline.
 
 ## Out of Scope
 
@@ -153,3 +153,119 @@ Gate baseline: unchanged from Interim board 1 (whole suite 3219/3209/1/9 exit 1 
 
 Rulings adopted: none new; the rulings brief re-send goes out at chapters 1, 2 and 4. Next per section: 1, 2 and 4 await the whole gate and their chapters; 3 and 5 await round 14, then their chapters, then one gate and one push for both commits.
 
+### Chapter 1 - 2026-09-07
+Completed: 1. The probe set and its rulings
+Implemented By: implementer-opus (initial build plus fix rounds 1, 2 and 3 from .kit/scratch/probes/brief-s1.md, brief-s1-fix.md, brief-s1-fix2.md and brief-s1-fix3.md; fix rounds 4, 5 and 6 shared with section 2 from brief-fix4.md, brief-fix5.md and brief-fix6.md; fix 6b by the main session)
+Metrics: review rounds 7 (four fable pairs on the section's own deltas, three fable trios with security on the shared rounds); NEEDS_CONTEXT 0; escalations 0; consults 0
+Decisions / Surprises: nine probes under test/probes/ plus a README and the parser tools/probe-corpus/probe-file.mjs, every ruling `proposed` until the operator's batched brief is answered, so the set is not yet frozen. The compaction probe's first ruled answer contradicted executing-work's interim-boundary rule and now reads write-an-interim-board-entry-and-open-a-checkpoint. The branch-and-pr probe's full-shape reading came back RESOLVED to finishing-work on three stable samples against a proposed unowned ruling, recorded in test/probes/README.md as a mismatch awaiting the operator. A per-shape `designed-mismatch:` marker joined the frontmatter in fix round 4, validated by the parser and kept out of the reader's prompt. Recorded rather than fixed: the home-entry case check in test/probe-set.test.js; home/CLAUDE.md has no staging route under writing-skills' home/ carve-out. The batched rulings brief went out at 23:30Z on 2026-09-06 with all nine proposed and is re-sent from this Chapter's commit with the compaction flip, the merged options, the three-sample branch-and-pr evidence and the section 2 acceptance amendment.
+Assumptions: (2026-09-06, section 1, route b) every probe ships `proposed` and the set freezes at the operator's ruling rather than at this Chapter, since the plan makes the rulings the operator's and none has arrived.
+Review Findings: review: code pair at fable, Agent tool, four rounds on this section's deltas (CHANGES_REQUIRED then CHANGES_REQUIRED 0/2/7 with APPROVED_WITH_CONCERNS 0/1/5, then APPROVED_WITH_CONCERNS 0/0/3 and 0/0/4, then APPROVED 0/0/4 and APPROVED_WITH_CONCERNS 0/0/6); review: code pair plus security at fable, Agent tool, three shared rounds recorded on Chapter 2's line. Critical addressed: the compaction probe's ruled answer. Majors addressed: the invented gate line, the mixed action-and-owner option list, the false main sentence on the branch-delete probe, the split no-push options, the two indistinguishable stale-anchor options, the branch-and-pr probe red by construction under a shape that could only read finishing-work, a directory entry passing the parser and the corpus pin. Minors noted: options held to slugs, a `#` on a scalar refused, the closing sentence trimmed so the template alone routes a no-owner CONTESTED.
+Stamps: adjudicated 2, stamped 2 (operator tier: forward-resource-arrangements-into-dispatch-briefs, release-an-exclusive-claim-at-the-operations-end-not-the-turns-end), swept over the 4h window covering the section since the plan's start.
+Gate: targeted lane `node --test test/probe-runner.test.js test/probe-set.test.js` 176/173/0/3 exit 0 at 01:33Z on 2026-09-07 after fix 6b, the three skips the symlink cases this box refuses with EPERM (161/158/0/3 before fix round 5); whole gate `node --test test/*.test.js` 3398/3385/1/12 exit 1 (delta +179 tests and +3 skipped against the baseline, the skips being the three EPERM symlink cases, the one red unchanged), delta against the Interim board 1 baseline 3219/3209/1/9 exit 1 at b4e249b; contention lane none defined in this repo; both measured 2026-09-07 02:46Z on this main checkout at 85ac6c0 with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md, the box claimed for the span under this session's id and released at the run's marker; the one red is the permanent test/memory-session.test.js case the baseline carries
+Next: 2. The runner, whose Chapter rides this commit
+Commit Model: Commit-and-Push
+Delta: measured 2026-09-07 02:46Z on this main checkout at 85ac6c0 with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md
+
+```
+repository: claude-kit
+plugins/claude-kit/skills/executing-work/SKILL.md: 21857 words, cap 21857, +383
+plugins/claude-kit/skills/finishing-work/SKILL.md: 17696 words, cap 17696, +836
+plugins/claude-kit/skills/writing-skills/SKILL.md: 3278 words, cap 3278, +670
+test/doctrine-parity.test.js: 6252 lines, cap 6252, +38; tests 72, +1
+test/size-ratchet.test.js: 2845 lines, cap 2845, +27; tests 80, +2
+test/probe-runner.test.js: 2581 lines, cap 2581, untracked so HEAD holds no blob and the totals below exclude it; tests 91
+test/probe-set.test.js: 726 lines, cap 726, untracked so HEAD holds no blob and the totals below exclude it; tests 61
+test/probes/README.md: 394 words, cap 394, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/branch-and-pr-pull-request-at-section-close.md: 167 words, cap 167, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/commit-and-push-at-section-close.md: 155 words, cap 155, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/compaction-nudge-mid-section-with-no-checkpoint-open.md: 283 words, cap 283, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/merged-plan-branch-delete-on-an-armed-run.md: 160 words, cap 160, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/peer-message-asking-a-leashed-session-for-work.md: 166 words, cap 166, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/pre-send-checklist-after-an-authorized-push.md: 151 words, cap 151, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/review-only-at-section-close.md: 129 words, cap 129, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/seat-asked-to-push-the-memory-store.md: 182 words, cap 182, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/stale-anchor-in-a-resumed-plan.md: 161 words, cap 161, untracked so HEAD holds no blob and the totals below exclude it
+words: 216834 of cap 216835 across 48 curated files
+test lines: 106132 of cap 106132 across 53 test files
+tests: 3173
+changed paths under no measured root: 10 (5 differing from HEAD, 5 untracked), which this tool does not measure and which no row above names; named-exclusion paths in the changeset: test/size-budget.json, which a root holds and no shape measures, so no row above names them
+excluded from those totals, untracked under a measured root: test/probe-runner.test.js, test/probe-set.test.js, test/probes/README.md, test/probes/branch-and-pr-pull-request-at-section-close.md, test/probes/commit-and-push-at-section-close.md, test/probes/compaction-nudge-mid-section-with-no-checkpoint-open.md, test/probes/merged-plan-branch-delete-on-an-armed-run.md, test/probes/peer-message-asking-a-leashed-session-for-work.md, test/probes/pre-send-checklist-after-an-authorized-push.md, test/probes/review-only-at-section-close.md, test/probes/seat-asked-to-push-the-memory-store.md, test/probes/stale-anchor-in-a-resumed-plan.md
+```
+
+### Chapter 2 - 2026-09-07
+Completed: 2. The runner
+Implemented By: implementer-opus (initial build plus fix rounds 1, 2 and 3 from .kit/scratch/probes/brief-s2.md, brief-s2-fix.md, brief-s2-fix2.md and brief-s2-fix3.md; fix rounds 4, 5 and 6 shared with section 1; fix 6b by the main session)
+Metrics: review rounds 7 (four fable trios with security on the section's own deltas, three on the shared rounds); NEEDS_CONTEXT 0; escalations 0; consults 0
+Decisions / Surprises: tools/probe-corpus/run.mjs, template.md, isolation-control.mjs and README.md, with test/probe-runner.test.js. The pilot's cold-reader prompt was unrecoverable on this machine, so template.md is written from the precedence plan's Chapter description (route b, Interim board 1). The reader's isolation is a scratch CLAUDE_CONFIG_DIR holding a copy of the credentials file alone, the bare rung of the isolation ladder confirming the copy authenticates and no fallback to the operator's home occurs. Section 2's first acceptance clause, reproducing the pilot's three verdicts, is unmet on three stable samples and unmeetable with the pilot's eight-file set unrecoverable; its amendment rides the rulings brief rather than this run. The summary line reads `probe-corpus: <n> pairs, <m> mismatches (<p> on proposed rulings, <d> designed), <e> errors, exit <x>, tier <tiers>, report <path>`, with `(partial)` on a run that died mid-set, exit 101 on a crash or interrupt, and the exit code the ruled mismatch count otherwise. The synchronous pair loop defers a signal sent to the runner alone until the set finishes, justified rather than rewritten async since a terminal Ctrl+C reaches the reader; the README states it. Declined with reasons: the extensionless PATH shim on win32 and the temp-root relocation, both recorded for the security model docs round with PROBE_CLAUDE_BIN and PROBE_HOME_DIR lacking the second-signal gate; a cost ceiling on the paid-reader spend; the stderr full-sentence pins. Recorded rather than fixed: the ls-tree dash-leading ref guard and the relative PATH entry skip; a CLAUDE.md planted above the temp cwd counted rather than stopping the run; the real-terminal exit code unmeasured; removeLiveScratch unpinned as internal. Kit friction for the kaizen inbox: the Bash tool collapses backslash escapes inside heredocs, which put a real NUL into a test file mid-round; and a sonnet-tier prose section drew twelve opus review rounds each partly reversing the last.
+Assumptions: (2026-09-06, section 2, route b) the runner's prompt template is authored from the precedence Chapter's description of the pilot rather than the pilot's own text; (2026-09-06, section 2, route b) reader isolation is the scratch config directory rather than `--bare`, which the OAuth-authenticated CLI on this box does not offer.
+Review Findings: review: code pair plus security at fable, Agent tool, seven rounds (CHANGES_REQUIRED and CONCERNS on the build; CHANGES_REQUIRED 0/4/4, 0/2/4 and CONCERNS 0/0/6; CHANGES_REQUIRED 0/3/5, APPROVED_WITH_CONCERNS 0/1/6 and CONCERNS 0/0/4; CHANGES_REQUIRED 0/1/5, APPROVED_WITH_CONCERNS 0/1/6 and CONCERNS 0/0/4; APPROVED_WITH_CONCERNS 0/0/5, 0/1/5 and CONCERNS 0/0/4; CHANGES_REQUIRED 0/2/4, 0/1/3 and CLEAR 0/0/3; APPROVED_WITH_CONCERNS 0/0/2, 0/1/5 and CONCERNS 0/1/3). Criticals addressed: the suite copying the live credentials file. Majors addressed: `$`-pattern substitution in the prompt composer, any nonzero git status read as absent, errors counted as mismatches, unbounded shape-file reach, the `--before` leg bypassing containment through git's own normalization, readContained judging existence before containment, the newer-wins credential refresh, the allowlist at the read boundary, the ref-mode link refusal through git ls-tree, the isolation line's attribution, the credential-copy symlink refusal, Ctrl+C unable to stop a paid run inside the synchronous loop, an ENOBUFS kill read as the operator's interrupt. Majors justified: the deferred runner-alone signal (above). Minors noted: the items fix rounds 5, 6 and 6b carried, recorded on Interim boards 5 and 6.
+Stamps: none surfaced beyond Chapter 1's two, the same window
+Gate: targeted lane `node --test test/probe-runner.test.js test/probe-set.test.js` 176/173/0/3 exit 0 at 01:33Z on 2026-09-07 after fix 6b, and `node tools/probe-corpus/run.mjs --dry-run` 27 pairs exit 0 at the same moment; whole gate `node --test test/*.test.js` 3398/3385/1/12 exit 1 (delta +179 tests and +3 skipped against the baseline, the skips being the three EPERM symlink cases, the one red unchanged), delta against the Interim board 1 baseline 3219/3209/1/9 exit 1 at b4e249b; contention lane none defined in this repo; both measured 2026-09-07 02:46Z on this main checkout at 85ac6c0 with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md, the box claimed for the span under this session's id and released at the run's marker; the one red is the permanent test/memory-session.test.js case the baseline carries
+Next: 4. The size ratchet classifies the probe set, whose Chapter rides this commit
+Commit Model: Commit-and-Push
+Delta: measured 2026-09-07 02:46Z on this main checkout at 85ac6c0 with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md
+
+```
+repository: claude-kit
+plugins/claude-kit/skills/executing-work/SKILL.md: 21857 words, cap 21857, +383
+plugins/claude-kit/skills/finishing-work/SKILL.md: 17696 words, cap 17696, +836
+plugins/claude-kit/skills/writing-skills/SKILL.md: 3278 words, cap 3278, +670
+test/doctrine-parity.test.js: 6252 lines, cap 6252, +38; tests 72, +1
+test/size-ratchet.test.js: 2845 lines, cap 2845, +27; tests 80, +2
+test/probe-runner.test.js: 2581 lines, cap 2581, untracked so HEAD holds no blob and the totals below exclude it; tests 91
+test/probe-set.test.js: 726 lines, cap 726, untracked so HEAD holds no blob and the totals below exclude it; tests 61
+test/probes/README.md: 394 words, cap 394, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/branch-and-pr-pull-request-at-section-close.md: 167 words, cap 167, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/commit-and-push-at-section-close.md: 155 words, cap 155, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/compaction-nudge-mid-section-with-no-checkpoint-open.md: 283 words, cap 283, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/merged-plan-branch-delete-on-an-armed-run.md: 160 words, cap 160, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/peer-message-asking-a-leashed-session-for-work.md: 166 words, cap 166, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/pre-send-checklist-after-an-authorized-push.md: 151 words, cap 151, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/review-only-at-section-close.md: 129 words, cap 129, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/seat-asked-to-push-the-memory-store.md: 182 words, cap 182, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/stale-anchor-in-a-resumed-plan.md: 161 words, cap 161, untracked so HEAD holds no blob and the totals below exclude it
+words: 216834 of cap 216835 across 48 curated files
+test lines: 106132 of cap 106132 across 53 test files
+tests: 3173
+changed paths under no measured root: 10 (5 differing from HEAD, 5 untracked), which this tool does not measure and which no row above names; named-exclusion paths in the changeset: test/size-budget.json, which a root holds and no shape measures, so no row above names them
+excluded from those totals, untracked under a measured root: test/probe-runner.test.js, test/probe-set.test.js, test/probes/README.md, test/probes/branch-and-pr-pull-request-at-section-close.md, test/probes/commit-and-push-at-section-close.md, test/probes/compaction-nudge-mid-section-with-no-checkpoint-open.md, test/probes/merged-plan-branch-delete-on-an-armed-run.md, test/probes/peer-message-asking-a-leashed-session-for-work.md, test/probes/pre-send-checklist-after-an-authorized-push.md, test/probes/review-only-at-section-close.md, test/probes/seat-asked-to-push-the-memory-store.md, test/probes/stale-anchor-in-a-resumed-plan.md
+```
+
+### Chapter 3 - 2026-09-07
+Completed: 4. The size ratchet classifies the probe set
+Implemented By: implementer-sonnet (from .kit/scratch/probes/brief-s4.md), with docs/architecture.md's root enumeration and the cap settings by the main session
+Metrics: review rounds 1; NEEDS_CONTEXT 0; escalations 0; consults 0
+Decisions / Surprises: plugins/claude-kit/scripts/kit-size.js gains the `test/probes/` root ahead of `test/`, measured in words; test/size-budget.json carries a cap per probe file, the probe README, both new test files and the three amended skills, every cap set exact at this commit; test/size-ratchet.test.js pins the root roster and the classifier's coverage. The two review Majors, cap slack and the commit-order dependency between the classifier and the probe files, close by this commit landing sections 1, 2 and 4 together with every cap exact. tools/probe-corpus/ sits under no measured root, like plugins/claude-kit/scripts/ itself, and stays there: the runner's behavior is measured by its test file's line cap, and a script root is a separate decision. The size report's whole-corpus words line shows one word of slack across the 48 curated files, in a file outside this plan.
+Assumptions: none
+Review Findings: review: code pair at opus, Workflow at high (APPROVED_WITH_CONCERNS both). Majors addressed: cap slack, the commit-order dependency. Minors noted: a README sentence on the cap requirement, handed to section 1's fix round and landed there.
+Stamps: none surfaced beyond Chapter 1's two, the same window
+Gate: targeted lane `node --test test/output-style-parity.test.js test/size-ratchet.test.js test/doctrine-parity.test.js` 163/163/0/0 exit 0 at 02:38Z on 2026-09-07 after rewrite 16, `node plugins/claude-kit/scripts/kit-size.js check` exit 0 at the same moment; whole gate `node --test test/*.test.js` 3398/3385/1/12 exit 1 (delta +179 tests and +3 skipped against the baseline, the skips being the three EPERM symlink cases, the one red unchanged), delta against the Interim board 1 baseline 3219/3209/1/9 exit 1 at b4e249b; contention lane none defined in this repo; both measured 2026-09-07 02:46Z on this main checkout at 85ac6c0 with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md, the box claimed for the span under this session's id and released at the run's marker; the one red is the permanent test/memory-session.test.js case the baseline carries
+Next: 3. The hook-ins and 5. The Chapter template holds the probe reading, in the next commit
+Commit Model: Commit-and-Push
+Delta: measured 2026-09-07 02:46Z on this main checkout at 85ac6c0 with the foreign dirty kaizen/notes-SCOTT-CLAUDE.md
+
+```
+repository: claude-kit
+plugins/claude-kit/skills/executing-work/SKILL.md: 21857 words, cap 21857, +383
+plugins/claude-kit/skills/finishing-work/SKILL.md: 17696 words, cap 17696, +836
+plugins/claude-kit/skills/writing-skills/SKILL.md: 3278 words, cap 3278, +670
+test/doctrine-parity.test.js: 6252 lines, cap 6252, +38; tests 72, +1
+test/size-ratchet.test.js: 2845 lines, cap 2845, +27; tests 80, +2
+test/probe-runner.test.js: 2581 lines, cap 2581, untracked so HEAD holds no blob and the totals below exclude it; tests 91
+test/probe-set.test.js: 726 lines, cap 726, untracked so HEAD holds no blob and the totals below exclude it; tests 61
+test/probes/README.md: 394 words, cap 394, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/branch-and-pr-pull-request-at-section-close.md: 167 words, cap 167, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/commit-and-push-at-section-close.md: 155 words, cap 155, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/compaction-nudge-mid-section-with-no-checkpoint-open.md: 283 words, cap 283, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/merged-plan-branch-delete-on-an-armed-run.md: 160 words, cap 160, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/peer-message-asking-a-leashed-session-for-work.md: 166 words, cap 166, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/pre-send-checklist-after-an-authorized-push.md: 151 words, cap 151, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/review-only-at-section-close.md: 129 words, cap 129, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/seat-asked-to-push-the-memory-store.md: 182 words, cap 182, untracked so HEAD holds no blob and the totals below exclude it
+test/probes/stale-anchor-in-a-resumed-plan.md: 161 words, cap 161, untracked so HEAD holds no blob and the totals below exclude it
+words: 216834 of cap 216835 across 48 curated files
+test lines: 106132 of cap 106132 across 53 test files
+tests: 3173
+changed paths under no measured root: 10 (5 differing from HEAD, 5 untracked), which this tool does not measure and which no row above names; named-exclusion paths in the changeset: test/size-budget.json, which a root holds and no shape measures, so no row above names them
+excluded from those totals, untracked under a measured root: test/probe-runner.test.js, test/probe-set.test.js, test/probes/README.md, test/probes/branch-and-pr-pull-request-at-section-close.md, test/probes/commit-and-push-at-section-close.md, test/probes/compaction-nudge-mid-section-with-no-checkpoint-open.md, test/probes/merged-plan-branch-delete-on-an-armed-run.md, test/probes/peer-message-asking-a-leashed-session-for-work.md, test/probes/pre-send-checklist-after-an-authorized-push.md, test/probes/review-only-at-section-close.md, test/probes/seat-asked-to-push-the-memory-store.md, test/probes/stale-anchor-in-a-resumed-plan.md
+```

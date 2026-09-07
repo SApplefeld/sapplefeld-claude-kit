@@ -56,7 +56,7 @@
     "test/doctor-goal-state.test.js": 586,
     "test/doctrine-parity.test.js": 6252,
     "test/embedder-install.test.js": 570,
-    "test/git-guard-parity.test.js": 381,
+    "test/git-guard-parity.test.js": 565,
     "test/hook-canary.test.js": 1659,
     "test/kaizen-signpost.test.js": 862,
     "test/kit-compact-gate.test.js": 11055,

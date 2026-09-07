@@ -33,24 +33,35 @@
 // one. Taking the two paths as parameters is what lets the controls below
 // run it against mkdtemp copies instead of only against the real files.
 //
-// Nine planted environment variables ride into both calls, present before
-// the guard runs so their fate is part of the observed delta. Two are noise
-// the guard has no name for: GIT_KIT_PARITY_PLANTED (uppercase) and
-// git_kit_parity_lower (lowercase) prove the strip is case-insensitive by
-// their absence from the result (they must show up as removed, on both
-// sides). The other seven are every name either guard sets
+// A block of environment variables ride into both calls, planted before the
+// guard runs so their fate is part of the observed delta. They fall into
+// three tables, PLANTED_NOISE, PLANTED_GUARD_OVERWRITE and
+// PLANTED_SURVIVOR, each merged into PLANTED and each checked against the
+// delta in its own way below, so a name's required fate always traces back
+// to the table it is planted from rather than to a count restated in prose.
+//
+// PLANTED_NOISE names are never a guard name, so their survival would mean
+// the strip missed them: they must show up as removed, on both sides, in
+// either casing (the strip is case-insensitive).
+//
+// PLANTED_GUARD_OVERWRITE names are the guard's own key names
 // (GIT_TERMINAL_PROMPT, GIT_CONFIG_COUNT, NoDefaultCurrentDirectoryInExePath,
 // GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0, GIT_CONFIG_KEY_1,
-// GIT_CONFIG_VALUE_1), each planted with a value the guard must overwrite,
-// so their fate must be "changed to the guard's value" rather than "added"
-// (which would mean the plant leaked past the point the guard reads process
-// state) or "removed" (which is what a broken strip-then-set order
-// produces, since a pre-existing name the strip queues for removal outruns
-// a set that ran before it). Planting all seven closes the gap a partial
-// plant leaves: without it, a name whose ambient value already matched the
-// guard's own value would read as untouched rather than as a guard failing
-// to set it, and the floor below would still pass on the strength of
-// whatever ambient GIT_ names happened to be lying around.
+// GIT_CONFIG_VALUE_1), each planted with a value distinct from what the
+// guard writes there, so their fate must be "changed away from the planted
+// value" rather than "added" (which would mean the plant leaked past the
+// point the guard reads process state) or "removed" (which is what a broken
+// strip-then-set order produces, since a pre-existing name the strip queues
+// for removal outruns a set that ran before it). The literal value each
+// name changes to is pinned once, at test/kit-git-lib.test.js and
+// test/memory-sync-git-guard.test.js; this file checks only that each side
+// moved away from its planted value and that the two sides' resulting
+// values agree with each other, in the per-touched-name comparison below.
+//
+// PLANTED_SURVIVOR names are neither a guard name nor deliberate noise: no
+// guard has any reason to touch them, so they must be absent from the delta
+// entirely, catching an over-broad strip that takes down a name it was
+// never meant to reach.
 //
 // GIT_CONFIG_VALUE_1 is pinned by shape rather than by literal value: both
 // sides join a fresh GUID onto their own runtime's temp directory with a
@@ -64,14 +75,14 @@
 //
 // GIT_CONFIG_COUNT is validated in both directions: for every i from 0 to
 // COUNT-1, both GIT_CONFIG_KEY_i and GIT_CONFIG_VALUE_i must actually be
-// present on that side (COUNT names an index nothing backs), and the number
-// of GIT_CONFIG_KEY_<i> names actually present must equal COUNT (an extra
-// key beyond COUNT's range, such as GIT_CONFIG_KEY_2 with COUNT still 2,
-// backs an index COUNT never named). Either direction alone would miss the
-// other's defect: counting digit-suffixed names without walking them would
-// pass even if the indices COUNT named were not the ones present, and
-// walking COUNT's own indices without counting would miss an extra key
-// COUNT never claims.
+// present on that side (COUNT names an index nothing backs), and the set of
+// indices actually present in GIT_CONFIG_KEY_<i> and in GIT_CONFIG_VALUE_<i>
+// must each equal exactly {0..COUNT-1} (an extra index beyond COUNT's
+// range, such as GIT_CONFIG_VALUE_2 with COUNT still 2, backs an index
+// COUNT never named). Either direction alone would miss the other's defect:
+// comparing sets by size alone would pass a wrong-but-equal-sized set of
+// indices, and walking COUNT's own indices without the reverse check would
+// miss an extra one COUNT never claims.
 //
 // Node's built-in test runner, no framework. The PowerShell-dependent cases
 // spawn Windows PowerShell and are skipped off Windows, where the doctor
@@ -110,11 +121,6 @@ function rmDir(dir) {
     }
 }
 
-// The three variables planted into both calls' environment before each
-// guard runs. GIT_CONFIG_COUNT and NoDefaultCurrentDirectoryInExePath are
-// two of the guard's own key names, planted with a value the guard must
-// overwrite; the other two are never guard names, so their survival would
-// mean the strip missed them.
 // Noise: never a guard name, so its survival means the strip missed it.
 // This is the single source PLANTED_NAMES_THAT_MUST_NOT_SURVIVE reads from,
 // rather than a hand-typed name list that could drift out of step with it.
@@ -136,20 +142,20 @@ const PLANTED_GUARD_OVERWRITE = {
     GIT_CONFIG_KEY_1: 'x',
     GIT_CONFIG_VALUE_1: 'x'
 };
-const PLANTED = { ...PLANTED_NOISE, ...PLANTED_GUARD_OVERWRITE };
+// A name neither guard has any reason to touch. This is the single source
+// the survivor check below reads from.
+const PLANTED_SURVIVOR = {
+    KIT_PARITY_SURVIVOR: 'keep'
+};
+const PLANTED = { ...PLANTED_NOISE, ...PLANTED_GUARD_OVERWRITE, ...PLANTED_SURVIVOR };
 const PLANTED_NAMES_THAT_MUST_NOT_SURVIVE = Object.keys(PLANTED_NOISE);
 
-// The literal value each planted guard name must change to, except
-// GIT_CONFIG_VALUE_1, which is checked by shape further down since its
-// value is a fresh GUID-bearing path rather than a fixed literal.
-const EXPECTED_GUARD_CHANGE = {
-    GIT_TERMINAL_PROMPT: '0',
-    NoDefaultCurrentDirectoryInExePath: '1',
-    GIT_CONFIG_COUNT: '2',
-    GIT_CONFIG_KEY_0: 'core.fsmonitor',
-    GIT_CONFIG_VALUE_0: 'false',
-    GIT_CONFIG_KEY_1: 'core.hooksPath'
-};
+// Every planted guard name except GIT_CONFIG_VALUE_1, which is checked by
+// shape further down (against its own planted-then-changed delta entry)
+// rather than by comparing to a literal target, since its value is a fresh
+// GUID-bearing path.
+const GUARD_NAMES_TO_CHECK = Object.keys(PLANTED_GUARD_OVERWRITE)
+    .filter((name) => name.toUpperCase() !== 'GIT_CONFIG_VALUE_1');
 
 const GUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -159,10 +165,16 @@ function hasNameCI(obj, name) {
 }
 
 // The JS side: require the copy (kit-git-lib.js requires only node
-// builtins, so a copy under a temp dir loads standalone), plant the four
-// variables on process.env, capture it as the pre-guard baseline, call the
-// real gitChildEnv() for the post-guard result, and restore process.env in
-// a finally whether the call threw or not.
+// builtins, so a copy under a temp dir loads standalone), plant the PLANTED
+// table on process.env, capture it as the pre-guard baseline, call the real
+// gitChildEnv() for the post-guard result, and restore process.env in a
+// finally whether the call threw or not. No casing cleanup is needed before
+// planting: unlike a spawned child's env block, Node's own process.env is
+// already case-insensitive on Windows (setting a name in one casing and
+// reading it back in another returns the same value, and Object.keys
+// reports only the one spelling that was set), so a plant can never leave
+// two differently-cased entries behind here the way it could in a spawned
+// child's env.
 function buildJsEnvMap(jsPath) {
     delete require.cache[require.resolve(jsPath)];
     const mod = require(jsPath);
@@ -192,12 +204,13 @@ function parseEnvDump(lines) {
     return map;
 }
 
-// The full path to Windows PowerShell, resolved the same way the guard
-// resolves paths it hands to a spawned child: a bare "powershell.exe" would
-// resolve against the current directory first on this platform, which is
-// exactly the hazard the guard itself exists to close for git, so the probe
-// does not lean on PATH resolution to find its own interpreter either.
-// Falls back to the bare name only when SystemRoot is unset.
+// The full path to Windows PowerShell. This has nothing to do with the
+// guard, which never resolves a path for a spawned child itself (gitRun
+// spawns the bare command "git" with the child's cwd set to __dirname); it
+// is here so the probe's own interpreter is found by an explicit path
+// rather than by a PATH lookup, removing PATH resolution as a variable in
+// what this test measures. Falls back to the bare name only when
+// SystemRoot is unset.
 const POWERSHELL_EXE = process.env.SystemRoot
     ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     : 'powershell.exe';
@@ -206,16 +219,22 @@ const POWERSHELL_EXE = process.env.SystemRoot
 // .cmd that ignores its arguments and dumps its own environment via "set")
 // twice: once directly, for the pre-guard baseline, and once through
 // Invoke-MemorySyncGit, for the post-guard result. Both dumps are captured
-// into a PowerShell variable and re-emitted line by line through
-// Write-Output, so both cross the same encoder rather than the pre dump
-// reaching stdout as a cmd child's raw bytes while the post dump reaches it
-// as PowerShell string objects. The two dumps share one stdout stream, so
-// each is wrapped in its own BEGIN/END marker line the parser cannot
-// mistake for environment output (no real environment variable name is
-// spelled KITPARITY_*). GetTempPath() rides along on its own marked line,
-// read by the caller to check GIT_CONFIG_VALUE_1's shape against the
-// runtime that produced it. [Console]::OutputEncoding is set to UTF8 up
-// front so the two dumps and PowerShell's own console output decode alike.
+// into a PowerShell variable, each item cast with [string]$_ (matching what
+// Invoke-MemorySyncGit's own Output already does, at
+// install-memory-sync.ps1:486), and re-emitted line by line through
+// [Console]::Out.WriteLine, which writes the raw string straight to stdout
+// and bypasses the console formatter Write-Output goes through; the
+// formatter wraps a line at the host's console width, which cut a long
+// GIT_CONFIG_VALUE_1 dump line at a column narrower than a redirected
+// stdout capture ever needs. The two dumps share one stdout stream, so each
+// is wrapped in its own BEGIN/END marker line the parser cannot mistake for
+// environment output (no real environment variable name is spelled
+// KITPARITY_*); the markers themselves stay on Write-Output, since they are
+// short literals a formatter has no reason to wrap. GetTempPath() rides
+// along on its own marked line, read by the caller to check
+// GIT_CONFIG_VALUE_1's shape against the runtime that produced it.
+// [Console]::OutputEncoding is set to UTF8 up front so every line written
+// through either path decodes alike.
 function buildPsEnvMap(psPath) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitguard-ps-'));
     try {
@@ -229,16 +248,35 @@ function buildPsEnvMap(psPath) {
             + 'Write-Output ("KITPARITY_TEMPPATH=" + $tempPath); '
             + '$pre = & ' + q(fakeGit) + ' 2>&1; '
             + 'Write-Output "KITPARITY_PRE_BEGIN"; '
-            + 'foreach ($line in $pre) { Write-Output $line }; '
+            + 'foreach ($line in $pre) { [Console]::Out.WriteLine([string]$line) }; '
             + 'Write-Output "KITPARITY_PRE_END"; '
             + '$result = Invoke-MemorySyncGit -StoreRoot ' + q(storeRoot)
             + ' -Arguments @("status") -GitExe ' + q(fakeGit) + '; '
             + 'Write-Output "KITPARITY_POST_BEGIN"; '
-            + 'foreach ($line in $result.Output) { Write-Output $line }; '
+            + 'foreach ($line in $result.Output) { [Console]::Out.WriteLine([string]$line) }; '
             + 'Write-Output "KITPARITY_POST_END"';
+
+        // Windows environment names are case-insensitive, but a plain object
+        // is not: { ...process.env, ...PLANTED } can leave two differently
+        // cased keys for the same logical name (an ambient "Path" beside a
+        // planted "PATH", say) sitting side by side in the object handed to
+        // spawnSync, which is free to pass both through to the child's real
+        // (case-insensitive, single-slot) environment block in either order.
+        // Dropping any ambient key that matches a planted name, in any
+        // casing, before adding the planted names back closes that
+        // ambiguity: the child never sees two spellings of one name.
+        const spawnEnv = { ...process.env };
+        for (const name of Object.keys(PLANTED)) {
+            const upper = name.toUpperCase();
+            for (const k of Object.keys(spawnEnv)) {
+                if (k.toUpperCase() === upper) delete spawnEnv[k];
+            }
+        }
+        Object.assign(spawnEnv, PLANTED);
+
         const res = spawnSync(POWERSHELL_EXE,
             ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-            { encoding: 'utf8', env: { ...process.env, ...PLANTED }, timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
+            { encoding: 'utf8', env: spawnEnv, timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
 
         // Never put the raw environment dump in an assertion message: it can
         // run to dozens of lines, and a line count plus a bounded slice of
@@ -247,11 +285,13 @@ function buildPsEnvMap(psPath) {
         const stdout = res.stdout || '';
         const lines = stdout.split(/\r?\n/);
         const stderrLines = (res.stderr || '').split(/\r?\n/).filter((l) => l.length > 0);
-        assert.strictEqual(res.status, 0,
-            'the PS probe exited non-zero: error=' + (res.error ? res.error.message : 'none')
-            + ' status=' + res.status + ' stdoutLines=' + lines.length
+        const stderrDetail = ' stdoutLines=' + lines.length
             + ' stderrFirst=' + JSON.stringify(stderrLines[0] || '')
-            + ' stderrTail=' + JSON.stringify(stderrLines.slice(-5)));
+            + ' stderrTail=' + JSON.stringify(stderrLines.slice(-5));
+        assert.strictEqual(res.status, 0,
+            res.error
+                ? 'the PS probe spawn failed: ' + res.error.message + stderrDetail
+                : 'the PS probe exited non-zero: status=' + res.status + stderrDetail);
 
         let tempPath = null;
         let mode = null;
@@ -329,7 +369,7 @@ function value1ShapeProblem(value, tempDir) {
 // digit-suffixed names (which would pass even for the wrong indices).
 function validateConfigIndices(post, sideLabel, problems) {
     const countName = Object.keys(post).find((k) => k.toUpperCase() === 'GIT_CONFIG_COUNT');
-    if (!countName) return; // absence is reported elsewhere (the floor and the name-set checks)
+    if (!countName) return; // absence is reported elsewhere (the per-name and name-set checks)
     const n = Number(post[countName]);
     if (!Number.isInteger(n) || n < 0) {
         problems.push(sideLabel + ' side: GIT_CONFIG_COUNT is not a non-negative integer: ' + JSON.stringify(post[countName]));
@@ -343,26 +383,39 @@ function validateConfigIndices(post, sideLabel, problems) {
             problems.push(sideLabel + ' side: GIT_CONFIG_COUNT=' + n + ' names index ' + i + ' but GIT_CONFIG_VALUE_' + i + ' is missing');
         }
     }
-    // The reverse direction: every GIT_CONFIG_KEY_<i> actually present must
-    // be one COUNT named, so an extra key beyond COUNT's range (for example
-    // GIT_CONFIG_KEY_2 surviving while GIT_CONFIG_COUNT still reads 2) is
-    // caught here even though the walk above never looks at index 2.
-    const keyIndexRe = /^GIT_CONFIG_KEY_(\d+)$/i;
-    const presentIndices = new Set();
-    for (const k of Object.keys(post)) {
-        const m = keyIndexRe.exec(k);
-        if (m) presentIndices.add(Number(m[1]));
+    // The reverse direction: every GIT_CONFIG_KEY_<i> and GIT_CONFIG_VALUE_<i>
+    // actually present must be one COUNT named, checked as sets rather than
+    // as a bare count, so an extra index beyond COUNT's range (for example
+    // GIT_CONFIG_VALUE_2 surviving while GIT_CONFIG_COUNT still reads 2) is
+    // caught here even though the walk above never looks at index 2, and a
+    // wrong-but-equal-sized set of indices (0 and 2 present when 0 and 1 are
+    // named) cannot pass on a size match alone.
+    const expected = new Set();
+    for (let i = 0; i < n; i++) expected.add(i);
+    const setsEqual = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+    const collectIndices = (re) => {
+        const present = new Set();
+        for (const k of Object.keys(post)) {
+            const m = re.exec(k);
+            if (m) present.add(Number(m[1]));
+        }
+        return present;
+    };
+    const presentKeyIndices = collectIndices(/^GIT_CONFIG_KEY_(\d+)$/i);
+    const presentValueIndices = collectIndices(/^GIT_CONFIG_VALUE_(\d+)$/i);
+    if (!setsEqual(presentKeyIndices, expected)) {
+        problems.push(sideLabel + ' side: GIT_CONFIG_COUNT=' + n + ' but GIT_CONFIG_KEY_<i> indices present are {'
+            + [...presentKeyIndices].sort((a, b) => a - b).join(', ') + '}, expected {0..' + (n - 1) + '}');
     }
-    if (presentIndices.size !== n) {
-        problems.push(sideLabel + ' side: GIT_CONFIG_COUNT=' + n + ' but ' + presentIndices.size
-            + ' GIT_CONFIG_KEY_<i> names are present: indices ' + [...presentIndices].sort((a, b) => a - b).join(', '));
+    if (!setsEqual(presentValueIndices, expected)) {
+        problems.push(sideLabel + ' side: GIT_CONFIG_COUNT=' + n + ' but GIT_CONFIG_VALUE_<i> indices present are {'
+            + [...presentValueIndices].sort((a, b) => a - b).join(', ') + '}, expected {0..' + (n - 1) + '}');
     }
 }
 
 // The pin. Builds each side's pre/post environment from a real run of the
 // real guard, computes each side's delta, and throws an AssertionError
-// listing every difference when the two disagree. Returns the two deltas
-// when they agree, so a caller can read them back.
+// listing every difference when the two disagree.
 function compareGuardEnvironments(jsPath, psPath) {
     const { pre: jsPre, post: jsPost } = buildJsEnvMap(jsPath);
     const { pre: psPre, post: psPost, tempPath: psTempDir } = buildPsEnvMap(psPath);
@@ -373,41 +426,52 @@ function compareGuardEnvironments(jsPath, psPath) {
 
     const problems = [];
 
-    // A guard that touched nothing, or a probe that captured nothing, must
-    // never read as parity. This can no longer red for an environmental
-    // reason (an ambient GIT_ name happening to already carry the guard's
-    // value): every one of the seven guard names is separately planted with
-    // a value distinct from what the guard must write, and checked below,
-    // so a reading under 7 here means the probe itself broke rather than an
-    // accident of ambient state.
-    const jsSetCount = [...jsTouched.values()].filter((t) => t.kind === 'added' || t.kind === 'changed').length;
-    const psSetCount = [...psTouched.values()].filter((t) => t.kind === 'added' || t.kind === 'changed').length;
-    if (jsSetCount < 7 || psSetCount < 7) {
-        problems.push('extraction floor: JS sets ' + jsSetCount + ' names, PS sets ' + psSetCount + ' (both expected at '
-            + 'least 7): the probe captured too little, since every guard name is planted and checked separately below.');
+    // The planted non-guard names never survive the strip, on either side,
+    // in either casing: each must appear in the delta as kind 'removed',
+    // not merely be absent from the post-guard environment, so a strip that
+    // renames the plant rather than deleting it (leaving it 'changed' or
+    // simply missing from the delta because it never moved) cannot pass.
+    for (const name of PLANTED_NAMES_THAT_MUST_NOT_SURVIVE) {
+        const upper = name.toUpperCase();
+        const jInfo = jsTouched.get(upper);
+        const pInfo = psTouched.get(upper);
+        if (!jInfo || jInfo.kind !== 'removed') {
+            problems.push('JS side: planted ' + name + ' was not removed: ' + JSON.stringify(jInfo || null));
+        }
+        if (!pInfo || pInfo.kind !== 'removed') {
+            problems.push('PS side: planted ' + name + ' was not removed: ' + JSON.stringify(pInfo || null));
+        }
     }
 
-    // The planted non-guard names never survive the strip, on either side,
-    // in either casing.
-    for (const name of PLANTED_NAMES_THAT_MUST_NOT_SURVIVE) {
-        if (hasNameCI(jsPost, name)) problems.push('JS side: planted ' + name + ' survived the strip');
-        if (hasNameCI(psPost, name)) problems.push('PS side: planted ' + name + ' survived the strip');
+    // The survivor plant is neither a guard name nor deliberate noise, so it
+    // must be absent from the delta entirely: no add, no change, no remove.
+    // Its presence in either delta means an over-broad strip took down a
+    // name it was never meant to reach.
+    for (const name of Object.keys(PLANTED_SURVIVOR)) {
+        const upper = name.toUpperCase();
+        if (jsTouched.has(upper)) problems.push('JS side: survivor ' + name + ' was touched: ' + JSON.stringify(jsTouched.get(upper)));
+        if (psTouched.has(upper)) problems.push('PS side: survivor ' + name + ' was touched: ' + JSON.stringify(psTouched.get(upper)));
     }
 
     // Every planted guard name (all but GIT_CONFIG_VALUE_1, checked by shape
     // further down) is proved by the delta rather than by an ambient
     // process that happened to already carry the guard's own value: each is
     // planted with a value the guard must overwrite, so each must read as
-    // changed to the guard's own literal value on both sides.
-    for (const [name, expected] of Object.entries(EXPECTED_GUARD_CHANGE)) {
+    // changed away from that planted value on both sides. The value each
+    // side changed to is not re-pinned here against a literal (that literal
+    // is pinned once, at test/kit-git-lib.test.js and
+    // test/memory-sync-git-guard.test.js); cross-side agreement on the
+    // resulting value is enforced by the per-touched-name loop below.
+    for (const name of GUARD_NAMES_TO_CHECK) {
         const upper = name.toUpperCase();
+        const plantedValue = PLANTED_GUARD_OVERWRITE[name];
         const jInfo = jsTouched.get(upper);
         const pInfo = psTouched.get(upper);
-        if (!jInfo || jInfo.kind !== 'changed' || jInfo.to !== expected) {
-            problems.push('JS side: ' + name + ' did not change to ' + JSON.stringify(expected) + ': ' + JSON.stringify(jInfo || null));
+        if (!jInfo || jInfo.kind !== 'changed' || jInfo.to === plantedValue) {
+            problems.push('JS side: ' + name + ' did not change away from the planted value ' + JSON.stringify(plantedValue) + ': ' + JSON.stringify(jInfo || null));
         }
-        if (!pInfo || pInfo.kind !== 'changed' || pInfo.to !== expected) {
-            problems.push('PS side: ' + name + ' did not change to ' + JSON.stringify(expected) + ': ' + JSON.stringify(pInfo || null));
+        if (!pInfo || pInfo.kind !== 'changed' || pInfo.to === plantedValue) {
+            problems.push('PS side: ' + name + ' did not change away from the planted value ' + JSON.stringify(plantedValue) + ': ' + JSON.stringify(pInfo || null));
         }
     }
 
@@ -580,9 +644,8 @@ test('swapping the PS Remove-Item and Set-Item loops turns the pin red, naming G
 
         assert.throws(() => compareGuardEnvironments(jsCopy, psCopy),
             (err) => err instanceof assert.AssertionError
-                && err.message.includes('GIT_CONFIG_COUNT')
-                && err.message.includes('PS removed'),
-            'expected the comparison to throw naming GIT_CONFIG_COUNT as changed on JS but removed on PS');
+                && /GIT_CONFIG_COUNT: JS changed to "2", PS removed/.test(err.message),
+            'expected the comparison to throw naming GIT_CONFIG_COUNT as changed on JS but removed on PS, on one line');
     });
 });
 
@@ -608,9 +671,8 @@ test('moving the JS strip loop below the assignments turns the pin red, naming G
 
         assert.throws(() => compareGuardEnvironments(jsCopy, psCopy),
             (err) => err instanceof assert.AssertionError
-                && err.message.includes('GIT_CONFIG_COUNT')
-                && err.message.includes('JS removed'),
-            'expected the comparison to throw naming GIT_CONFIG_COUNT as removed on JS but changed on PS');
+                && /GIT_CONFIG_COUNT: JS removed, PS changed to "2"/.test(err.message),
+            'expected the comparison to throw naming GIT_CONFIG_COUNT as removed on JS but changed on PS, on one line');
     });
 });
 
@@ -631,7 +693,7 @@ test('deleting the JS strip loop turns the pin red, naming GIT_KIT_PARITY_PLANTE
 
         assert.throws(() => compareGuardEnvironments(jsCopy, psCopy),
             (err) => err instanceof assert.AssertionError
-                && err.message.includes('JS side: planted GIT_KIT_PARITY_PLANTED survived the strip'),
+                && err.message.includes('JS side: planted GIT_KIT_PARITY_PLANTED was not removed'),
             'expected the comparison to throw naming GIT_KIT_PARITY_PLANTED as still present on the JS side');
     });
 });

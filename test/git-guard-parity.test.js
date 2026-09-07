@@ -55,13 +55,15 @@
 // the strip queues for removal outruns a set that ran before it). This file
 // pins the literal value each name (all but GIT_CONFIG_VALUE_1) must change
 // to as the parity contract itself, checked against both sides;
-// test/kit-git-lib.test.js:266-270 separately pins the JS side's own set of
-// these values for its own purposes, independently of this file.
+// test/kit-git-lib.test.js:266-270 separately pins five of the six on the
+// JS side for its own purposes; NoDefaultCurrentDirectoryInExePath is
+// pinned to its literal only here.
 //
 // PLANTED_SURVIVOR names are neither a guard name nor deliberate noise: no
 // guard has any reason to touch them, so they must be absent from the delta
-// entirely, catching an over-broad strip that takes down a name it was
-// never meant to reach.
+// entirely and still present with their planted value in both post-guard
+// environments, catching an over-broad strip that takes down a name it
+// was never meant to reach and a plant that never landed alike.
 //
 // GIT_CONFIG_VALUE_1 is pinned by shape rather than by literal value: both
 // sides join a fresh GUID onto their own runtime's temp directory with a
@@ -165,6 +167,16 @@ const EXPECTED_GUARD_CHANGE = {
     GIT_CONFIG_KEY_1: 'core.hooksPath'
 };
 
+// The literal table and the plant table are two hand-typed lists, so they
+// are bound here: every planted guard name is in the literal table or is
+// GIT_CONFIG_VALUE_1, and nothing else is, so a guard key added to one
+// table and forgotten in the other fails at load rather than falling
+// through to the generic cross-side comparison.
+assert.deepStrictEqual(
+    [...Object.keys(EXPECTED_GUARD_CHANGE), 'GIT_CONFIG_VALUE_1'].sort(),
+    Object.keys(PLANTED_GUARD_OVERWRITE).sort(),
+    'EXPECTED_GUARD_CHANGE plus GIT_CONFIG_VALUE_1 must name exactly the PLANTED_GUARD_OVERWRITE keys');
+
 const GUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function hasNameCI(obj, name) {
@@ -184,10 +196,11 @@ function getValueCI(obj, name) {
 // gitChildEnv() for the post-guard result, and restore process.env in a
 // finally whether the call threw or not. No casing cleanup is needed before
 // planting here the way buildPsEnvMap needs it for its spawned child's env
-// block: computeDelta keys every name by its upper-cased spelling before
-// comparing pre against post, so a differently-cased ambient key and its
-// planted counterpart are read as the same delta entry regardless of which
-// casing process.env happens to enumerate.
+// block: process.env on Windows holds one slot per name whatever its
+// casing, so planting cannot leave two spellings of one name behind, and
+// computeDelta keys every name by its upper-cased spelling, so the
+// spelling pre enumerates and the spelling post enumerates are read as
+// one delta entry.
 function buildJsEnvMap(jsPath) {
     delete require.cache[require.resolve(jsPath)];
     const mod = require(jsPath);
@@ -238,7 +251,7 @@ const POWERSHELL_EXE = process.env.SystemRoot
 // marker lines included, goes through [Console]::Out.WriteLine, which
 // writes the raw string straight to stdout and bypasses the console
 // formatter Write-Output goes through; the formatter wraps a line at the
-// host's console width, which cut a long GIT_CONFIG_VALUE_1 dump line at a
+// host's console width, which cuts a long GIT_CONFIG_VALUE_1 dump line at a
 // column narrower than a redirected stdout capture ever needs. Routing
 // every line through the one writer also means there is no ordering
 // assumption between two different output paths interleaving on the same

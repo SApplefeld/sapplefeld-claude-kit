@@ -1954,12 +1954,26 @@ test('a store that syncs nowhere is reported, however clean its allowlist', { sk
 // branch on origin, and origin carries only that branch, so the section reads
 // as a healthy destination while the automated push exits nonzero every run.
 //
-// push.default comes from config, so these cases pin git's global and system
-// files out of the doctor's run: what the machine running the suite happens to
-// set must not decide what the check reports.
+// push.default comes from config, so these cases pin git's global file out of
+// the doctor's run: what the machine running the suite happens to set must not
+// decide what the check reports.
+//
+// The pin runs through HOME rather than through GIT_CONFIG_GLOBAL, because
+// every git call the doctor makes goes through Invoke-MemorySyncGit, which
+// removes every GIT_* name from the environment before it runs git. A
+// GIT_CONFIG_GLOBAL handed in here would be gone by then, and the case would
+// read the machine's real global config while looking isolated. HOME survives
+// that strip, and Git for Windows reads it ahead of both HOMEDRIVE/HOMEPATH
+// and USERPROFILE, so pointing it at the fake home (which carries no
+// .gitconfig) is an empty global file. The other two names need no redirect,
+// since git never consults them while HOME is set.
+//
+// The system file is not pinned out and cannot be through this funnel, which
+// strips GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM with the rest: a
+// push.default written into the machine's system gitconfig would still reach
+// these cases.
 function isolatedGitConfig(fake) {
-    const absent = path.join(fake.home, 'absent.gitconfig');
-    return { GIT_CONFIG_GLOBAL: absent, GIT_CONFIG_SYSTEM: absent };
+    return { HOME: fake.home, USERPROFILE: fake.home };
 }
 
 // A store tracking origin under a branch name that no longer matches its own.

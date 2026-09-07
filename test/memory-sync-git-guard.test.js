@@ -147,9 +147,22 @@ test('the funnel strips the caller\'s GIT_* variables, keeps the config files, a
             fs.writeFileSync(path.join(home, '.gitconfig'), '[kitguard]\n\tglobal = kept\n');
             // GIT_TERMINAL_PROMPT carries a caller value the guard
             // overwrites, so the restore has something to get wrong.
+            // Git_Config_Key_0 is a guard name spelled in a casing the guard
+            // does not use, and the guard sets that variable itself. Windows
+            // environment names are case-insensitive, so this is the same
+            // variable as GIT_CONFIG_KEY_0 rather than a second one, and what
+            // the assertions below can observe is the matching: the strip's
+            // regex and the guard table's lookup both have to answer to the
+            // caller's spelling, or the variable would come back holding the
+            // guard's own value or nothing at all. The name is one the ambient
+            // environment does not carry, so nothing else can be supplying the
+            // value that returns. It is a key rather than the count because a
+            // GIT_CONFIG_KEY_<i> with no GIT_CONFIG_COUNT beside it is inert to
+            // git, which leaves the bare-git control below able to run.
             const callerEnv = {
                 GIT_CONFIG_GLOBAL: injected,
                 GIT_TERMINAL_PROMPT: 'caller-value',
+                Git_Config_Key_0: 'caller-cased',
                 HOME: home,
                 USERPROFILE: home
             };
@@ -200,6 +213,12 @@ test('the funnel strips the caller\'s GIT_* variables, keeps the config files, a
             assert.strictEqual(out.After.GIT_TERMINAL_PROMPT, 'caller-value', JSON.stringify(out));
             assert.strictEqual(out.After.GIT_CONFIG_GLOBAL, injected, JSON.stringify(out));
             assert.strictEqual(out.After.GIT_CONFIG_COUNT, null, JSON.stringify(out));
+            // The differently-cased name: the caller's value is back, so the
+            // guard neither left its own key behind nor lost the caller's to a
+            // case-sensitive lookup. It was there before the calls too, which is
+            // what makes the reading a restore rather than an absence.
+            assert.strictEqual(out.Before.GIT_CONFIG_KEY_0, 'caller-cased', JSON.stringify(out));
+            assert.strictEqual(out.After.GIT_CONFIG_KEY_0, 'caller-cased', JSON.stringify(out));
         } finally {
             rmDir(planted.dir);
         }

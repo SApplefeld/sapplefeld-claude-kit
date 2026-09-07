@@ -60,6 +60,40 @@ function rmDir(dir) {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
+// A repository that reports on being read: core.fsmonitor and core.hooksPath
+// both point at scripts that append a line to a marker file kept outside the
+// repository. git runs the fsmonitor command on a status and the pre-commit
+// hook on a commit, so the two keys cover a read-shaped call and a write-shaped
+// one. The marker path is baked into each script rather than passed through the
+// environment, because the environment is exactly what the runner rewrites.
+function plantRepo() {
+    const dir = makeDir('kit-git-lib-planted-');
+    const repo = path.join(dir, 'planted');
+    const marker = path.join(dir, 'marker.txt');
+    const sh = marker.replace(/\\/g, '/');
+    fs.mkdirSync(repo, { recursive: true });
+    git(repo, ['init', '-q', '.']);
+    git(repo, ['config', 'user.email', 'planted@example.invalid']);
+    git(repo, ['config', 'user.name', 'planted']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'a\n', 'utf8');
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'seed']);
+    fs.writeFileSync(path.join(repo, 'fsmonitor.sh'),
+        '#!/bin/sh\nprintf \'fsmonitor\\n\' >> "' + sh + '"\nprintf \'/\\0\'\n', 'utf8');
+    fs.mkdirSync(path.join(repo, 'planted-hooks'));
+    fs.writeFileSync(path.join(repo, 'planted-hooks', 'pre-commit'),
+        '#!/bin/sh\nprintf \'hookspath\\n\' >> "' + sh + '"\nexit 0\n', 'utf8');
+    // Set last, so the fixture's own commands above do not fire them.
+    git(repo, ['config', 'core.fsmonitor', repo.replace(/\\/g, '/') + '/fsmonitor.sh']);
+    git(repo, ['config', 'core.hooksPath', repo.replace(/\\/g, '/') + '/planted-hooks']);
+    return { dir, repo, marker };
+}
+
+function markerLines(marker) {
+    if (!fs.existsSync(marker)) return [];
+    return fs.readFileSync(marker, 'utf8').split(/\r?\n/).filter((l) => l.length > 0);
+}
+
 // A repository with one commit, returning its directory and that commit's sha.
 function makeRepo(prefix) {
     const dir = makeDir(prefix || 'kit-git-lib-repo-');
@@ -161,6 +195,47 @@ test('an ambient GIT_DIR cannot redirect a call at another repository', () => {
     }
 });
 
+// core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours on
+// an ordinary read, so a status against a repository nobody has vetted runs that
+// repository's code. The session-start hook asks exactly that of the store root
+// before its ownership gate has decided the root is the kit's, so the runner
+// pins both inert through git's environment-config channel, which beats
+// repo-local config.
+test('a planted repository cannot make a call through the runner run its own code', () => {
+    const planted = plantRepo();
+    try {
+        // Direction one, the control: bare git, no pins. Both keys must speak
+        // here, or their silence in direction two says nothing.
+        const bareStatus = spawnSync('git', ['-C', planted.repo, 'status', '--porcelain'],
+            { cwd: HOOKS_DIR, encoding: 'utf8', env: gitEnv(planted.dir) });
+        assert.strictEqual(bareStatus.status, 0, bareStatus.stdout + bareStatus.stderr);
+        assert.ok(markerLines(planted.marker).includes('fsmonitor'),
+            'core.fsmonitor did not fire under bare git, so the fixture proves nothing: '
+            + JSON.stringify(markerLines(planted.marker)));
+
+        const bareCommit = spawnSync('git',
+            ['-C', planted.repo, 'commit', '-q', '--allow-empty', '-m', 'bare'],
+            { cwd: HOOKS_DIR, encoding: 'utf8', env: gitEnv(planted.dir) });
+        assert.strictEqual(bareCommit.status, 0, bareCommit.stdout + bareCommit.stderr);
+        assert.ok(markerLines(planted.marker).includes('hookspath'),
+            'core.hooksPath did not fire under bare git, so the fixture proves nothing: '
+            + JSON.stringify(markerLines(planted.marker)));
+
+        // Direction two: the same two calls through the runner.
+        fs.rmSync(planted.marker, { force: true });
+        const status = gitRun(planted.repo, ['status', '--porcelain'], { timeoutMs: 20000 });
+        assert.notStrictEqual(status, null, 'the guarded status did not run at all');
+        assert.strictEqual(status.status, 0, 'guarded status: ' + JSON.stringify(status));
+        const commit = gitRun(planted.repo, ['commit', '-q', '--allow-empty', '-m', 'guarded'],
+            { timeoutMs: 20000 });
+        assert.notStrictEqual(commit, null, 'the guarded commit did not run at all');
+        assert.strictEqual(commit.status, 0, 'guarded commit: ' + JSON.stringify(commit));
+        assert.deepStrictEqual(markerLines(planted.marker), [],
+            'the planted repository ran its own code through the runner: '
+            + JSON.stringify(markerLines(planted.marker)));
+    } finally { rmDir(planted.dir); }
+});
+
 // The whole GIT_* family, not GIT_DIR alone: GIT_COMMON_DIR redirects even a
 // --local config read, and GIT_CONFIG_GLOBAL and GIT_SSH_COMMAND hand git an
 // attacker's config and an attacker's transport. The prompt refusal is set
@@ -172,9 +247,25 @@ test('the child environment carries no GIT_ variable and refuses a terminal prom
     try {
         for (const k of keys) process.env[k] = 'planted';
         const env = gitChildEnv();
-        const left = Object.keys(env).filter((k) => /^GIT_/i.test(k) && k !== 'GIT_TERMINAL_PROMPT');
-        assert.deepStrictEqual(left, [], 'GIT_ keys reached the child environment: ' + left.join(', '));
+        // What survives is the guard's own set and nothing else: the prompt
+        // refusal and the two config pins, matched against the full list rather
+        // than against an exemption, so a key that arrives from anywhere else
+        // reads as a failure.
+        const left = Object.keys(env).filter((k) => /^GIT_/i.test(k)).sort();
+        assert.deepStrictEqual(left, ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_KEY_1',
+            'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_VALUE_1', 'GIT_TERMINAL_PROMPT'],
+            'GIT_ keys reached the child environment: ' + left.join(', '));
+        assert.ok(!Object.values(env).includes('planted'),
+            'a planted value survived the strip under a name of its own');
         assert.strictEqual(env.GIT_TERMINAL_PROMPT, '0');
+        assert.strictEqual(env.GIT_CONFIG_COUNT, '2');
+        assert.strictEqual(env.GIT_CONFIG_KEY_0, 'core.fsmonitor');
+        assert.strictEqual(env.GIT_CONFIG_VALUE_0, 'false');
+        assert.strictEqual(env.GIT_CONFIG_KEY_1, 'core.hooksPath');
+        assert.ok(!fs.existsSync(env.GIT_CONFIG_VALUE_1),
+            'the hooks path pin names a directory nothing creates: ' + env.GIT_CONFIG_VALUE_1);
+        assert.notStrictEqual(gitChildEnv().GIT_CONFIG_VALUE_1, env.GIT_CONFIG_VALUE_1,
+            'the hooks path carries a fresh suffix per call, so nothing can pre-create it');
         assert.ok(env.PATH || env.Path, 'the rest of the environment is kept, PATH included');
     } finally {
         for (const [k, v] of saved) {

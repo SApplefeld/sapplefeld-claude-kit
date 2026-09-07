@@ -2473,7 +2473,9 @@ test('one helper owns the git environment every invocation here runs under', () 
         // the variables a session might be carrying.
         const gitKeys = Object.keys(env).filter((k) => /^GIT_/i.test(k)).sort();
         assert.deepStrictEqual(gitKeys, ['GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_EMAIL',
-            'GIT_COMMITTER_NAME', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_TERMINAL_PROMPT']);
+            'GIT_COMMITTER_NAME', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_KEY_0',
+            'GIT_CONFIG_KEY_1', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_VALUE_1',
+            'GIT_TERMINAL_PROMPT']);
     }
     // The named home is a case's own override, which is what keeps the one case that
     // plants an excludes file out of the shared directory.

@@ -26,7 +26,11 @@
 // terminal profile) would otherwise decide what a hook reports. The strip is
 // wholesale and case-insensitive, since Windows environment keys are not the
 // casing a plain-object copy is indexed by, and GIT_TERMINAL_PROMPT is set
-// after it so no invocation can block a session on a credential prompt.
+// after it so no invocation can block a session on a credential prompt. The
+// only GIT_* names the child carries are the guard's own: the prompt refusal
+// and the environment-config pins that hold core.fsmonitor and core.hooksPath
+// inert, so a read against a repository nobody has vetted cannot run that
+// repository's code.
 //
 // The boundary is shared rather than per-caller because an unexported one is
 // the fix the next author reimplements by not implementing it: both properties
@@ -40,6 +44,9 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
+const os = require('os');
+const path = require('path');
 
 // Bound on one git call when the caller names none. Every caller here blocks
 // something a session is waiting on, so a wedged git is a bounded cost rather
@@ -53,9 +60,29 @@ const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 // The environment a git child runs under: this process's environment with every
-// GIT_* key removed case-insensitively, plus the terminal-prompt refusal. None
-// of the stripped variables is needed, since every call below passes
-// `-C <repoDir>` to name the repository it means.
+// GIT_* key removed case-insensitively, plus the terminal-prompt refusal and
+// the two config pins below. None of the stripped variables is needed, since
+// every call below passes `-C <repoDir>` to name the repository it means.
+//
+// core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours on
+// an ordinary read, so a status or a rev-list against a wrong or planted
+// repository runs that repository's code, and the hooks here ask exactly those
+// questions of whatever directory a session opened in. Both are pinned inert
+// through git's environment-config channel, which beats repo-local config. The
+// pins are additive rather than a suppression of the config files: pointing
+// GIT_CONFIG_GLOBAL at an empty file would also drop safe.directory, whose
+// absence surfaces as a dubious-ownership refusal that reads like a permissions
+// bug. fsmonitor takes git's own disable value rather than an empty string,
+// because a Windows process environment cannot hold an empty value and a
+// GIT_CONFIG_VALUE_<i> absent while GIT_CONFIG_COUNT names it is a fatal parse
+// error on every call. hooksPath names a fresh path under the temp directory
+// that nothing creates, so git finds no hooks to run. Both are set after the
+// strip, so an ambient GIT_CONFIG_COUNT cannot displace them.
+//
+// The same two pins are spelled again in Invoke-MemorySyncGit
+// (doctor/install-memory-sync.ps1), which guards the sync script's own git
+// calls. Neither language can call the other's, so the protections are
+// restated there rather than shared.
 function gitChildEnv() {
     const env = { ...process.env };
     for (const k of Object.keys(env)) {
@@ -68,6 +95,11 @@ function gitChildEnv() {
     // The spawn working directory above is what closes the route for the git
     // call itself; this closes it one level down.
     env.NoDefaultCurrentDirectoryInExePath = '1';
+    env.GIT_CONFIG_COUNT = '2';
+    env.GIT_CONFIG_KEY_0 = 'core.fsmonitor';
+    env.GIT_CONFIG_VALUE_0 = 'false';
+    env.GIT_CONFIG_KEY_1 = 'core.hooksPath';
+    env.GIT_CONFIG_VALUE_1 = path.join(os.tmpdir(), 'kit-git-no-hooks-' + crypto.randomUUID());
     return env;
 }
 

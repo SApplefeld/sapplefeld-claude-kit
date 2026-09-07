@@ -391,8 +391,9 @@ function Get-MemorySyncProbePaths {
 # Every git call in the sync path passes through here, so the child
 # environment is hardened here rather than at any one caller: a hand run of
 # the sync script inherits the same protections the unattended background run
-# gets from the hook's own gitChildEnv() in kit-git-lib.js, which cannot be
-# called from PowerShell and is pinned against this guard instead.
+# gets from the hook's own gitChildEnv() in kit-git-lib.js. PowerShell cannot
+# call that function, so this guard restates its protections rather than
+# sharing them.
 #
 # What the guard covers:
 #
@@ -424,6 +425,13 @@ function Get-MemorySyncProbePaths {
 # while GIT_CONFIG_COUNT names it is a fatal parse error on every call.
 # hooksPath points at a fresh path under the temp directory that nothing
 # creates, so git finds no hooks to run.
+#
+# Those two keys are pinned by name, and the class they belong to is not
+# closed. Other repo-local keys also make git run a command on the verbs this
+# funnel uses (credential.helper, core.sshCommand, core.askPass,
+# core.gitProxy, gpg.program under commit.gpgSign, and filter and merge
+# drivers), and none of them is pinned here. So the coverage above is the two
+# named members rather than the class.
 #
 # The variables are snapshotted and restored in a finally block, so the
 # session that dot-sources this file keeps its own environment whether git

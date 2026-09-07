@@ -60,7 +60,7 @@
     "test/kaizen-signpost.test.js": 862,
     "test/kit-compact-gate.test.js": 11055,
     "test/kit-endpoint-lib.test.js": 281,
-    "test/kit-git-lib.test.js": 256,
+    "test/kit-git-lib.test.js": 347,
     "test/kit-goal-lib.test.js": 5017,
     "test/kit-goal-statusline.test.js": 1215,
     "test/kit-goal-stop.test.js": 3409,
@@ -79,8 +79,8 @@
     "test/memory-index.test.js": 1322,
     "test/memory-recognition-nudge.test.js": 3531,
     "test/memory-session.test.js": 3240,
-    "test/memory-sync-git-guard.test.js": 210,
-    "test/memory-sync.test.js": 3091,
+    "test/memory-sync-git-guard.test.js": 225,
+    "test/memory-sync.test.js": 3105,
     "test/memory-usage-stamp.test.js": 436,
     "test/memq-grant.test.js": 1342,
     "test/memq-shim.test.js": 679,
@@ -112,6 +112,6 @@
     "test/session-start-plans.test.js": 489,
     "test/session-start-plugin-view.test.js": 594,
     "test/session-start-shared-checkout.test.js": 307,
-    "test/size-ratchet.test.js": 2987,
+    "test/size-ratchet.test.js": 2989,
     "test/stop-docs-hygiene.test.js": 275
 }

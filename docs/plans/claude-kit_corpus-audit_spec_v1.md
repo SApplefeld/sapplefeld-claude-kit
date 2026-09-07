@@ -38,6 +38,8 @@ Ruled 2026-08-29 by the operator: the audit arms only after the implementation q
 
 Ruled 2026-09-02 by the operator, first-hand on the allowlisted relay thread, from the kaizen pass's close-out recap: the audit arms after all seven plans in the worker's queue on that date close (board routing and homing, capacity gate, gating definitions, checkpoint session validation, scenario probes, output-channel eliding, store git channel guard), which is later than the recommended point of the first four. The four kaizen specs appended behind them the same day are not the wait: the arming session reads which of them have closed by then and treats prose they rewrote (the liveness and claim-writer plans touch the role and coordinator skills) as corpus at rest where closed and as in-flight surface to re-base against where not. The kaizen prose batch (`claude-kit_kaizen-prose-batch_spec_v1.md`) rides the adjudication lane as an input set, on the same ruling.
 
+Reaffirmed 2026-09-07 by the operator at the keyboard of the KIT: Expert session, when the function-hooks spike left the worker's queue and its tail slot came free: the audit does not take that slot and stays parked outside the queue, because a plan appended there runs in the implementation worker's session, at that session's model, before the fleet update, against Decision 3 and both rulings above. The arming remains the operator's word in a fresh Fable session once the queue drains and the update lands; the kaizen prose batch stays parked beside it on the same ruling.
+
 ## Sections of Work
 
 ### 1. The blind conflict sweep

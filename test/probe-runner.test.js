@@ -116,10 +116,11 @@ test('parseArgs refuses a dash-leading --before value and says why', async () =>
     assert.throws(() => parseArgs(['--before', '--upload-pack=evil']), /starts with a dash/);
 });
 
-test('parseArgs refuses an empty --before and an empty --shape by name', async () => {
+test('parseArgs refuses an empty --before, --shape or --only by name, with a reason about that flag', async () => {
     const { parseArgs } = await loadRunner();
-    assert.throws(() => parseArgs(['--before', '']), /--before was given an empty value/);
-    assert.throws(() => parseArgs(['--shape', '']), /--shape was given an empty value/);
+    assert.throws(() => parseArgs(['--before', '']), /--before was given an empty value: an empty --before/);
+    assert.throws(() => parseArgs(['--shape', '']), /--shape was given an empty value: an empty --shape/);
+    assert.throws(() => parseArgs(['--only', '']), /--only was given an empty value: an empty --only/);
     assert.equal(parseArgs(['--shape', 'full']).shape, 'full');
 });
 

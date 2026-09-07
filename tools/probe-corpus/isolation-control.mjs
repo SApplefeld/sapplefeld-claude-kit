@@ -43,7 +43,9 @@
 //
 // The `inherit` and `real-config` variants spend a real reader invocation
 // against the operator's own configuration directory and copy no credentials
-// anywhere. The other two build their scratch under the OS temp directory and
+// anywhere. The `inherit` rung is a live hooked session in this checkout: the
+// kit's SessionStart and Stop hooks run for it and its transcript lands under
+// the real home, so run it with no goal armed here. The other two build their scratch under the OS temp directory and
 // remove it on the way out.
 
 import fs from 'node:fs';

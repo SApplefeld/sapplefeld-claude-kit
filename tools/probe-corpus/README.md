@@ -79,7 +79,11 @@ far it got. A nonzero code the run itself chose wins: 101 through the
 interruption path above, and a nonzero mismatch count from a run that finished.
 Where the run chose nothing, or chose zero, the process exits 130 on SIGINT and
 143 on SIGTERM. The credential copy is removed on every one of those routes, and
-a copy the removal could not take is named on stderr and retried on exit.
+a copy the removal could not take is named on stderr and retried on exit. A run
+backgrounded with no terminal, the finishing pass's shape, has no Ctrl+C to
+reach its reader, so stopping it early is a kill of the whole process tree
+rather than of the runner's pid alone, which would let every remaining pair
+spawn its reader before the handler runs.
 
 Output lands in `.kit/probe-runs/<UTC stamp>/`: `report.md` and `report.json`,
 each shape's files copied under `shapes/<moment>/<shape>/`, and beside them the

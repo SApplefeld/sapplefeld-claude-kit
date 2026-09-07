@@ -192,7 +192,7 @@ test('every probe carries a distinct moment', () => {
     assert.strictEqual(byMoment.size, probeFiles.length);
 });
 
-test('the pilot moments section 2 reproduces are in the corpus', () => {
+test('the pilot moments are in the corpus', () => {
     const moments = probeFiles.map((file) => probeOf(file).moment);
     for (const moment of PILOT_MOMENTS) {
         assert.ok(moments.includes(moment), 'the corpus has no probe for the pilot moment ' + moment);

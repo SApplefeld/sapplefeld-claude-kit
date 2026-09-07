@@ -114,7 +114,11 @@ export function parseArgs(argv) {
             throw new Error(arg + ' takes a value and the next word is the flag ' + JSON.stringify(value) + ': the value is missing');
         }
         if (value === '') {
-            throw new Error(arg + ' was given an empty value: an empty --before would read the worktree while the caller believes a ref ran, and an empty --shape narrows nothing');
+            const why = arg === '--before' ? 'an empty --before would read the worktree while the caller believes a ref ran'
+                : arg === '--shape' ? 'an empty --shape narrows nothing'
+                : arg === '--only' ? 'an empty --only names no moment'
+                : 'the flag takes a value';
+            throw new Error(arg + ' was given an empty value: ' + why);
         }
         if (arg === '--before') {
             if (value.startsWith('-')) {

@@ -32,7 +32,7 @@ exit code, and an agreement is reported as `designed-agreed` and counted like an
 other mismatch, since a red that stopped being red is the finding.
 
 One further pair disagrees without being designed to, and is not counted above:
-the branch-and-pr pull-request probe under `full`, where cold readings report
-RESOLVED with finishing-work as the owner against this probe's proposed
-CONTESTED and its unowned answer. That disagreement is an open question for the
-operator's ruling on the probe, not a signal a shape was built to take.
+the branch-and-pr pull-request probe under `full`, whose reading disagrees with
+this probe's proposed CONTESTED and its unowned answer. That disagreement is an
+open question for the operator's ruling on the probe, not a signal a shape was
+built to take.

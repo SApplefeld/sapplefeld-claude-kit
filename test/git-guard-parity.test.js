@@ -48,15 +48,15 @@
 // (GIT_TERMINAL_PROMPT, GIT_CONFIG_COUNT, NoDefaultCurrentDirectoryInExePath,
 // GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0, GIT_CONFIG_KEY_1,
 // GIT_CONFIG_VALUE_1), each planted with a value distinct from what the
-// guard writes there, so their fate must be "changed away from the planted
-// value" rather than "added" (which would mean the plant leaked past the
-// point the guard reads process state) or "removed" (which is what a broken
-// strip-then-set order produces, since a pre-existing name the strip queues
-// for removal outruns a set that ran before it). The literal value each
-// name changes to is pinned once, at test/kit-git-lib.test.js and
-// test/memory-sync-git-guard.test.js; this file checks only that each side
-// moved away from its planted value and that the two sides' resulting
-// values agree with each other, in the per-touched-name comparison below.
+// guard writes there, so their fate must be "changed to the guard's own
+// literal value" rather than "added" (which would mean the plant leaked
+// past the point the guard reads process state) or "removed" (which is
+// what a broken strip-then-set order produces, since a pre-existing name
+// the strip queues for removal outruns a set that ran before it). This file
+// pins the literal value each name (all but GIT_CONFIG_VALUE_1) must change
+// to as the parity contract itself, checked against both sides;
+// test/kit-git-lib.test.js:266-270 separately pins the JS side's own set of
+// these values for its own purposes, independently of this file.
 //
 // PLANTED_SURVIVOR names are neither a guard name nor deliberate noise: no
 // guard has any reason to touch them, so they must be absent from the delta
@@ -150,12 +150,20 @@ const PLANTED_SURVIVOR = {
 const PLANTED = { ...PLANTED_NOISE, ...PLANTED_GUARD_OVERWRITE, ...PLANTED_SURVIVOR };
 const PLANTED_NAMES_THAT_MUST_NOT_SURVIVE = Object.keys(PLANTED_NOISE);
 
-// Every planted guard name except GIT_CONFIG_VALUE_1, which is checked by
-// shape further down (against its own planted-then-changed delta entry)
-// rather than by comparing to a literal target, since its value is a fresh
-// GUID-bearing path.
-const GUARD_NAMES_TO_CHECK = Object.keys(PLANTED_GUARD_OVERWRITE)
-    .filter((name) => name.toUpperCase() !== 'GIT_CONFIG_VALUE_1');
+// The literal value each planted guard name changes to, confirmed against
+// plugins/claude-kit/hooks/kit-git-lib.js:100-116 and
+// plugins/claude-kit/doctor/install-memory-sync.ps1:452-487. GIT_CONFIG_VALUE_1
+// is not here: it is checked by shape further down (against its own
+// planted-then-changed delta entry) rather than by comparing to a literal
+// target, since its value is a fresh GUID-bearing path.
+const EXPECTED_GUARD_CHANGE = {
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_COUNT: '2',
+    NoDefaultCurrentDirectoryInExePath: '1',
+    GIT_CONFIG_KEY_0: 'core.fsmonitor',
+    GIT_CONFIG_VALUE_0: 'false',
+    GIT_CONFIG_KEY_1: 'core.hooksPath'
+};
 
 const GUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -164,17 +172,22 @@ function hasNameCI(obj, name) {
     return Object.keys(obj).some((k) => k.toUpperCase() === upper);
 }
 
+function getValueCI(obj, name) {
+    const upper = name.toUpperCase();
+    const key = Object.keys(obj).find((k) => k.toUpperCase() === upper);
+    return key === undefined ? undefined : obj[key];
+}
+
 // The JS side: require the copy (kit-git-lib.js requires only node
 // builtins, so a copy under a temp dir loads standalone), plant the PLANTED
 // table on process.env, capture it as the pre-guard baseline, call the real
 // gitChildEnv() for the post-guard result, and restore process.env in a
 // finally whether the call threw or not. No casing cleanup is needed before
-// planting: unlike a spawned child's env block, Node's own process.env is
-// already case-insensitive on Windows (setting a name in one casing and
-// reading it back in another returns the same value, and Object.keys
-// reports only the one spelling that was set), so a plant can never leave
-// two differently-cased entries behind here the way it could in a spawned
-// child's env.
+// planting here the way buildPsEnvMap needs it for its spawned child's env
+// block: computeDelta keys every name by its upper-cased spelling before
+// comparing pre against post, so a differently-cased ambient key and its
+// planted counterpart are read as the same delta entry regardless of which
+// casing process.env happens to enumerate.
 function buildJsEnvMap(jsPath) {
     delete require.cache[require.resolve(jsPath)];
     const mod = require(jsPath);
@@ -221,20 +234,21 @@ const POWERSHELL_EXE = process.env.SystemRoot
 // Invoke-MemorySyncGit, for the post-guard result. Both dumps are captured
 // into a PowerShell variable, each item cast with [string]$_ (matching what
 // Invoke-MemorySyncGit's own Output already does, at
-// install-memory-sync.ps1:486), and re-emitted line by line through
-// [Console]::Out.WriteLine, which writes the raw string straight to stdout
-// and bypasses the console formatter Write-Output goes through; the
-// formatter wraps a line at the host's console width, which cut a long
-// GIT_CONFIG_VALUE_1 dump line at a column narrower than a redirected
-// stdout capture ever needs. The two dumps share one stdout stream, so each
-// is wrapped in its own BEGIN/END marker line the parser cannot mistake for
-// environment output (no real environment variable name is spelled
-// KITPARITY_*); the markers themselves stay on Write-Output, since they are
-// short literals a formatter has no reason to wrap. GetTempPath() rides
-// along on its own marked line, read by the caller to check
-// GIT_CONFIG_VALUE_1's shape against the runtime that produced it.
-// [Console]::OutputEncoding is set to UTF8 up front so every line written
-// through either path decodes alike.
+// install-memory-sync.ps1:486), and every line this script writes, the
+// marker lines included, goes through [Console]::Out.WriteLine, which
+// writes the raw string straight to stdout and bypasses the console
+// formatter Write-Output goes through; the formatter wraps a line at the
+// host's console width, which cut a long GIT_CONFIG_VALUE_1 dump line at a
+// column narrower than a redirected stdout capture ever needs. Routing
+// every line through the one writer also means there is no ordering
+// assumption between two different output paths interleaving on the same
+// stream. The two dumps share that one stdout stream, so each is wrapped in
+// its own BEGIN/END marker line the parser cannot mistake for environment
+// output (no real environment variable name is spelled KITPARITY_*).
+// GetTempPath() rides along on its own marked line, read by the caller to
+// check GIT_CONFIG_VALUE_1's shape against the runtime that produced it.
+// [Console]::OutputEncoding is set to UTF8 up front so every line decodes
+// alike.
 function buildPsEnvMap(psPath) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitguard-ps-'));
     try {
@@ -245,16 +259,16 @@ function buildPsEnvMap(psPath) {
         const script = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
             + '. ' + q(psPath) + '; '
             + '$tempPath = [System.IO.Path]::GetTempPath(); '
-            + 'Write-Output ("KITPARITY_TEMPPATH=" + $tempPath); '
+            + '[Console]::Out.WriteLine("KITPARITY_TEMPPATH=" + $tempPath); '
             + '$pre = & ' + q(fakeGit) + ' 2>&1; '
-            + 'Write-Output "KITPARITY_PRE_BEGIN"; '
+            + '[Console]::Out.WriteLine("KITPARITY_PRE_BEGIN"); '
             + 'foreach ($line in $pre) { [Console]::Out.WriteLine([string]$line) }; '
-            + 'Write-Output "KITPARITY_PRE_END"; '
+            + '[Console]::Out.WriteLine("KITPARITY_PRE_END"); '
             + '$result = Invoke-MemorySyncGit -StoreRoot ' + q(storeRoot)
             + ' -Arguments @("status") -GitExe ' + q(fakeGit) + '; '
-            + 'Write-Output "KITPARITY_POST_BEGIN"; '
+            + '[Console]::Out.WriteLine("KITPARITY_POST_BEGIN"); '
             + 'foreach ($line in $result.Output) { [Console]::Out.WriteLine([string]$line) }; '
-            + 'Write-Output "KITPARITY_POST_END"';
+            + '[Console]::Out.WriteLine("KITPARITY_POST_END")';
 
         // Windows environment names are case-insensitive, but a plain object
         // is not: { ...process.env, ...PLANTED } can leave two differently
@@ -444,34 +458,43 @@ function compareGuardEnvironments(jsPath, psPath) {
     }
 
     // The survivor plant is neither a guard name nor deliberate noise, so it
-    // must be absent from the delta entirely: no add, no change, no remove.
-    // Its presence in either delta means an over-broad strip took down a
-    // name it was never meant to reach.
-    for (const name of Object.keys(PLANTED_SURVIVOR)) {
+    // must be absent from the delta entirely (no add, no change, no remove)
+    // and it must actually be present, on both sides, still carrying its
+    // planted value: absence from the delta alone would also describe a
+    // plant that never landed in the pre-guard environment in the first
+    // place, which proves nothing about the strip.
+    for (const [name, plantedValue] of Object.entries(PLANTED_SURVIVOR)) {
         const upper = name.toUpperCase();
         if (jsTouched.has(upper)) problems.push('JS side: survivor ' + name + ' was touched: ' + JSON.stringify(jsTouched.get(upper)));
         if (psTouched.has(upper)) problems.push('PS side: survivor ' + name + ' was touched: ' + JSON.stringify(psTouched.get(upper)));
+        const jVal = getValueCI(jsPost, name);
+        const pVal = getValueCI(psPost, name);
+        if (jVal !== plantedValue) {
+            problems.push('JS side: survivor ' + name + ' is not present with its planted value ' + JSON.stringify(plantedValue) + ': ' + JSON.stringify(jVal));
+        }
+        if (pVal !== plantedValue) {
+            problems.push('PS side: survivor ' + name + ' is not present with its planted value ' + JSON.stringify(plantedValue) + ': ' + JSON.stringify(pVal));
+        }
     }
 
     // Every planted guard name (all but GIT_CONFIG_VALUE_1, checked by shape
     // further down) is proved by the delta rather than by an ambient
-    // process that happened to already carry the guard's own value: each is
-    // planted with a value the guard must overwrite, so each must read as
-    // changed away from that planted value on both sides. The value each
-    // side changed to is not re-pinned here against a literal (that literal
-    // is pinned once, at test/kit-git-lib.test.js and
-    // test/memory-sync-git-guard.test.js); cross-side agreement on the
-    // resulting value is enforced by the per-touched-name loop below.
-    for (const name of GUARD_NAMES_TO_CHECK) {
+    // process that happened to already carry the guard's own value: each
+    // must read as changed, from the planted value (proving the plant
+    // actually reached the pre-guard environment) to the literal value the
+    // guard is known to write, on both sides.
+    for (const [name, expected] of Object.entries(EXPECTED_GUARD_CHANGE)) {
         const upper = name.toUpperCase();
         const plantedValue = PLANTED_GUARD_OVERWRITE[name];
         const jInfo = jsTouched.get(upper);
         const pInfo = psTouched.get(upper);
-        if (!jInfo || jInfo.kind !== 'changed' || jInfo.to === plantedValue) {
-            problems.push('JS side: ' + name + ' did not change away from the planted value ' + JSON.stringify(plantedValue) + ': ' + JSON.stringify(jInfo || null));
+        if (!jInfo || jInfo.kind !== 'changed' || jInfo.from !== plantedValue || jInfo.to !== expected) {
+            problems.push('JS side: ' + name + ' did not change from the planted value ' + JSON.stringify(plantedValue)
+                + ' to ' + JSON.stringify(expected) + ': ' + JSON.stringify(jInfo || null));
         }
-        if (!pInfo || pInfo.kind !== 'changed' || pInfo.to === plantedValue) {
-            problems.push('PS side: ' + name + ' did not change away from the planted value ' + JSON.stringify(plantedValue) + ': ' + JSON.stringify(pInfo || null));
+        if (!pInfo || pInfo.kind !== 'changed' || pInfo.from !== plantedValue || pInfo.to !== expected) {
+            problems.push('PS side: ' + name + ' did not change from the planted value ' + JSON.stringify(plantedValue)
+                + ' to ' + JSON.stringify(expected) + ': ' + JSON.stringify(pInfo || null));
         }
     }
 
@@ -534,7 +557,6 @@ function compareGuardEnvironments(jsPath, psPath) {
     if (problems.length) {
         throw new assert.AssertionError({ message: 'guard parity broken:\n' + problems.join('\n') });
     }
-    return { jsTouched, psTouched, jsTempDir, psTempDir };
 }
 
 function withCopies(fn) {
@@ -550,9 +572,9 @@ function withCopies(fn) {
     }
 }
 
-// The floor and per-name checks inside compareGuardEnvironments already
-// throw a fully-detailed AssertionError on any disagreement; a passing call
-// here is itself the full claim, so there is nothing left for this test to
+// The per-name checks inside compareGuardEnvironments already throw a
+// fully-detailed AssertionError on any disagreement; a passing call here is
+// itself the full claim, so there is nothing left for this test to
 // re-assert about the returned deltas.
 test('the Node and PowerShell git guards hand git the same environment delta', { skip: !isWin }, () => {
     compareGuardEnvironments(JS_PATH, PS_PATH);
@@ -695,6 +717,50 @@ test('deleting the JS strip loop turns the pin red, naming GIT_KIT_PARITY_PLANTE
             (err) => err instanceof assert.AssertionError
                 && err.message.includes('JS side: planted GIT_KIT_PARITY_PLANTED was not removed'),
             'expected the comparison to throw naming GIT_KIT_PARITY_PLANTED as still present on the JS side');
+    });
+});
+
+// The survivor control: widening the JS strip predicate from /^GIT_/i to
+// /^(GIT_|KIT_)/i makes it delete KIT_PARITY_SURVIVOR along with every
+// genuine GIT_ name, which the survivor check exists to catch: a plant no
+// guard has any reason to touch must never turn up touched in the delta.
+test('widening the JS strip predicate to catch KIT_ names turns the pin red, naming KIT_PARITY_SURVIVOR as touched on the JS side', { skip: !isWin }, () => {
+    withCopies((jsCopy, psCopy) => {
+        const before = fs.readFileSync(jsCopy, 'utf8');
+        const eol = detectEol(before);
+        const anchor = '    for (const k of Object.keys(env)) {' + eol
+            + '        if (/^GIT_/i.test(k)) delete env[k];' + eol
+            + '    }' + eol;
+        assert.ok(before.includes(anchor), 'the strip loop was not found in the JS copy');
+        const after = before.replace(anchor,
+            '    for (const k of Object.keys(env)) {' + eol
+            + '        if (/^(GIT_|KIT_)/i.test(k)) delete env[k];' + eol
+            + '    }' + eol);
+        fs.writeFileSync(jsCopy, after, 'utf8');
+
+        assert.throws(() => compareGuardEnvironments(jsCopy, psCopy),
+            (err) => err instanceof assert.AssertionError
+                && err.message.includes('JS side: survivor KIT_PARITY_SURVIVOR was touched'),
+            'expected the comparison to throw naming KIT_PARITY_SURVIVOR as touched on the JS side');
+    });
+});
+
+// The PS mirror of the strip-predicate control: narrowing -match to
+// -cmatch makes the saved-names scan case-sensitive, so the lowercase
+// git_kit_parity_lower plant no longer matches "^GIT_" and is never queued
+// for removal, riding straight through to git.
+test('narrowing the PS saved-names match to case-sensitive turns the pin red, naming git_kit_parity_lower as not removed on the PS side', { skip: !isWin }, () => {
+    withCopies((jsCopy, psCopy) => {
+        const before = fs.readFileSync(psCopy, 'utf8');
+        const anchor = '$item.Name -match "^GIT_"';
+        assert.ok(before.includes(anchor), 'the saved-names match was not found in the PS copy');
+        const after = before.replace(anchor, '$item.Name -cmatch "^GIT_"');
+        fs.writeFileSync(psCopy, after, 'utf8');
+
+        assert.throws(() => compareGuardEnvironments(jsCopy, psCopy),
+            (err) => err instanceof assert.AssertionError
+                && err.message.includes('PS side: planted git_kit_parity_lower was not removed'),
+            'expected the comparison to throw naming git_kit_parity_lower as not removed on the PS side');
     });
 });
 

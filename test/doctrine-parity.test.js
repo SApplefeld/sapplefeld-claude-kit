@@ -6212,3 +6212,41 @@ test('the bounded-artifact class sentence reads the same on both gating surfaces
             + 'as evidence about the spec');
     }
 });
+
+test('the probe hook-ins quote the literals the runner actually emits and the flags it actually takes, and the pointer pair between them resolves', () => {
+    const runnerPath = path.join(__dirname, '..', 'tools', 'probe-corpus', 'run.mjs');
+    assert.ok(fs.existsSync(runnerPath), 'tools/probe-corpus/run.mjs is absent: this pin reads the scenario-probes runner, which lands with that plan\'s section 2 ahead of the hook-ins it pins');
+    const runner = fs.readFileSync(runnerPath, 'utf8');
+    const flags = /const KNOWN_FLAGS = \[([^\]]*)\]/.exec(runner);
+    assert.ok(flags, 'run.mjs names KNOWN_FLAGS as a literal array');
+    const known = flags[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+    assert.ok(runner.includes("'probe-corpus: '"), 'run.mjs emits the summary line prefix as a literal');
+    assert.ok(runner.includes("'- WARNING: '"), 'run.mjs emits the report warning prefix as a literal');
+    const skill = (name) => fs.readFileSync(path.join(__dirname, '..', 'plugins', 'claude-kit', 'skills', name, 'SKILL.md'), 'utf8');
+    const floor = { 'writing-skills': ['--only', '--before'], 'finishing-work': ['--only', '--before', '--shape'] };
+    for (const [name, expected] of Object.entries(floor)) {
+        const body = skill(name);
+        const spelled = new Set();
+        // Only a flag inside a run.mjs command span is read; a bare flag span in prose sits outside this pin's reach.
+        const spans = (body.match(/`[^`]*`/g) || []).filter((s) => /run\.mjs/.test(s));
+        for (const span of spans) {
+            for (const m of span.matchAll(/--[a-z][a-z-]*/g)) spelled.add(m[0]);
+        }
+        for (const flag of expected) assert.ok(spelled.has(flag), name + ' no longer spells ' + flag + ' in a run.mjs command, so this pin\'s floor is stale');
+        for (const flag of spelled) assert.ok(known.includes(flag), name + ' spells ' + flag + ' in a run.mjs command, which run.mjs does not take');
+    }
+    const ew = skill('executing-work');
+    assert.ok(ew.includes('`probe-corpus:`'), 'executing-work names the summary line prefix the runner emits');
+    assert.ok(ew.includes('`- WARNING:`'), 'executing-work names the report warning prefix the runner emits');
+    // The pointer pairs are pinned on stable tokens rather than on curated sentences, so the wording stays free to move.
+    const field = (name) => (ew.split(/\r?\n/).find((l) => l.startsWith(name + ': <')) || '');
+    const gate = field('Gate');
+    assert.ok(/finishing-work's step 5/.test(gate) && /probe/.test(gate), 'executing-work\'s Gate line holds the slot finishing-work\'s step 5 points at');
+    // The paragraph that spells the runner is the hook-in, so the pointer is read there and a sentence elsewhere in the file cannot satisfy it.
+    const fwRunnerParas = skill('finishing-work').split(/\r?\n/).filter((l) => /run\.mjs/.test(l));
+    assert.ok(fwRunnerParas.length > 0 && fwRunnerParas.some((l) => l.includes("executing-work's Chapter template")), 'finishing-work\'s runner paragraph points at executing-work\'s Chapter template');
+    const decisions = field('Decisions / Surprises');
+    assert.ok(/writing-skills'/.test(decisions) && /probe pair/.test(decisions), 'executing-work\'s Decisions / Surprises line holds the slot writing-skills points at');
+    const wsBody = skill('writing-skills');
+    assert.ok(wsBody.includes("executing-work's Chapter template") && wsBody.includes('`Decisions / Surprises`'), 'writing-skills points at the Decisions / Surprises slot');
+});

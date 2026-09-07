@@ -4,7 +4,7 @@ Status: In Progress
 Commit Model: Commit-and-Push
 Created: 2026-09-01
 
-Session model: any executor session in the kit repo; three sections, tiers per section. Authored 2026-09-01 by the session that shipped the precedence-and-ownership plan, at the operator's question whether the probe experiment belongs in that session or in a follow-on. This document is the follow-on. Anchors are authoring-time; re-locate every hit by content.
+Session model: any executor session in the kit repo; five sections, tiers per section, the fourth and fifth appended during the run as approval drift the Interim boards record. Authored 2026-09-01 by the session that shipped the precedence-and-ownership plan, at the operator's question whether the probe experiment belongs in that session or in a follow-on. This document is the follow-on. Anchors are authoring-time; re-locate every hit by content.
 
 ## Dispatch Authorization
 
@@ -74,6 +74,7 @@ Acceptance: the `Gate:` and `Decisions / Surprises` lines name their readings; f
 - `docs/plans/claude-kit_corpus-audit_spec_v1.md`: the one-time sweep whose conflict lane consumes and extends the probe set.
 - `plugins/claude-kit/skills/writing-skills/SKILL.md`: the RED and GREEN discipline the runner mechanizes.
 - `sidecar/batteries/`: the frozen-battery precedent the probe set's freeze-at-ruling rule follows.
+- `docs/plans/claude-kit_output-channel-eliding_spec_v1.md`: the plan whose producer sweep the runner's stderr messages join, since a refusal reason or a cleanup warning there can spell an absolute home-directory path.
 
 ## Chapters
 
@@ -319,3 +320,11 @@ test lines: 109439 of cap 109439 across 55 test files
 tests: 3325
 changed paths under no measured root: 1 (1 differing from HEAD, 0 untracked), which this tool does not measure and which no row above names; named-exclusion paths in the changeset: none
 ```
+
+### Interim board 8 - 2026-09-07
+
+Finishing pass in flight, compaction boundary taken on the gate's deferral nudge. Base ref 85ac6c0 by the Chapter walk (parent of 9b5b2f5, the first commit appending a Chapter); both section commits pushed at 02:48Z with main in sync and the build stamp rebuilt. Step 1 QA (qa-verifier): PASS, whole gate 3398/3385/1/12 exit 1 at 02:58Z on e0ef09c, identical to the Chapter baseline, contention lane none defined, every acceptance line verified with the section 2 pilot-reproduction clause operator-pending. Steps 2 and 3 at fable/high through Workflow, both resolved wholly at claude-fable-5-1 (45 and 44 assistant turns): security CONCERNS 0/0/3 (home-prefixed absolute paths in stderr refusal reasons, the runner-alone signal deferral being the operative case under the backgrounded finishing shape, the inherit rung's unstated side effects); adversarial APPROVED_WITH_CONCERNS 0/1/9, the Major being that the five Chapters carry none of the probe-pair states the changeset's own Decisions / Surprises slot now requires, closed in the final Chapter per section rather than by rewriting appended Chapters. Fix delta applied at 03:11Z: the runner's empty-value refusal speaks to the flag it names with --only '' pinned, the probe-set test name no longer claims the unmet reproduction, test/probes/README.md drops the measured reading and keeps the open question, docs/architecture.md's tools/ and test/ layout lines name probe-corpus/ and test/probes/, isolation-control.mjs names the inherit rung as a live hooked session, the runner README states the tree-kill route for a backgrounded run, docs/plans/README.md says ruled-mismatch count; lane `node --test test/probe-runner.test.js test/probe-set.test.js test/size-ratchet.test.js test/doctrine-parity.test.js test/output-style-parity.test.js` 339/336/0/3 exit 0, size check exit 0, caps exact at 2582 and 387; no review round on the delta, judged below the bar as message wording, one pin, comments and prose. Step 4 docs-curator: docs/architecture.md, docs/security-model.md (new runner section, the two PROBE_* overrides placed outside the payload's ungated three) and docs/README.md updated, nine drift items, eight deviations recorded for the final Chapter and one mistake, the plan header's "three sections", confirmed by reading line 7 and fixed here as an approval-region edit recorded as drift; hygiene: the corpus-audit plan's Related is left unedited per section 3, and the eliding plan is now pointed at from this plan's Related. Step 5's probe set: the after leg `node tools/probe-corpus/run.mjs` launched 03:12:31Z backgrounded with its log and exit marker under the box claim, eight of 27 pairs done at 03:21Z; no before leg is owed since every probe is proposed. Memory: five applied stamps taken by hand walk at 03:11Z (test-suite-invocation, suite-baseline-is-not-zero-fail, skill-amendments-collide-with-neighbours, and operator-tier build-stamp-refresh and pwsh7), the sweep having found no read stamp in the window; decay stamp eleven days old, no pass due.
+
+Gate baseline: unchanged from Interim board 1 (3219/3209/1/9 exit 1 at b4e249b); the handoff gate is owed after the archive and index edits.
+
+Next: read the after leg, re-run any errored or mismatched pair once, append the final Chapter with its Gate line open, archive the plan through curating-docs, refresh both indexes, run the whole gate, fill the Gate line, commit the docs and the fix delta, push, close out with the board and end BLOCKED on the rulings batch unless it is answered by then.

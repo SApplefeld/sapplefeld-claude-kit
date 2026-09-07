@@ -189,11 +189,18 @@ const HOOK_OUTPUT_MAX_BYTES = 256 * 1024;
 
 // Run a hook as a child with a JSON payload on stdin. spawnSync makes the sweep
 // serial, and the timeout bounds each child on its own.
+//
+// The timeout is delivered as SIGKILL rather than the default SIGTERM: a
+// replaced file in the cache is free to trap SIGTERM and keep running, and a
+// timeout a child can decline is no bound at all. win32 has no signals and ends
+// the process whatever the name says, so this is the POSIX half of the same
+// bound.
 function runHook(file, payload, env) {
     return spawnSync(process.execPath, [file], {
         input: JSON.stringify(payload),
         encoding: 'utf8',
         timeout: PROBE_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
         maxBuffer: HOOK_OUTPUT_MAX_BYTES,
         env: env || process.env
     });
@@ -931,8 +938,8 @@ const RENDER_CHILD = [
 //     choosing;
 //   - a returned line carries a character outside printable ASCII, a newline
 //     above all: a report is read as lines, so a line holding one is two rows to
-//     whoever reads it, and the shared renderer strips before it elides, so
-//     nothing it rendered can carry one;
+//     whoever reads it, and the shared renderer DELETES every character outside
+//     printable ASCII on its way through, so nothing it rendered can carry one;
 //   - a returned detail line does not begin with the head this report composed
 //     for it, which is the bullet, the hook's name, the label and the
 //     expectation, all of them this file's own text and no renderer's to
@@ -947,6 +954,11 @@ function renderLines(root, lines, heads) {
         input: JSON.stringify(lines),
         encoding: 'utf8',
         timeout: PROBE_TIMEOUT_MS,
+        // The timeout is delivered the way runHook's is, and for the same
+        // reason: this child loads a library out of the cache being probed, so a
+        // replaced one that traps SIGTERM would outlive a bound meant to hold
+        // it.
+        killSignal: 'SIGKILL',
         maxBuffer: RENDER_MAX_BYTES,
         env: probeEnv()
     });
@@ -972,9 +984,9 @@ function renderLines(root, lines, heads) {
 }
 
 // A composed head as the child would have rendered it, which is what the line
-// that came back is checked against. The strip runs in the child before the
-// elision, so a head is compared stripped, and a head longer than the cap is
-// compared as far as the cap reaches. A head the elision itself would alter (a
+// that came back is checked against. The child's renderer deletes every
+// character outside printable ASCII, so a head is compared stripped, and a head
+// longer than the cap is compared as far as the cap reaches. A head the elision itself would alter (a
 // wired hook name spelled like this machine's own flattened home directory)
 // refuses the rendering, which is the safe direction: the report is still
 // written, with every path taken back out of it.

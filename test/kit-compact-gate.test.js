@@ -6664,12 +6664,13 @@ function refusedOpenUnderHome(home) {
 }
 
 test('cli: an account name the printable-ASCII strip alters is still elided', () => {
-    // The strip runs before the elision, so a home directory carrying an
-    // accented or CJK character reaches this channel in a spelling the home
-    // directory's own text never contains: C:\Users\Jose with an accent on the e
-    // is emitted as C:\Users\Jos, which a pattern built from the raw spelling can
-    // never match. On such a machine the whole guard is inert rather than
-    // imprecise.
+    // The renderer elides, strips, and then elides again over the stripped
+    // text, so a home directory carrying an accented or CJK character reaches
+    // the second pass in a spelling the home directory's own text never
+    // contains: C:\Users\Jose with an accent on the e is stripped to
+    // C:\Users\Jos, which a pattern built from the raw spelling alone can never
+    // match. Without the stripped spelling in the table the guard is inert on
+    // such a machine rather than imprecise.
     //
     // What must be ABSENT is therefore the ASCII-surviving remainder of the
     // account name rather than the name as spelled on disk: the strip had

@@ -2691,15 +2691,17 @@ function charsetRule(s, max) {
     return String(s).replace(/[^\x20-\x7E]/g, '').replace(BARRED_QUOTE, '').slice(0, max);
 }
 
-// Whether the output channel is this file's own, which is what the elision
-// below belongs to. The descriptor wrapper at the bottom of this file is
+// Whether the output channel is this file's own, which is what the elisions
+// below belong to: sanitize's, and the one printMemoryBody runs over a stored
+// body. The descriptor wrapper at the bottom of this file is
 // installed on the same reading and for the same reason: a module consumer
 // writes to its own descriptors, and what covers the text it puts there is that
 // consumer's own guard or the rule the sweep exempted it under, never this
 // gate. The session hook that emits the memory directory is the worked case,
 // exempted because the line is an absolute destination the Write tool needs.
-// So a consumer that reaches for the gate below gets the charset rule it has
-// always got, and the elision runs where the channel is ours.
+// So a consumer that reaches for either gets the text under the rule that is
+// not the channel's (the charset rule for a sanitized value, the body as
+// stored), and the elision runs where the channel is ours.
 const CHANNEL_IS_OURS = require.main === module;
 
 // Reduce a value to short printable ASCII, with the double quote barred and,
@@ -7192,7 +7194,12 @@ function printMemoryBody(file, fence, read) {
     // here rather than the whole renderer, a body being a document whose
     // punctuation and newlines are content. The length the truncation note
     // reports is this text's, so the number names what would have printed.
-    const text = scrub(body);
+    //
+    // It runs where the channel is this file's own, which is sanitize's rule
+    // and holds here for its reason: loaded as a module this prints onto a
+    // consumer's descriptors, and what covers the text there is that consumer's
+    // own guard rather than a gate this file installed for its own stdout.
+    const text = CHANNEL_IS_OURS ? scrub(body) : body;
     if (fence !== null) {
         process.stdout.write(fence + '\n');
         const capped = text.length > BODY_CAP;

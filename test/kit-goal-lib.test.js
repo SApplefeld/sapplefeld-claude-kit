@@ -4147,6 +4147,51 @@ test('a real-length authorization sentence is recorded whole, not truncated', ()
     }
 });
 
+// The sentence is quoted from a plan doc, so it carries whatever an author
+// wrote into it, an absolute home-anchored path included, and this report is
+// echoed into a session's context by the /kit-goal skill. The store-side screen
+// is a printable-ASCII rule and a cap and elides nothing, so the OS account name
+// inside such a path reaches that channel unless the print goes through the
+// channel's own renderer. It runs at the authorization cap rather than the
+// renderer's default of 120, which is the cap the sentence is stored under and
+// what keeps a claim from being printed cut.
+test('the status report elides a home directory named inside an authorization sentence', () => {
+    const repo = makeRepo();
+    // A fixture account name that appears nowhere else in this run's output, so
+    // an assertion that it is absent reads the renderer rather than the box's
+    // own temp path.
+    const account = 'zephyrina';
+    const home = path.join(repo, 'fixture-home', account);
+    try {
+        fs.mkdirSync(path.join(home, 'work', 'threads'), { recursive: true });
+        const sentence = 'Authorized by the operator on the thread rooted at '
+            + path.join(home, 'work', 'threads') + ' and queued from there.';
+        writePlan(repo, 'docs/plans/a.md', 'Status: In Progress\n\n'
+            + '## Dispatch Authorization\n\n' + sentence + '\n');
+
+        assert.strictEqual(armGoal(repo, ['docs/plans/a.md']).ok, true);
+        assert.strictEqual(readGoal(repo).authorizations['docs/plans/a.md'], sentence,
+            'test setup: the whole sentence is stored, the absolute path in it included');
+
+        // The child's home directory is the fixture, since the elision table is
+        // compiled once from os.homedir() at library load.
+        const status = spawnSync(process.execPath, [CLI, 'status'], {
+            cwd: repo,
+            encoding: 'utf8',
+            env: { ...process.env, HOME: home, USERPROFILE: home }
+        });
+        assert.strictEqual(status.status, 0, status.stderr);
+        assert.ok(!status.stdout.includes(account),
+            'the account name is absent from the report: ' + status.stdout);
+        assert.ok(status.stdout.includes('(authorization: Authorized by the operator on the thread '
+            + 'rooted at ~' + path.sep + path.join('work', 'threads') + ' and queued from there.)'),
+            'and the sentence still reaches the reader whole, with the home directory under the '
+            + 'shorthand the operator reads it by: ' + status.stdout);
+    } finally {
+        rmRepo(repo);
+    }
+});
+
 // The map is keyed by untrusted, hand-editable strings and then read by key, so
 // it is built without a prototype and read as own keys only. A plain object
 // answers a key it never recorded with whatever Object.prototype carries under

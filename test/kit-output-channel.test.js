@@ -1,7 +1,7 @@
 // Tests for the shared output-channel renderer in
 // plugins/claude-kit/hooks/kit-compact-lib.js: sanitizeForOutput, displayPath,
-// scrub and homeElisionsKnown, the four exports every writer into a channel a
-// model reads goes through.
+// scrub, scrubAfterStrip and homeElisionsKnown, the five exports every writer
+// into a channel a model reads goes through.
 //
 // Node's built-in test runner, no framework (Node v24). The renderer's elision
 // table is compiled once at module load from os.homedir(), so a case cannot
@@ -290,6 +290,107 @@ test('renderer: separators doubled inside a home spelling elide with it', () => 
         'a doubled separator must not carry the account name onto the channel: ' + out.doubled);
     assert.strictEqual(out.doubled, 'reading ~' + path.sep + 'repo',
         'the doubled spelling elides to the shorthand the single one elides to');
+});
+
+// The child for the separator-run case below. It builds the run inside the
+// child rather than being handed one, since the run is longer than an
+// environment variable is worth carrying, and it times the rendering itself so
+// the reading is the match rather than the spawn.
+const RUN_CHILD = `
+    const lib = require(process.env.PROBE_LIB);
+    const run = '/'.repeat(Number(process.env.PROBE_RUN));
+    const started = Date.now();
+    const swept = lib.scrub(run + 'x');
+    const elided = lib.scrub('reading ' + run + process.env.PROBE_HOME + '/repo');
+    process.stdout.write(JSON.stringify({ swept, elided, ms: Date.now() - started }));
+`;
+
+test('renderer: a long separator run is entered once rather than at every position', () => {
+    // A POSIX-shaped home directory compiles a leading separator run into its
+    // literal, and every character of a run in the text is otherwise a start
+    // position the pattern is entered at, each one consuming the run again
+    // before it fails. That is quadratic in the run's length, and the text this
+    // channel renders is not bounded by anything a writer controls (a stored
+    // memory body reaches it at its own cap), so a run of a few tens of
+    // thousands of separators costs seconds of the session's time. Refusing a
+    // preceding separator leaves one start position, the run's own first
+    // character, at linear cost; the refusal alone would narrow the set, so
+    // the bounded form folds the leading boundary into an alternation at that
+    // one position (pinned below, at the POSIX-shaped home case).
+    //
+    // The home directory is POSIX-shaped rather than staged on disk: the
+    // leading run only exists in the literal where the home spelling starts
+    // with a separator, which is the platform this case is about, and nothing
+    // here reads the filesystem.
+    const home = '/home/' + ACCOUNT;
+    const run = 131072;
+    const bound = 3000;
+    const child = spawnSync(process.execPath, ['-e', RUN_CHILD], {
+        env: {
+            ...process.env,
+            HOME: home,
+            USERPROFILE: home,
+            PROBE_LIB: LIB,
+            PROBE_HOME: home,
+            PROBE_RUN: String(run)
+        },
+        encoding: 'utf8'
+    });
+    assert.strictEqual(child.status, 0,
+        'the probe child must exit clean: ' + child.stdout + child.stderr);
+    const out = JSON.parse(child.stdout);
+
+    assert.ok(out.ms < bound,
+        'a run of ' + run + ' separators renders in well under a second, which a pattern entered '
+        + 'once does and a pattern entered at every position does not: ' + out.ms + ' ms against a '
+        + 'bound of ' + bound + ' ms');
+    assert.strictEqual(out.swept, '/'.repeat(run) + 'x',
+        'a run carrying no home spelling is rendered as itself');
+    assert.ok(!out.elided.includes(ACCOUNT),
+        'and a spelling the run leads straight into is still elided, account name and all: '
+        + out.elided);
+    assert.strictEqual(out.elided, 'reading ~/repo',
+        'the run is part of the spelling it introduces, so it elides with it');
+});
+
+test('renderer: a POSIX-shaped home elides behind a separator run, and only where a run starts', () => {
+    // The leading boundary refuses a name character in front of the spelling,
+    // and the anchor that keeps a long run to one start position refuses a
+    // separator in front of it. A POSIX-shaped home directory is the one
+    // spelling those two edges meet on, because its literal STARTS with a
+    // separator run: the run's own first character is what the anchor admits
+    // and what the leading boundary refuses, so the two together can refuse
+    // every position and print the account name. This holds them to the match
+    // set the leading boundary alone had, where a run of two or more separators
+    // names the same directory a single one names and elides, and a single
+    // separator behind a name character is still some other path.
+    //
+    // The home directory is POSIX-shaped rather than staged on disk, as in the
+    // run-length case above: the leading run exists in the literal only where
+    // the home spelling starts with a separator, which is the platform this
+    // case is about, and nothing here reads the filesystem. win32 reaches the
+    // same table through USERPROFILE, so the case runs on both.
+    const home = '/home/' + ACCOUNT;
+    const out = render(home, [
+        ['doubled', 'scrub', '/mnt/backup//home/' + ACCOUNT + '/x', null],
+        ['tripled', 'scrub', '/mnt/backup///home/' + ACCOUNT + '/x', null],
+        ['single', 'scrub', '/mnt/backup/home/' + ACCOUNT + '/x', null],
+        ['unled', 'scrub', '/home/' + ACCOUNT + '/x', null]
+    ]);
+    for (const name of ['doubled', 'tripled', 'unled']) {
+        assert.ok(!out[name].includes(ACCOUNT),
+            name + ': the account name is absent from the rendering: ' + out[name]);
+        assert.ok(out[name].includes('~'),
+            name + ': and the home directory is named in its elided form: ' + out[name]);
+    }
+    assert.strictEqual(out.doubled, '/mnt/backup~/x',
+        'the run belongs to the spelling it introduces, so the elision starts at the run rather '
+        + 'than inside it: ' + out.doubled);
+    assert.strictEqual(out.unled, '~/x',
+        'a spelling with nothing in front of it renders as the shorthand alone');
+    assert.ok(out.single.includes(ACCOUNT) && !out.single.includes('~'),
+        'a single separator behind a name character introduces some other path, which keeps its '
+        + 'name: ' + out.single);
 });
 
 // Every function name the source declares at the top level, extracted

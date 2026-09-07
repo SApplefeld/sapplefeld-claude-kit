@@ -375,6 +375,36 @@ test('registry audit: the CLI speaks over a planted directory and is silent over
     }
 });
 
+// The audit's stdout is a channel a model reads, and every value it
+// interpolates comes out of a file any local session on the machine can write,
+// so both interpolation sites render through the shared output guard: a field's
+// own text at 40 characters, the composed sentence at 300. That guard MARKS
+// what it discarded, and the mark is what keeps a value shown in part from
+// reading as the whole one, so this pins the mark reaching this stdout.
+test('registry audit: a field longer than the report shows is printed with the cut mark', () => {
+    const f = fixture();
+    try {
+        // A moment in the legacy spelling Date.parse also accepts: a whole
+        // second, which is the finding this raises, written long enough to pass
+        // the cap a field is shown within. Built from the clock like every other
+        // fixture moment in this file, so no literal moment ships here either.
+        const legacy = new Date(Math.floor((Date.now() - 40 * MINUTE) / 1000) * 1000).toString();
+        assert.ok(legacy.length > 40,
+            'test setup: the stamp must be longer than the cap or the case pins nothing: ' + legacy);
+        writeFile(path.join(f.registryDir, SESSION + '.md'), entryText({ statusUpdated: legacy }));
+
+        const res = runAudit(f, ['--dir', f.dir]);
+        assert.strictEqual(res.status, 1,
+            'a whole-second stamp is a finding, so the line under test is printed; stderr: ' + res.stderr);
+        assert.ok(res.stdout.includes(legacy.slice(0, 40) + ' [cut to fit]'),
+            'the field is shown as far as the cap reaches and marked as cut: ' + res.stdout);
+        assert.ok(!res.stdout.includes(legacy),
+            'and the whole field does not reach the line, which is what the cap is for: ' + res.stdout);
+    } finally {
+        rmDir(f.home);
+    }
+});
+
 test('registry audit: an empty coordinator directory is an ordinary state, not a finding', () => {
     const f = fixture();
     try {

@@ -52,8 +52,8 @@ const path = require('path');
 // home-anchored on an installed plugin, and this CLI's output is echoed into a
 // session's context.
 let armGoal, appendGoal, clearGoal, readGoal, planStatusReadings, lastActivePhrase, isSessionIdShaped,
-    goalPathKind, planPathState, safeForAuthorization, planArmedBy, queuePosition,
-    GOAL_STATE_MAX_BYTES;
+    goalPathKind, planPathState, planArmedBy, queuePosition,
+    GOAL_STATE_MAX_BYTES, AUTHORIZATION_MAX_CHARS;
 
 // Repo-controlled strings (a plan path) are sanitized before they reach
 // stdout/stderr, matching the sibling hooks' convention for any repo data
@@ -61,16 +61,17 @@ let armGoal, appendGoal, clearGoal, readGoal, planStatusReadings, lastActivePhra
 // this file's own name: the refusal reasons this CLI prints embed absolute plan
 // paths, so the channel's home elision is what keeps the OS account name out of
 // them, and the library's cap of 120 is the cap this file already used. A
-// recorded authorization sentence is prose that runs past that cap and goes
-// through safeForAuthorization instead, the same screen the value was stored
-// under.
+// recorded authorization sentence is prose that runs past that cap, so it takes
+// the same renderer at the cap the store screened it under
+// (AUTHORIZATION_MAX_CHARS): one renderer for everything this file prints, and
+// the sentence still reaches the reader whole.
 let sanitize;
 
 function loadKitLibraries() {
     ({
         armGoal, appendGoal, clearGoal, readGoal, planStatusReadings, lastActivePhrase,
-        isSessionIdShaped, goalPathKind, planPathState, safeForAuthorization, planArmedBy,
-        queuePosition, GOAL_STATE_MAX_BYTES
+        isSessionIdShaped, goalPathKind, planPathState, planArmedBy,
+        queuePosition, GOAL_STATE_MAX_BYTES, AUTHORIZATION_MAX_CHARS
     } = require('./kit-goal-lib.js'));
     ({ sanitizeForOutput: sanitize } = require('./kit-compact-lib.js'));
 }
@@ -482,11 +483,18 @@ function cmdStatus() {
         // the plan doc and asserted rather than authenticated, which is why it
         // reads as what the plan says rather than as a grant.
         //
-        // It is screened by safeForAuthorization, the rule it was stored under,
-        // rather than by sanitize: the sentences plans carry run well past
-        // sanitize's 120-character path cap, and a claim about who authorized
-        // arming that is cut mid-clause reads as the whole recorded claim, which
-        // is the one thing this line exists to let a reader judge.
+        // It goes through sanitize at the cap the store screened it under rather
+        // than at sanitize's own 120-character path cap: the sentences plans
+        // carry run well past that cap, and a claim about who authorized arming
+        // that is cut mid-clause reads as the whole recorded claim, which is the
+        // one thing this line exists to let a reader judge. The renderer is what
+        // the sentence needs and the store's screen cannot give it: the sentence
+        // is quoted from a plan doc and an author can write an absolute
+        // home-anchored path into it, and this report is echoed into a session's
+        // context, so the OS account name in such a path is what the channel's
+        // home elision takes out. The store's screen is a printable-ASCII rule
+        // and a cap, already applied to the stored value, so the renderer's own
+        // strip and cap have nothing left to do here.
         const authorization = state.authorizations[plan];
         // The arming beside the authorization, on both directions for the reason
         // the authorization prints on both: a line rendered only for one reading
@@ -498,7 +506,8 @@ function cmdStatus() {
             : 'typed by the operator';
         out.push('  ' + (i === 0 ? '>' : ' ') + ' ' + sanitize(plan) + ' [' + status + ']'
             + ' (armed: ' + arming + ')'
-            + ' (authorization: ' + (authorization ? safeForAuthorization(authorization) : 'none recorded') + ')');
+            + ' (authorization: '
+            + (authorization ? sanitize(authorization, AUTHORIZATION_MAX_CHARS) : 'none recorded') + ')');
     });
     const more = state.queue.length - position.index - window.length;
     if (more > 0) out.push('  ... and ' + more + ' more');

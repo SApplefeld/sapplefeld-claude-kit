@@ -2619,9 +2619,14 @@ function emitGoalEvent(details) {
 // (planPathState), and the CLI prints a token per queued plan (planPathState).
 // Each must answer to the one rule rather than to a spelling of its own.
 // GOAL_STATE_MAX_BYTES rides along for the CLI's report of a state file past it.
-// safeForAuthorization rides along for the same single-rule reason: the CLI
-// prints the stored sentence, and a printer applying a shorter cap than the store
-// hands a reader half a claim and presents it as the whole recorded one.
+// safeForAuthorization rides along for the same single-rule reason: the size
+// report screens a plan-doc sentence it prints under the rule the store applies,
+// rather than under a spelling of its own. AUTHORIZATION_MAX_CHARS rides along
+// beside it for the printers: the CLI prints the stored sentence through the
+// output channel's own renderer, which elides the home directory a sentence can
+// name, and a printer applying a shorter cap than the store hands a reader half
+// a claim and presents it as the whole recorded one, so the cap it renders at is
+// this one rather than the renderer's default.
 // queuePosition rides along for the surfaces that report where a queue stands:
 // the SessionStart notice, the CLI status report, the status-line widget's
 // Plans segment, and the Stop hook's blocked clause, which files its event and
@@ -2656,4 +2661,4 @@ function emitGoalEvent(details) {
 // caller's own tree, which is the comparison fsEq and nativeSpelling answer
 // here. A hand copy in the caller would match this file's comparison the day
 // it was written and drift from it silently after.
-module.exports = { goalPath, goalPathKind, goalStateAbsent, readGoal, armGoal, appendGoal, advanceGoal, bindSession, clearGoal, composeCondition, planArmedBy, armingSession, armingSessionClaims, sessionHoldsLeash, planHead, planStatusReadings, classifyPlanStatus, emitGoalEvent, normalizePlanArg, lastActivePhrase, isSessionIdShaped, planFileSize, planHeadText, planPathState, pathErrnoClass, safeForAuthorization, queuePosition, fsEq, nativeSpelling, storablePathValue, GIT_POINTER_PATH_CAP, GOAL_STATE_MAX_BYTES };
+module.exports = { goalPath, goalPathKind, goalStateAbsent, readGoal, armGoal, appendGoal, advanceGoal, bindSession, clearGoal, composeCondition, planArmedBy, armingSession, armingSessionClaims, sessionHoldsLeash, planHead, planStatusReadings, classifyPlanStatus, emitGoalEvent, normalizePlanArg, lastActivePhrase, isSessionIdShaped, planFileSize, planHeadText, planPathState, pathErrnoClass, safeForAuthorization, queuePosition, fsEq, nativeSpelling, storablePathValue, GIT_POINTER_PATH_CAP, GOAL_STATE_MAX_BYTES, AUTHORIZATION_MAX_CHARS };

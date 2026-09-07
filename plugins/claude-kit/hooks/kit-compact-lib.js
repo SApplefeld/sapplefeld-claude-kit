@@ -3373,11 +3373,14 @@ function registryField(text, name) {
 // and two spellings of it drift, with the one a caller reaches for then decided
 // by which file it happens to sit beside.
 //
-// Four exported parts. sanitizeForOutput renders one repo-controlled value;
+// Five exported parts. sanitizeForOutput renders one repo-controlled value;
 // displayPath renders a value already known to be a path; scrub takes the home
 // directory out of a whole composed line, which is what a caller's own emitter
-// hands it; and homeElisionsKnown answers whether a home directory is knowable
-// at all, which is the reading a caller states out loud when its floor is off.
+// hands it; scrubAfterStrip is that same elision for a second pass over text a
+// strip has deleted characters from, which is the one place the name boundaries
+// are dropped; and homeElisionsKnown answers whether a home directory is
+// knowable at all, which is the reading a caller states out loud when its floor
+// is off.
 
 // The length a repo-controlled string is printed within absent a caller's own
 // cap. One number, so the value and the mark that says it was shortened cannot
@@ -3572,8 +3575,9 @@ function displayPath(full) {
 // separately from the leading prefix.
 //
 // Each spelling is built TWICE, from the raw home directory and from its
-// printable-ASCII form, because the text this elides has already been stripped:
-// sanitizeForOutput strips before it elides, so on a home directory carrying an
+// printable-ASCII form, because the text this elides has in one of its two
+// passes already been stripped: sanitizeForOutput's second pass runs over text
+// its strip has deleted characters from, so on a home directory carrying an
 // accented or CJK character the raw spelling is one no emitted line can ever
 // contain, and C:\Users\Jose with an accent on the e reaches the channel as
 // C:\Users\Jos. Building the same patterns from printableAscii(home) covers the
@@ -3629,9 +3633,41 @@ function homeElisions() {
         const literal = Array.from(named)
             .map((ch) => (ch === '\\' || ch === '/' ? '[\\\\/]+' : escape(ch)))
             .join('');
+        // A spelling that STARTS with a separator run is entered at the run's
+        // own first character and nowhere else. Without that anchor, every
+        // character of a run in the text is a start position, and each one
+        // consumes the whole run again before failing, which is quadratic in
+        // the run's length: the text reaching this channel is not bounded by
+        // anything the writer controls, a stored memory body arriving at its
+        // own cap among it, so a run of a few tens of thousands of separators
+        // costs seconds. The greedy run inside the anchored form backtracks
+        // once per run rather than once per start position, which is linear.
+        //
+        // The anchor alone would narrow the match set, because the leading
+        // boundary refuses the run's first character exactly where the anchor
+        // is the only position left: a run behind a name character, as in
+        // /mnt/backup//home/name, has its first separator refused by the
+        // boundary and every later one by the anchor, and the account name
+        // prints. So a spelling starting with a run takes the anchor with the
+        // boundary folded INSIDE it as an alternation, and takes no outer
+        // boundary of its own. The two branches are the two ways the leading
+        // boundary admitted a run: the run's start carries no name character
+        // in front of it, or the run is two or more separators long, which is
+        // the case the boundary admitted one character in. That is the match
+        // set the boundary alone had, entered once. The elision starts at the
+        // run's first character rather than its second, since the whole run is
+        // one separator's worth of the same directory and belongs to the
+        // spelling it introduces.
+        const leadingRun = '[\\\\/]+';
+        const startsWithRun = literal.startsWith(leadingRun);
+        const anchored = startsWithRun ? '(?<![\\\\/])' + literal : literal;
+        const bounded = startsWithRun
+            ? '(?<![\\\\/])(?:' + lead + leadingRun + '|[\\\\/]{2,})'
+                + literal.slice(leadingRun.length) + trail
+            : lead + literal + trail;
         const flattened = escape(named.replace(/[^A-Za-z0-9]/g, '-'));
         for (const [source, unbounded, shown] of [
-            [lead + literal + trail, literal, '~'],
+            [bounded, anchored, '~'],
             [flattened + '(?![A-Za-z0-9])', flattened, 'flattened-home']
         ]) {
             if (!seen.has(source)) {

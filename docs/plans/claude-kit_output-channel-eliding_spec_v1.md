@@ -72,6 +72,19 @@ callers that write into model-read channels onto it. Do not unify every sanitize
 ones that are genuinely about character sets and caps for non-path values keep their own job. The
 sweep is over what reaches a model-read channel carrying a path, not over the word "sanitize".
 
+## Standing Brief Amendments
+
+1. (2026-09-07, section 2) The hook canary loads nothing out of the plugin cache it probes, and
+   `test/hook-canary.test.js` pins that (`the canary loads no file out of the cache it is probing`).
+   The pin stands. The canary therefore reaches the shared renderer through one child process on
+   the failure path only: the report is composed in-process from raw values, then a single child
+   spawned from the same root requires `kit-compact-lib.js` and renders each line through
+   `sanitizeForOutput` (strip, elide, cap, marked). The parent owns the verdict sentence and the
+   failure count, checks the child returned exactly one line per line sent, and on a child
+   failure or a count mismatch withholds every detail line and says so once, so a tampered
+   library can blank the details and never the verdict. No in-process require of any cache file,
+   guarded or not.
+
 ## Sections of Work
 
 ### 1. One shared path renderer, with the channel's two properties. Model: opus
@@ -171,3 +184,11 @@ test lines: 109835 of cap 109835 across 56 test files
 tests: 3332
 changed paths under no measured root: 4 (4 differing from HEAD, 0 untracked), which this tool does not measure and which no row above names; named-exclusion paths in the changeset: test/size-budget.json, which a root holds and no shape measures, so no row above names them
 ```
+
+### Interim board 2 - 2026-09-07
+
+Section 2 in flight at 2026-09-07T06:19:09Z, on this main checkout at 79475ba (section 1 committed and pushed). Stage: second implementer-opus dispatch running, awaited in-turn. The first dispatch (brief at .kit/scratch/eliding/brief-s2.md) returned NEEDS_CONTEXT on a real contradiction: the brief said to bind the shared renderer in hook-canary.js through a guarded require, and test/hook-canary.test.js pins that the canary loads no file out of the cache it probes (a tampered library would execute inside the tamper detector before its bytes are hashed). It left its other work in the worktree unstaged: kit-goal.js and kit-registry-stamp.js bound to the library with withheld load-failure legs, the kit-goal callback-arity defect it introduced and fixed (Array.map passing the index as the cap), two red-first canary cases, two CLI withheld-leg cases, and a 42-file sweep (351 emitter sites) with its table. Ruling adopted by this session, written as Standing Brief Amendment 1 (approval-region edit, deliberate): the pin stands and the canary renders its failure report through one child process on the failure path only, the parent owning the verdict and the failure count and withholding the detail lines on a child failure or a line-count mismatch. The second dispatch (brief at .kit/scratch/eliding/brief-s2b.md) was asked to build that, plus three folds the first sweep left unfixed without a stated rule: memq.js failureText (an fs error path on stderr), memq-shim.js (absolute plugins root and memq path), and the probe runner under tools/probe-corpus (absolute paths on stderr), each with a red-first pin. Live dispatch: implementer-opus at opus, dispatched 05:43Z, first-turn reading 55 assistant lines and 0 synthetic at its five-minute close, transcript growing, its edits now landing on hook-canary.js, memq.js, memq-shim.js and their tests.
+
+Gate baseline: the whole gate reading from Chapter 1 stands (3405/3389/4/12 exit 1 measured 04:48:47Z to 04:56:27Z at c6143b2 with the section staged; after the build-stamp rebuild the effective baseline is that reading with the three canary reds cleared and the one permanent memory-session red). No new whole-gate reading yet this section; contention lane none defined. The heavy-process claim is the implementer's for its lane, released on this session's id.
+
+Next: read the second dispatch's report, verify its diff and lane, then the review round (code pair plus security lens at fable, both rounds bracketed), then docs/security-model.md rewritten in the main thread from the final residual list, then close gate, whole gate, Chapter 2, commit, push, checkpoint. This entry is committed with the plan doc alone and not pushed: the push owes the whole gate and lands with the section close.

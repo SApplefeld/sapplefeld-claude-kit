@@ -29,8 +29,9 @@
 // after it so no invocation can block a session on a credential prompt. The
 // only GIT_* names the child carries are the guard's own: the prompt refusal
 // and the environment-config pins that hold core.fsmonitor and core.hooksPath
-// inert, so a read against a repository nobody has vetted cannot run that
-// repository's code.
+// inert. Those two pins close two named routes by which a repository nobody
+// has vetted runs its own code on a read; the class is wider than the two,
+// and gitChildEnv's comment names what stays open.
 //
 // The boundary is shared rather than per-caller because an unexported one is
 // the fix the next author reimplements by not implementing it: both properties
@@ -77,7 +78,20 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
 // GIT_CONFIG_VALUE_<i> absent while GIT_CONFIG_COUNT names it is a fatal parse
 // error on every call. hooksPath names a fresh path under the temp directory
 // that nothing creates, so git finds no hooks to run. Both are set after the
-// strip, so an ambient GIT_CONFIG_COUNT cannot displace them.
+// strip, so an ambient GIT_CONFIG_COUNT cannot displace them. The channel
+// exists in git 2.31 and later; an older git ignores it silently and this
+// guard degrades to the strip alone, with nothing here to say so.
+//
+// Two keys are pinned by name, and the class they belong to is not closed:
+// any key git documents as a command or program, and any remote URL scheme or
+// helper a remote's config selects, also makes git run a command on the verbs
+// the hooks use. The one write-shaped verb here is branch-reaper-nudge's
+// fetch against whatever repository a session opened, where a repo-local
+// core.sshCommand, credential.helper or upload-pack setting runs under these
+// pins exactly as before them. So the coverage is the two named members
+// rather than the class. The hooksPath pin also reaches an operator's global
+// hooks, since the environment channel cannot tell a repo-local hooksPath
+// from a global one; on the read verbs here that costs nothing.
 //
 // The same two pins are spelled again in Invoke-MemorySyncGit
 // (doctor/install-memory-sync.ps1), which guards the sync script's own git

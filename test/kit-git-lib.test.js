@@ -83,6 +83,12 @@ function plantRepo() {
     fs.mkdirSync(path.join(repo, 'planted-hooks'));
     fs.writeFileSync(path.join(repo, 'planted-hooks', 'pre-commit'),
         '#!/bin/sh\nprintf \'hookspath\\n\' >> "' + sh + '"\nexit 0\n', 'utf8');
+    // Off Windows git runs only an executable hook and the fsmonitor exec
+    // needs the bit too, or the control leg below reds for the wrong reason.
+    if (process.platform !== 'win32') {
+        fs.chmodSync(path.join(repo, 'fsmonitor.sh'), 0o755);
+        fs.chmodSync(path.join(repo, 'planted-hooks', 'pre-commit'), 0o755);
+    }
     // Set last, so the fixture's own commands above do not fire them.
     git(repo, ['config', 'core.fsmonitor', repo.replace(/\\/g, '/') + '/fsmonitor.sh']);
     git(repo, ['config', 'core.hooksPath', repo.replace(/\\/g, '/') + '/planted-hooks']);

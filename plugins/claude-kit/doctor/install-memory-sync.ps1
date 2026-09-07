@@ -427,11 +427,23 @@ function Get-MemorySyncProbePaths {
 # creates, so git finds no hooks to run.
 #
 # Those two keys are pinned by name, and the class they belong to is not
-# closed. Other repo-local keys also make git run a command on the verbs this
-# funnel uses (credential.helper, core.sshCommand, core.askPass,
-# core.gitProxy, gpg.program under commit.gpgSign, and filter and merge
-# drivers), and none of them is pinned here. So the coverage above is the two
-# named members rather than the class.
+# closed: any key git documents as a command or program (credential.helper
+# and its URL-scoped form, core.sshCommand, core.askPass, core.gitProxy and
+# the per-remote proxy, gpg.program and the ssh signing program under
+# commit.gpgSign, filter and merge drivers, upload-pack and receive-pack), and
+# any remote URL scheme or helper a remote's config selects, also makes git
+# run a command on the verbs this funnel uses (fetch, rebase, commit, push),
+# and none of them is pinned here. So the coverage above is the two named
+# members rather than the class. The environment-config channel exists in
+# git 2.31 and later; an older git ignores it silently and this guard
+# degrades to the strip alone, with nothing here to say so.
+#
+# The hooksPath pin cannot tell a repo-local hooksPath from a global one, so
+# it also keeps an operator's global hooks (a pre-commit secret scanner, say)
+# from running on the store's own commit and push. That is deliberate: the
+# store is the repository this guard distrusts, its ownership check accepts a
+# marker file a clone can carry, and a hook allowed on the write verbs would
+# be the planted route reopened behind that check.
 #
 # The variables are snapshotted and restored in a finally block, so the
 # session that dot-sources this file keeps its own environment whether git

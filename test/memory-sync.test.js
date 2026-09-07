@@ -1959,21 +1959,24 @@ test('a store that syncs nowhere is reported, however clean its allowlist', { sk
 // decide what the check reports.
 //
 // The pin runs through HOME rather than through GIT_CONFIG_GLOBAL, because
-// every git call the doctor makes goes through Invoke-MemorySyncGit, which
-// removes every GIT_* name from the environment before it runs git. A
+// every git call the doctor's memory-sync section makes goes through
+// Invoke-MemorySyncGit, which removes every GIT_* name from the environment
+// before it runs git. A
 // GIT_CONFIG_GLOBAL handed in here would be gone by then, and the case would
 // read the machine's real global config while looking isolated. HOME survives
 // that strip, and Git for Windows reads it ahead of both HOMEDRIVE/HOMEPATH
 // and USERPROFILE, so pointing it at the fake home (which carries no
 // .gitconfig) is an empty global file. The other two names need no redirect,
-// since git never consults them while HOME is set.
+// since git never consults them while HOME is set. XDG_CONFIG_HOME is the
+// other global-scope source git reads, and it is not GIT_-prefixed, so it
+// survives the strip and is redirected under the same home.
 //
 // The system file is not pinned out and cannot be through this funnel, which
 // strips GIT_CONFIG_SYSTEM and GIT_CONFIG_NOSYSTEM with the rest: a
 // push.default written into the machine's system gitconfig would still reach
 // these cases.
 function isolatedGitConfig(fake) {
-    return { HOME: fake.home, USERPROFILE: fake.home };
+    return { HOME: fake.home, USERPROFILE: fake.home, XDG_CONFIG_HOME: path.join(fake.home, 'xdg') };
 }
 
 // A store tracking origin under a branch name that no longer matches its own.

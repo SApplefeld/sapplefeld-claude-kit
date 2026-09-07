@@ -519,10 +519,10 @@ function tierOf(memq, dir) {
 // as a placeholder otherwise: the directory comes out of the payload's own
 // path, and a deny's stderr reaches the model as the harness's reason for
 // blocking the call.
-function sharedTierFix(memq, tier, dir) {
+function sharedTierFix(memq, compact, tier, dir) {
     if (tier === 'operator') return 'memq add-operator <name> "<description>"';
     const segment = path.basename(dir);
-    const named = memq.isTypeName(segment) ? quoted(memq, segment) : '<type>';
+    const named = memq.isTypeName(segment) ? quoted(memq, compact, segment) : '<type>';
     return 'memq add-type ' + named + ' <name> "<description>"';
 }
 
@@ -530,28 +530,87 @@ function sharedTierFix(memq, tier, dir) {
 // that verb takes a type as --type=<type> where add-type takes it as its first
 // positional, so the create form's stem cannot carry the trigger form. The
 // unusable segment reads as the same placeholder either way.
-function sharedTierTriggerFlag(memq, tier, dir) {
+function sharedTierTriggerFlag(memq, compact, tier, dir) {
     if (tier === 'operator') return '--operator';
     const segment = path.basename(dir);
-    return '--type=' + (memq.isTypeName(segment) ? quoted(memq, segment) : '<type>');
+    return '--type=' + (memq.isTypeName(segment) ? quoted(memq, compact, segment) : '<type>');
+}
+
+// What a rejected value reads as when the library that elides it is not there.
+// The deny is the thing that has to survive a damaged cache: this guard is one
+// of the enforcement points the hook canary probes, and a renderer that will
+// not load must cost the VALUE rather than the verdict, because a throw here
+// reaches the catch around main() and that catch allows the write. Printing the
+// value unelided is the other direction and the expensive one, since the whole
+// point of the elision is that a deny reason is a channel a model reads.
+const VALUE_WITHHELD = '[value withheld: the kit library that elides the account name could '
+    + 'not be loaded]';
+
+// Whether the channel's renderer is there to be called at all. A cache can
+// supply a kit-compact-lib.js that loads and carries none of these exports, so
+// presence is asked of the function rather than of the module.
+function rendererAvailable(compact) {
+    return compact !== null && typeof compact === 'object' && typeof compact.scrub === 'function';
+}
+
+// The home directory taken out of text bound for a deny reason, which is a
+// channel a model reads, or null where the renderer refused to answer.
+//
+// kit-compact-lib owns that elision, and which pass it takes depends on whether
+// a strip has already deleted characters out of the text: where one has, a home
+// spelling can arrive glued to the text beside it and the name boundaries that
+// keep a neighbouring directory its own name refuse the site, so the relaxed
+// pass drops them. A cached library one version behind carries scrub without
+// scrubAfterStrip, and scrub is that same elision with the boundaries kept, so
+// it stands in.
+//
+// A cache can supply exports that are there and throw when called, and a throw
+// out of one reaches the catch around main(), which ALLOWS the write: presence
+// alone is not the answer, so the call is made behind a catch of its own and a
+// renderer that will not answer costs the VALUE. That is the same ruling as the
+// missing export's, taken one step later, and null is how each caller reads it.
+function elideForChannel(compact, text, stripped) {
+    const s = String(text);
+    try {
+        return stripped && typeof compact.scrubAfterStrip === 'function'
+            ? compact.scrubAfterStrip(s, true)
+            : compact.scrub(s);
+    } catch {
+        return null;
+    }
 }
 
 // Store text on its way onto a line, reduced to what a line can carry with
-// every reduction named: memq.sanitize keeps printable ASCII and drops the
-// double quote, so the characters it removed are marked when any were, and a
-// value past the cap is marked as cut, because text shown as if it were whole
-// is how a reader comes to act on a name the record does not carry. The note
-// vocabulary is the one memq's own anchorRefusalText uses, so one wording
-// marks a reduction wherever a line carries one.
-function quoted(memq, value) {
-    const s = String(value);
-    const cut = s.length > QUOTE_CAP;
-    const head = cut ? s.slice(0, QUOTE_CAP) : s;
-    const kept = memq.sanitize(head, QUOTE_CAP);
+// every reduction named: the home directory is elided, memq.sanitize keeps
+// printable ASCII and drops the double quote, so the characters it removed are
+// marked when any were, and a value past the cap is marked as cut, because text
+// shown as if it were whole is how a reader comes to act on a name the record
+// does not carry. The note vocabulary is the one memq's own anchorRefusalText
+// uses, so one wording marks a reduction wherever a line carries one.
+//
+// The four steps are the shared renderer's own order and hold it for its
+// reasons. The values that reach here FAILED the store's grammars, so they are
+// free text and a hand- or model-written record can put an absolute
+// home-anchored path in one. The elision runs first, over the text as given;
+// the strip runs next, so the cut is decided on what is emitted; the elision
+// runs again where the strip deleted anything, both because a deletion inside a
+// spelling reassembles it for this pass and because a cut taken before the
+// elision can halve a spelling into a fragment no whole-spelling pattern
+// reaches; and the cap runs last.
+function quoted(memq, compact, value) {
+    if (!rendererAvailable(compact)) return VALUE_WITHHELD;
+    const elided = elideForChannel(compact, value, false);
+    if (elided === null) return VALUE_WITHHELD;
+    const kept = memq.sanitize(elided, Infinity);
+    const removed = kept.length !== elided.length;
+    const rendered = elideForChannel(compact, kept, removed);
+    if (rendered === null) return VALUE_WITHHELD;
+    const cut = rendered.length > QUOTE_CAP;
+    const head = cut ? rendered.slice(0, QUOTE_CAP) : rendered;
     const notes = [];
-    if (kept !== head) notes.push('characters removed for display');
+    if (removed) notes.push('characters removed for display');
     if (cut) notes.push('shown to ' + QUOTE_CAP + ' characters');
-    return notes.length === 0 ? kept : kept + ' [' + notes.join('; ') + ']';
+    return notes.length === 0 ? head : head + ' [' + notes.join('; ') + ']';
 }
 
 // The longest text a refused anchors: or triggers: entry can carry once
@@ -574,8 +633,11 @@ function shownCap(memq) {
     const triggerCap = memq.TRIGGER_ENTRY_CAP;
     // Each probe opens with one character of the invisible class (BEL), so
     // every measured answer carries the reduction's removed-characters note.
+    // memq takes its cut AFTER that strip, over the text it will print, so a
+    // probe meant to be cut is written one past the cap in the characters that
+    // survive the strip rather than in the characters it is handed.
     const probes = [
-        '\u0007' + 'a'.repeat(cap),                              // one past the entry cap: cut
+        '\u0007' + 'a'.repeat(cap + 1),                          // one past the entry cap: cut
         '\u0007' + 'a'.repeat(cap - 42) + '@' + '0'.repeat(40),  // at the cap: a path the grammar refuses
         '\u0007' + 'a'.repeat(cap - 1)                           // at the cap: not <path>@<sha> at all
     ];
@@ -619,16 +681,34 @@ function shownCap(memq) {
     return refusedTextCap;
 }
 
-// Text memq has already reduced for display, bounded past the measured cap
-// above and not reduced again. memq.sanitize keeps printable ASCII only, and
-// a refused anchor entry has been through memq's own reduction, which strips
-// the invisible class and the quote and names what it removed: running
-// sanitize over that would quietly drop the visible non-ASCII characters of a
-// path (src/Ubersicht.cs) and hand back a different filename under an
-// annotation saying nothing was removed.
-function shown(memq, text) {
+// Text memq has already reduced for display, with the home directory taken out
+// of it and bounded past the measured cap above, and not reduced again.
+// memq.sanitize keeps printable ASCII only, and a refused anchor entry has been
+// through memq's own reduction, which strips the invisible class and the quote
+// and names what it removed: running sanitize over that would quietly drop the
+// visible non-ASCII characters of a path (src/Ubersicht.cs) and hand back a
+// different filename under an annotation saying nothing was removed. So the
+// strip step of the renderer's order is that upstream one rather than a second
+// pass taken here.
+//
+// The elision is the strict pass, boundaries kept, because neither thing that
+// reaches here is text a strip has altered under this guard's eye. A refused
+// entry arrives already elided: memq takes the channel's four steps over it,
+// the relaxed pass among them, before it caps and annotates it, so what is left
+// to do here is a floor over a cache whose memq is older than that order, and
+// that floor covers one shape: a home spelling standing whole, unglued and
+// uncut. An older memq cuts the entry at its own cap before any elision and
+// strips it with none, so a spelling it hands back can arrive halved by that
+// cut or glued to its neighbour by that strip, and the strict pass reaches
+// neither. A PARSED anchor path has been through no reduction at all, memq's path grammar
+// refusing the colon, the backslash and every absolute spelling, so it is the
+// text as its author wrote it and the boundaries are exactly what keeps a
+// neighbouring directory its own name on this line.
+function shown(memq, compact, text) {
+    if (!rendererAvailable(compact)) return VALUE_WITHHELD;
     const cap = shownCap(memq);
-    const s = String(text);
+    const s = elideForChannel(compact, text, false);
+    if (s === null) return VALUE_WITHHELD;
     return s.length > cap ? s.slice(0, cap) + ' [cut]' : s;
 }
 
@@ -853,16 +933,16 @@ function fenceIsLate(block) {
 // denied one, because the loop returns at the first fault: the checks past a
 // filesystem-touching one run only when that one answered a cause, which is
 // exactly the case this exists for.
-function frontmatterFault(memq, text, block, dir, file, cwd) {
+function frontmatterFault(memq, compact, text, block, dir, file, cwd) {
     const checks = [
         () => unclosedFault(memq, block),
         () => lateFenceFault(block),
         () => placementFault(memq, text),
-        () => triggersFault(memq, text),
-        () => supersedesCheck(memq, text, dir, file),
-        () => anchorsFault(memq, text, cwd),
+        () => triggersFault(memq, compact, text),
+        () => supersedesCheck(memq, compact, text, dir, file),
+        () => anchorsFault(memq, compact, text, cwd),
         () => tagsFault(memq, text, block),
-        () => dateFault(memq, text)
+        () => dateFault(memq, compact, text)
     ];
     let cause = null;
     for (const check of checks) {
@@ -946,10 +1026,10 @@ function placementFault(memq, text) {
 }
 
 // The pointer, asked only of a record that declares one.
-function supersedesCheck(memq, text, dir, file) {
+function supersedesCheck(memq, compact, text, dir, file) {
     const supersedes = memq.frontmatterValue(text, 'supersedes');
     if (typeof supersedes === 'string' && supersedes.trim() !== '') {
-        return supersedesFault(memq, supersedes, dir, file);
+        return supersedesFault(memq, compact, supersedes, dir, file);
     }
     return null;
 }
@@ -968,14 +1048,14 @@ function tagsFault(memq, text, block) {
 // The anchors line: its grammar, then the containment of what it names, then
 // whether the whole of it was read. This is the one check here that touches
 // the filesystem, and only for a record that names an anchor.
-function anchorsFault(memq, text, cwd) {
+function anchorsFault(memq, compact, text, cwd) {
     const anchors = memq.frontmatterAnchors(text);
     if (anchors === null) {
         return { cause: 'this record\'s anchors could not be read' };
     }
     if (anchors.bad.length) {
         return {
-            fault: 'Its anchors: carries an entry outside the grammar: ' + shown(memq, anchors.bad[0])
+            fault: 'Its anchors: carries an entry outside the grammar: ' + shown(memq, compact, anchors.bad[0])
                 + '. An entry is <repo-relative-path>@<40 hex>, and memq anchor <name> <path>... '
                 + 'writes the line so no hash is typed by hand.'
         };
@@ -1029,7 +1109,7 @@ function anchorsFault(memq, text, cwd) {
                 // strip visible non-ASCII and name a file the record does
                 // not carry.
                 return {
-                    fault: 'Its anchors: names ' + shown(memq, entry.path) + ', which leaves this '
+                    fault: 'Its anchors: names ' + shown(memq, compact, entry.path) + ', which leaves this '
                         + 'project. An anchor path is relative to the project root. Use memq anchor '
                         + '<name> <path>... , which refuses a path outside it.'
                 };
@@ -1054,12 +1134,12 @@ function anchorsFault(memq, text, cwd) {
 // does read, so it names itself as this store's own convention rather than as
 // something the store could not read. `pinned:` has only the house rule: memq
 // never parses that value, so no spelling of it is certain damage.
-function dateFault(memq, text) {
+function dateFault(memq, compact, text) {
     const created = memq.frontmatterValue(text, 'created');
     if (typeof created === 'string' && created.trim() !== ''
         && !Number.isFinite(Date.parse(created.trim()))) {
         return {
-            fault: 'Its created: reads ' + quoted(memq, created.trim()) + ', which memq cannot parse '
+            fault: 'Its created: reads ' + quoted(memq, compact, created.trim()) + ', which memq cannot parse '
                 + 'as a date, so the record reads as carrying no created date at all. Write it as '
                 + 'YYYY-MM-DD.'
         };
@@ -1068,7 +1148,7 @@ function dateFault(memq, text) {
         const value = memq.frontmatterValue(text, name);
         if (typeof value === 'string' && value.trim() !== '' && !isHouseDate(value.trim())) {
             return {
-                fault: 'Its ' + name + ': reads ' + quoted(memq, value.trim()) + ', which is not the '
+                fault: 'Its ' + name + ': reads ' + quoted(memq, compact, value.trim()) + ', which is not the '
                     + 'date form this store writes. Write it as YYYY-MM-DD, naming a day the '
                     + 'calendar holds.'
             };
@@ -1090,13 +1170,13 @@ function dateFault(memq, text) {
 // A record whose frontmatter could not be read is a cause rather than a
 // fault, for the reason the anchors branch above gives: silence there would
 // be the checked-and-clean answer for a line nobody looked at.
-function triggersFault(memq, text) {
+function triggersFault(memq, compact, text) {
     const triggers = memq.frontmatterTriggers(text);
     if (triggers === null) return { cause: 'this record\'s triggers could not be read' };
     if (triggers.bad.length) {
         return {
             fault: 'Its triggers: carries an entry outside the grammar: '
-                + shown(memq, triggers.bad[0]) + '. An entry is <type>:<pattern>, the type one of '
+                + shown(memq, compact, triggers.bad[0]) + '. An entry is <type>:<pattern>, the type one of '
                 + memq.TRIGGER_TYPES.join(', ') + ', and the pattern at least '
                 + memq.TRIGGER_PATTERN_MIN + ' characters, not a bare common token on the '
                 + memq.TRIGGER_FRAGMENT_TYPES.join('/') + ' types, and free of the quote, the '
@@ -1127,11 +1207,11 @@ function triggersFault(memq, text) {
 // exact-casing check is the point: a variant-case pointer passes on a
 // case-insensitive filesystem and goes inert on a case-sensitive one, so the
 // exact filename is named here, at the door where it is still one edit away.
-function supersedesFault(memq, value, dir, file) {
+function supersedesFault(memq, compact, value, dir, file) {
     const name = memq.supersedesName(value);
     if (name === null) {
         return {
-            fault: 'Its supersedes: reads ' + quoted(memq, value.trim()) + ', which memq does not '
+            fault: 'Its supersedes: reads ' + quoted(memq, compact, value.trim()) + ', which memq does not '
                 + 'read as one record name, so it points nowhere. Name a single record, without '
                 + 'the .md.'
         };
@@ -1145,7 +1225,7 @@ function supersedesFault(memq, value, dir, file) {
     const self = path.basename(file).slice(0, -3);
     if (samePath(name, self)) {
         return {
-            fault: 'Its supersedes: names the record\'s own name, ' + quoted(memq, name) + '. The '
+            fault: 'Its supersedes: names the record\'s own name, ' + quoted(memq, compact, name) + '. The '
                 + 'field rides on the successor and points at the record it replaces, which is '
                 + 'never itself.'
         };
@@ -1165,16 +1245,16 @@ function supersedesFault(memq, value, dir, file) {
         // what carries the spelling in that case.
         const stem = variant.slice(0, -3);
         const fixes = [];
-        if (stem !== name) fixes.push('name it exactly: ' + quoted(memq, stem));
+        if (stem !== name) fixes.push('name it exactly: ' + quoted(memq, compact, stem));
         if (variant.slice(-3) !== '.md') {
-            fixes.push('rename the file to ' + quoted(memq, stem + '.md'));
+            fixes.push('rename the file to ' + quoted(memq, compact, stem + '.md'));
         }
         const fix = fixes.join(', and ');
         return {
-            fault: 'Its supersedes: names ' + quoted(memq, name) + ', and this tier holds '
-                + quoted(memq, variant) + ' instead. The pointer is read in exact casing, so it '
+            fault: 'Its supersedes: names ' + quoted(memq, compact, name) + ', and this tier holds '
+                + quoted(memq, compact, variant) + ' instead. The pointer is read in exact casing, so it '
                 + 'goes inert on a case-sensitive checkout. To fix it, '
-                + (fix === '' ? 'name it exactly: ' + quoted(memq, stem) : fix) + '.'
+                + (fix === '' ? 'name it exactly: ' + quoted(memq, compact, stem) : fix) + '.'
         };
     }
     const retired = recordNames(memq, path.join(dir, memq.ARCHIVE_DIR));
@@ -1190,13 +1270,13 @@ function supersedesFault(memq, value, dir, file) {
     // survive a move to a case-sensitive checkout under.
     if (retired.some((n) => samePath(n, target))) {
         return {
-            fault: 'Its supersedes: names ' + quoted(memq, name) + ', which this tier holds only '
+            fault: 'Its supersedes: names ' + quoted(memq, compact, name) + ', which this tier holds only '
                 + 'under ' + memq.ARCHIVE_DIR + '/. A pointer names a live record: a retired one is '
                 + 'already out of the tier, so nothing is left to supersede.'
         };
     }
     return {
-        fault: 'Its supersedes: names ' + quoted(memq, name) + ', and this tier holds no such '
+        fault: 'Its supersedes: names ' + quoted(memq, compact, name) + ', and this tier holds no such '
             + 'record. A pointer that names nothing is inert: name a live record of this tier, or '
             + 'drop the field.'
     };
@@ -1275,6 +1355,34 @@ function main() {
     // Every screen below is memq's own judgment, so none of it can move above
     // this line, memq.namesNetworkShare included.
     const memq = require(MEMQ);
+    // The channel's renderer, bound beside memq: every deny reason below
+    // carries store text a model reads, and the elision that takes the OS
+    // account name out of it belongs to that channel. Unlike memq above it is
+    // bound behind a catch of its own rather than through the one around
+    // main(), because that catch ALLOWS the write: a renderer this guard could
+    // not use would otherwise stop it denying at all, which is the one failure a
+    // guard must not have. A null here withholds the value and leaves every
+    // verdict standing, and so does an export that is missing or throws.
+    //
+    // That holds on the values memq renders too, not only the ones rendered
+    // here. A refused anchors: or triggers: entry is reduced for display inside
+    // memq's own parse, which this guard calls through frontmatterAnchors and
+    // frontmatterTriggers, so a throw there would arrive ahead of every wrapper
+    // below and land in the catch around main(). memq's refusedEntryText gates
+    // and catches the same two calls for the same reason, and hands back a
+    // withheld placeholder among the entries it refused, so the deny that names
+    // one still runs.
+    //
+    // What this catch does NOT cover is a library that will not load at all:
+    // memq requires the same file at its own module scope and rethrows the
+    // failure when it is loaded as a module, so that state has already taken the
+    // require above, with no target placed in a tier yet and so nothing for the
+    // catch around main() to report. That is where an unloadable memq lands too,
+    // and it is the same allow. The states this leg answers for are a renderer
+    // that loads and lacks an export the guard calls, or supplies one that
+    // throws.
+    let compact = null;
+    try { compact = require('./kit-compact-lib.js'); } catch { compact = null; }
 
     // tierDirFor, tierNameFor and namesNetworkShare are newer than
     // isMemoryFilename, so a plugin cache carrying an older memq.js can
@@ -1361,8 +1469,8 @@ function main() {
         // same place: its no-trigger note names the state rather than the verb
         // under these signals. The merge is no answer either, being that same
         // withheld verb.
-        const fix = sharedTierFix(memq, tier, site.dir);
-        const triggerFlag = sharedTierTriggerFlag(memq, tier, site.dir);
+        const fix = sharedTierFix(memq, compact, tier, site.dir);
+        const triggerFlag = sharedTierTriggerFlag(memq, compact, tier, site.dir);
         const triggerRoute = memq.storeSignalsPresent()
             ? 'there is no route from this process: it carries the engine store signals, and the '
                 + 'standing grant an unattended worker runs under withholds the `triggers` verb '
@@ -1441,7 +1549,7 @@ function main() {
         return;                                 // the block is untouched: allow
     }
 
-    const answer = frontmatterFault(memq, result.text, block, site.dir, site.file, cwd);
+    const answer = frontmatterFault(memq, compact, result.text, block, site.dir, site.file, cwd);
     if (answer === null) return;                // checked, and nothing to refuse: allow
     if (answer.cause !== undefined) {
         notChecked(answer.cause);

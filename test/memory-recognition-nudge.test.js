@@ -313,6 +313,44 @@ test('a cmd: trigger fires at PreToolUse on the command it names, and not on a s
     } finally { rmStore(store); }
 });
 
+// The fixture account name, chosen the way test/kit-output-channel.test.js
+// chooses its own: a string that appears in no temp directory's own path on
+// any box this suite runs on, so a case asserting the name is absent reads the
+// hook's rendering rather than the machine's.
+const ACCOUNT_NAME = 'zephyrina';
+
+test('store text carrying a home path reaches the context with the account name elided', () => {
+    // A trigger pattern is store text: frontmatter is hand- and model-written,
+    // and the grammar admits a forward-slashed absolute path, so a record can
+    // name a command under the operator's home directory. The nudge quotes
+    // that pattern into a context a model reads, which is the channel the
+    // elision belongs to.
+    const store = makeStore();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'recognition-account-'));
+    const home = path.join(parent, ACCOUNT_NAME);
+    fs.mkdirSync(home, { recursive: true });
+    try {
+        // Forward-slashed because the trigger grammar bars the backslash; the
+        // elision matches either separator, as a path can arrive in either.
+        const command = 'node ' + path.join(home, 'tool.js').split(path.sep).join('/');
+        writeRecord(store, 'home-anchored-tool.md', { triggers: 'cmd:' + command });
+        const fired = runHook(store, prePayload(store, {
+            tool_input: { command: command + ' --once' }
+        }), { HOME: home, USERPROFILE: home });
+        const text = assertNudge(fired, 'PreToolUse', 'home-anchored fire');
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(text),
+            'the OS account name must not reach a channel a model reads: ' + text);
+        assert.ok(text.includes('~'),
+            'and the home directory is elided to the operator\'s own shorthand rather than the '
+            + 'pattern being dropped: ' + text);
+        assert.ok(text.includes('home-anchored-tool.md'),
+            'while the record the pointer names is still named: ' + text);
+    } finally {
+        rmStore(store);
+        try { fs.rmSync(parent, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+});
+
 test('a cmd: trigger matches case-insensitively', () => {
     const store = makeStore();
     try {
@@ -3424,4 +3462,70 @@ test('the nudge log names the tier, and the stamp-rate report counts project-tie
         assert.strictEqual(report.unnudged.total, 1,
             'the same-named project-tier record stays a control: ' + JSON.stringify(report));
     } finally { rmStore(store); }
+});
+
+// Strip one export off a library inside the spawned hook, leaving the module
+// itself loadable, which is the state an installed cache one version behind
+// puts the hook in and one a refused require cannot stand in for. The fired
+// marker is written from inside the branch that deletes the key and a case
+// asserts it: a stripped run in which the shim never engaged is byte-identical
+// to an unstripped one, so without the marker the pin would pass vacuously.
+// The preload path is forward-slashed because Node parses NODE_OPTIONS with
+// backslash as an escape character.
+function skewFiredMarker(dir, name) {
+    return path.join(dir, 'strip-export-' + name + '.fired');
+}
+
+function exportStrippingPreload(dir, moduleName, name) {
+    const shim = path.join(dir, 'strip-export-' + name + '.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        "const fs = require('fs');",
+        "const Module = require('module');",
+        'const realLoad = Module._load;',
+        'const marker = ' + JSON.stringify(skewFiredMarker(dir, name)) + ';',
+        'Module._load = function (request) {',
+        '    const loaded = realLoad.apply(Module, arguments);',
+        '    if (String(request).endsWith(' + JSON.stringify(moduleName) + ') && loaded && '
+            + JSON.stringify(name) + ' in loaded) {',
+        '        delete loaded[' + JSON.stringify(name) + '];',
+        "        fs.writeFileSync(marker, 'fired\\n', 'utf8');",
+        '    }',
+        '    return loaded;',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+test('a renderer one version behind still elides the pattern it quotes', () => {
+    // The state an installed cache one version behind puts this hook in: a
+    // kit-compact-lib.js carrying scrub without scrubAfterStrip. The call is
+    // gated on the export's presence rather than made and caught, because a
+    // throw here costs this hook its whole answer; the fall-through is scrub,
+    // the same elision with its boundaries kept.
+    const store = makeStore();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'recognition-account-'));
+    const home = path.join(parent, ACCOUNT_NAME);
+    fs.mkdirSync(home, { recursive: true });
+    try {
+        const command = 'node ' + path.join(home, 'tool.js').split(path.sep).join('/');
+        writeRecord(store, 'home-anchored-tool.md', { triggers: 'cmd:' + command });
+        const fired = runHook(store, prePayload(store, {
+            tool_input: { command: command + ' --once' }
+        }), {
+            HOME: home,
+            USERPROFILE: home,
+            NODE_OPTIONS: exportStrippingPreload(store.root, 'kit-compact-lib.js', 'scrubAfterStrip')
+        });
+        const text = assertNudge(fired, 'PreToolUse', 'home-anchored fire under a skewed renderer');
+        assert.ok(fs.existsSync(skewFiredMarker(store.root, 'scrubAfterStrip')),
+            'the shim engaged: the export was actually stripped off the loaded renderer');
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(text),
+            'a renderer one version behind still takes the account name off the text: ' + text);
+        assert.ok(text.includes('~'),
+            'and names the home directory in its elided form: ' + text);
+    } finally {
+        rmStore(store);
+        try { fs.rmSync(parent, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
 });

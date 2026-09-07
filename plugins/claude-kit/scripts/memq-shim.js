@@ -54,7 +54,16 @@
 // untouched (the environment is inherited whole); memq reads the memory pair
 // and ignores the plugins pair.
 //
-// Node core modules only, CommonJS, zero dependencies, UTF-8 throughout.
+// Node core modules only, CommonJS, zero dependencies, UTF-8 throughout. That
+// last constraint is why the two failure notes below name no path. Both values
+// they would otherwise carry are home-anchored (the plugins directory sits
+// under ~/.claude, and the payload inside it), and this shim's output is read
+// by a model, so taking the OS account name out of them is the shared
+// renderer's job. The renderer lives in the kit payload, which is exactly what
+// this file has failed to find or to run whenever either note fires, and the
+// installed copy of this file sits in ~/.claude/bin/ outside every payload, so
+// there is nothing beside it to load either. The paths are withheld and the
+// remedy named in their place.
 
 'use strict';
 
@@ -184,8 +193,9 @@ function resolveMemq() {
 function main() {
     const memqPath = resolveMemq();
     if (memqPath === null) {
-        process.stderr.write('memq: no installed ' + PLUGIN_NAME + ' payload found under '
-            + pluginsRoot() + '; install the plugin, or re-run the kit doctor with -Fix\n');
+        process.stderr.write('memq: no installed ' + PLUGIN_NAME + ' payload found in the plugins '
+            + 'directory this shim searched, whose path is withheld here; install the plugin, or '
+            + 're-run the kit doctor with -Fix\n');
         process.exitCode = 1;
         return;
     }
@@ -195,8 +205,15 @@ function main() {
     const child = spawnSync(process.execPath, [memqPath].concat(process.argv.slice(2)),
         { stdio: 'inherit' });
     if (child.error) {
-        process.stderr.write('memq: could not run ' + memqPath + ': '
-            + (child.error.message || String(child.error)) + '\n');
+        // The error's CODE rides, since a Node error code is an upper-case
+        // identifier (ENOENT, EACCES) that names the failure's kind and can
+        // carry no path; anything else in that field is dropped, as is the
+        // message, which names the file the spawn was refused on.
+        const raw = child.error.code;
+        const code = typeof raw === 'string' && /^[A-Z0-9_]{1,40}$/.test(raw) ? ' (' + raw + ')' : '';
+        process.stderr.write('memq: could not run the installed ' + PLUGIN_NAME + ' payload'
+            + code + '; its path and the error text are withheld here. Re-run the kit doctor '
+            + 'with -Fix\n');
         process.exitCode = 1;
         return;
     }

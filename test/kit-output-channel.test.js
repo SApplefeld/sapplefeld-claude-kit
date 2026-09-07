@@ -272,6 +272,26 @@ test('renderer: a home spelling introduced by a separator is elided rather than 
         + out.floating);
 });
 
+test('renderer: separators doubled inside a home spelling elide with it', () => {
+    // The test above admits a separator run in FRONT of the spelling. This is
+    // the same reading inside it: a path can reach this channel with its
+    // separators doubled by a join that met a trailing separator or by a
+    // spelling copied out of a quoted string, and two separators name exactly
+    // the directory one names, so each separator in the literal matches a run.
+    // Printing the OS account name because a separator was written twice is the
+    // expensive direction; eliding a doubled spelling of some other path is the
+    // cheap one.
+    const { home } = stageHome(ACCOUNT);
+    const doubled = home.split(path.sep).join(path.sep + path.sep);
+    const out = render(home, [
+        ['doubled', 'scrub', 'reading ' + doubled + path.sep + 'repo', null]
+    ]);
+    assert.ok(!out.doubled.includes(ACCOUNT),
+        'a doubled separator must not carry the account name onto the channel: ' + out.doubled);
+    assert.strictEqual(out.doubled, 'reading ~' + path.sep + 'repo',
+        'the doubled spelling elides to the shorthand the single one elides to');
+});
+
 // Every function name the source declares at the top level, extracted
 // STRUCTURALLY rather than from a list of the names this file cares about: the
 // pattern is handed the shape of a declaration and nothing else, so the control
@@ -287,7 +307,8 @@ function declaredFunctions(source) {
 }
 
 // The renderer's parts, by the names they are declared under.
-const RENDERER_PARTS = ['printableAscii', 'sanitizeForOutput', 'displayPath', 'homeElisions', 'scrub'];
+const RENDERER_PARTS = ['printableAscii', 'sanitizeForOutput', 'displayPath', 'homeElisions',
+    'scrub', 'scrubAfterStrip'];
 
 // Every JavaScript source the plugin ships under its hooks and scripts
 // directories, subdirectories included, which is the class a second copy of
@@ -347,7 +368,8 @@ test('renderer: it is defined in the shared library and in no other plugin sourc
         + 'rather than carrying a second copy');
 
     const exported = require(LIB);
-    for (const name of ['sanitizeForOutput', 'displayPath', 'scrub', 'homeElisionsKnown']) {
+    for (const name of ['sanitizeForOutput', 'displayPath', 'scrub', 'scrubAfterStrip',
+        'homeElisionsKnown']) {
         assert.strictEqual(typeof exported[name], 'function',
             'and the library exports ' + name + ', which is how another channel reaches the '
             + 'renderer instead of spelling the elision again');
@@ -373,4 +395,205 @@ test('renderer: it is defined in the shared library and in no other plugin sourc
         'function usage() {\n    const scrub = (text) => text;');
     assert.ok(declaredFunctions(arrowVariant).includes('scrub'),
         'the detector speaks on an indented arrow binding too');
+});
+
+// --- The CLIs that write into a model-read channel ------------------------
+
+const GOAL_CLI = path.join(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-goal.js');
+const STAMP_CLI = path.join(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-registry-stamp.js');
+
+// Refuse the require of a kit library outright, which is what a damaged or
+// partially written plugin cache does to these CLIs. The shim runs before the
+// CLI is loaded, so the refusal meets the CLI's own require rather than a later
+// call. Forward-slashed for NODE_OPTIONS, which parses a backslash as an escape.
+function libraryRefusingPreload(dir, moduleFile) {
+    const shim = path.join(dir, 'refuse-require-' + moduleFile);
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        "const Module = require('module');",
+        'const realLoad = Module._load;',
+        'Module._load = function (request) {',
+        "    if (String(request).endsWith(" + JSON.stringify(moduleFile) + ')) {',
+        "        const err = new Error('the fixture refuses this require');",
+        "        err.code = 'ERR_FIXTURE_REFUSED';",
+        '        throw err;',
+        '    }',
+        '    return realLoad.apply(Module, arguments);',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+function runRefused(cli, args, lib, dir) {
+    return spawnSync(process.execPath, [cli].concat(args), {
+        encoding: 'utf8',
+        env: { ...process.env, NODE_OPTIONS: libraryRefusingPreload(dir, lib) }
+    });
+}
+
+// What every one of these legs holds, so a third CLI joining them asserts the
+// same shape rather than a fresh spelling of it: one sentence the CLI composed,
+// the error's code, and none of the runtime's own trace. The code is admitted
+// under an anchored upper-case pattern, so it can carry no path; the message is
+// not, since the renderer that would elide it is in the library that refused.
+function assertWithheldLeg(res, prefix, lib) {
+    assert.notStrictEqual(res.status, 0, lib + ': the run fails: ' + res.stderr);
+    assert.ok(res.stderr.startsWith(prefix),
+        lib + ': the failure is one sentence this CLI composed: ' + res.stderr);
+    assert.ok(res.stderr.includes('withheld'),
+        lib + ': and it says the text was withheld: ' + res.stderr);
+    assert.ok(!res.stderr.includes('the fixture refuses this require'),
+        lib + ': the error text itself is withheld, since no renderer here survived the load '
+        + 'that failed: ' + res.stderr);
+    assert.ok(res.stderr.includes('(ERR_FIXTURE_REFUSED)'),
+        lib + ': while the error code, an identifier that can carry no path, still names the '
+        + 'kind of failure: ' + res.stderr);
+    assert.ok(!res.stderr.includes('Require stack'),
+        lib + ': the require stack the runtime prints must not reach the channel: ' + res.stderr);
+    assert.ok(!/[\\/][^\s]*\.js/.test(res.stderr),
+        lib + ': nor any module path, which is what a `.js` behind a separator is, rather than '
+        + 'the bare filename a sentence may name: ' + res.stderr);
+    assert.ok(!/\n\s+at /.test(res.stderr),
+        lib + ': nor a stack frame: ' + res.stderr);
+}
+
+test('cli: kit-goal reports a kit library it cannot load as one line, not as a require stack', () => {
+    // A require at module scope throws before any guard the file installs, and
+    // Node then prints its own trace, whose `Require stack:` lines carry the
+    // absolute module path of every file on it, home-anchored on an installed
+    // plugin. This CLI's output is echoed into a session's context by the
+    // /kit-goal skill invocation, so the requires run inside its guarded region
+    // instead, which is the shape the checkpoint CLI already takes.
+    const dir = makeDir('kit-output-channel-goal-refuse-');
+    for (const lib of ['kit-compact-lib.js', 'kit-goal-lib.js']) {
+        assertWithheldLeg(runRefused(GOAL_CLI, ['status'], lib, dir), 'kit-goal: ', lib);
+    }
+});
+
+test('cli: kit-registry-stamp does the same, while a REQUIRER still gets the throw', () => {
+    // The same leg, on a file that is a CLI and a module at once. Its exported
+    // constants are derived from the libraries' at module scope, so the guard
+    // splits on how the file was loaded: the CLI leg withholds and exits, and a
+    // requirer gets the original error, since a module that loaded with those
+    // bindings unbound would answer undefined where it now fails loudly.
+    const dir = makeDir('kit-output-channel-stamp-refuse-');
+    for (const lib of ['kit-compact-lib.js', 'kit-read-lib.js']) {
+        assertWithheldLeg(runRefused(STAMP_CLI, ['audit'], lib, dir), 'kit-registry-stamp: ', lib);
+    }
+
+    // The requirer's direction, which is what says the guard split rather than
+    // swallowed: a module required under the same refusal throws it on.
+    const requirer = path.join(dir, 'require-the-stamp.js');
+    fs.writeFileSync(requirer,
+        "'use strict';\n"
+        + 'try {\n'
+        + '    require(' + JSON.stringify(STAMP_CLI.replace(/\\/g, '/')) + ');\n'
+        + "    process.stdout.write('LOADED');\n"
+        + '} catch (err) {\n'
+        + "    process.stdout.write('THREW ' + (err && err.code));\n"
+        + '}\n', 'utf8');
+    const res = spawnSync(process.execPath, [requirer], {
+        encoding: 'utf8',
+        env: { ...process.env, NODE_OPTIONS: libraryRefusingPreload(dir, 'kit-compact-lib.js') }
+    });
+    assert.strictEqual(res.stdout, 'THREW ERR_FIXTURE_REFUSED',
+        'a requirer keeps the loud failure it has today, rather than a module whose exported '
+        + 'constants are silently undefined: ' + res.stdout + res.stderr);
+});
+
+test('renderer: a character the strip removes cannot glue a home spelling out of reach', () => {
+    // The strip DELETES what it removes, so a tab or a non-breaking space
+    // sitting between a word and a home spelling leaves the two glued, and the
+    // elision then refuses the site: its match requires the spelling to begin a
+    // path component rather than to run on from an alphanumeric, which is the
+    // boundary rule that keeps a neighbouring directory its own name. Deleting
+    // the separator is therefore enough to carry the account name past the
+    // elision, so the elision runs before the strip as well as after it.
+    const { home } = stageHome(ACCOUNT);
+    const out = render(home, [
+        ['tabbed', 'sanitizeForOutput', 'see\t' + path.join(home, 'x'), 400],
+        ['nbsp', 'sanitizeForOutput', 'see\u00a0' + home, 400],
+        ['spaced', 'sanitizeForOutput', 'see ' + path.join(home, 'x'), 400]
+    ]);
+
+    assert.strictEqual(out['tabbed'], 'see~' + path.sep + 'x [characters removed]',
+        'the home directory is elided where the stripped tab was, and the strip is still marked');
+    assert.strictEqual(out['nbsp'], 'see~ [characters removed]',
+        'and the same holds for any character outside printable ASCII');
+    assert.ok(!out['tabbed'].includes(ACCOUNT) && !out['nbsp'].includes(ACCOUNT),
+        'so no account name reaches the channel: ' + out['tabbed'] + ' / ' + out['nbsp']);
+    // The control the two cases are read against: a separator the strip keeps
+    // is elided by the same rule, so what the cases above pin is the strip's
+    // deletion rather than the elision working at all.
+    assert.strictEqual(out['spaced'], 'see ~' + path.sep + 'x',
+        'a separator the strip keeps carries no mark and elides the same way');
+});
+
+test('renderer: two stripped characters cannot glue a home spelling out of reach either', () => {
+    // One stripped character in front of a home spelling glues it onto the word
+    // before it; one stripped character inside the spelling hides it from the
+    // first elision pass and is deleted before the second. Together they defeat a
+    // pair of passes that both keep the leading boundary, so the pass that runs
+    // after the strip drops that boundary wherever the strip removed anything.
+    //
+    // What that costs is the control below: on text the strip left alone the
+    // boundary stands, and a home spelling running on from an alphanumeric names
+    // something else and keeps its name.
+    const { home } = stageHome(ACCOUNT);
+    const cut = Math.floor(home.length / 2);
+    const split = home.slice(0, cut) + '\u200b' + home.slice(cut);
+    const flat = flattened(home);
+    const flatSplit = flat.slice(0, cut) + '\u200b' + flat.slice(cut);
+    const out = render(home, [
+        ['lead and inside', 'sanitizeForOutput', 'x\u00a0' + split + path.sep + 'repo', 400],
+        ['inside and after', 'sanitizeForOutput', 'see ' + split + '\u200bfoo', 400],
+        ['flattened inside and after', 'sanitizeForOutput', 'see ' + flatSplit + '\u200bfoo', 400],
+        ['inside only', 'sanitizeForOutput', 'see ' + split + path.sep + 'repo', 400],
+        ['unstripped glue', 'sanitizeForOutput', 'x' + home + path.sep + 'repo', 400],
+        ['relaxed pass alone', 'scrubAfterStrip', 'x' + home + path.sep + 'repo', true]
+    ]);
+
+    assert.ok(!out['lead and inside'].includes(ACCOUNT),
+        'a stripped character on each side of the spelling still takes the account name off the '
+        + 'channel: ' + out['lead and inside']);
+    assert.strictEqual(out['lead and inside'], 'x~' + path.sep + 'repo [characters removed]',
+        'the home directory is elided where the two stripped characters were, and the strip is '
+        + 'still marked');
+    assert.strictEqual(out['inside only'], 'see ~' + path.sep + 'repo [characters removed]',
+        'and the case with nothing glued in front renders the same way it always has');
+
+    // The same pairing on the other edge. A stripped character INSIDE the
+    // spelling hides it from the first pass, and one right AFTER it leaves the
+    // next word glued to the end of the spelling once both are gone, which a
+    // trailing name boundary refuses exactly as a leading one refuses the word
+    // in front. So the pass that runs after the strip keeps neither edge.
+    assert.ok(!out['inside and after'].includes(ACCOUNT),
+        'a stripped character inside the spelling and one after it leave no account name '
+        + 'either: ' + out['inside and after']);
+    assert.strictEqual(out['inside and after'], 'see ~foo [characters removed]',
+        'the home directory is elided and the word the deletion glued onto it stands where it was');
+    // And the flattened spelling, whose own table is relaxed the same way: it
+    // is the spelling a transcript directory carries, where the account name
+    // sits inside one component rather than at a separator.
+    assert.ok(!out['flattened inside and after'].includes(ACCOUNT),
+        'the flattened spelling is relaxed on both edges too: '
+        + out['flattened inside and after']);
+    assert.strictEqual(out['flattened inside and after'],
+        'see flattened-homefoo [characters removed]',
+        'and it elides to the marker no directory on disk carries');
+
+    // The control on the other side: nothing was stripped, so the boundary is
+    // still standing and the site is refused by design. Without it the two
+    // assertions above would read the same whether the boundary had been dropped
+    // for stripped text alone or dropped altogether.
+    assert.ok(out['unstripped glue'].includes(ACCOUNT) && !out['unstripped glue'].includes('~'),
+        'a home spelling glued to an alphanumeric in text the strip never touched keeps its own '
+        + 'name: ' + out['unstripped glue']);
+    // And the relaxed pass called directly does elide that same text, so what the
+    // line above pins is the confinement to stripped text rather than a pattern
+    // that matches nothing.
+    assert.ok(!out['relaxed pass alone'].includes(ACCOUNT)
+        && out['relaxed pass alone'].includes('~'),
+        'while the pass that runs after a strip elides that same glued spelling: '
+        + out['relaxed pass alone']);
 });

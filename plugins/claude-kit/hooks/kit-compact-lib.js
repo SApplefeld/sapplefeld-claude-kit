@@ -3400,29 +3400,50 @@ const PRINT_CAP = 120;
 // together. The third alteration, the channel's home elision, shortens a value
 // too and carries no mark of its own; scrub below states why it needs none.
 //
-// Three steps in one order, and the order is what both marks rest on. The strip
-// runs first, so the cut is decided on what is actually EMITTED rather than on
-// the string before sanitizing: a value carried past the cap only by characters
-// the strip removes is not cut at all, and marking it as cut would name a
-// truncation that did not happen. The channel's home elision runs next, for
-// that same reason and for a second one that is not cosmetic. A value carried
-// past the cap only by a home prefix the channel takes out is not cut either;
-// and eliding after the cap is eliding a home spelling the cut may have taken
-// in half, which no pattern built from the whole spelling can match, so the
-// account name reaches the channel in a fragment on exactly the machines whose
-// home directory is long. The cap runs last, over the text the reader will see,
-// and the marks are appended after it so a mark is never itself cut.
+// Four steps in one order, and the order is what both marks rest on. The
+// channel's home elision runs first, over the text as given, which is where a
+// spelling standing whole in the argument is taken out under the full boundary
+// rule. The strip runs next, so the cut is decided on what is actually EMITTED
+// rather than on the string before sanitizing: a value carried past the cap only
+// by characters the strip removes is not cut at all, and marking it as cut would
+// name a truncation that did not happen. The elision runs again over the stripped
+// text, for two reasons that are not cosmetic. A value carried past the cap only
+// by a home prefix the channel takes out is not cut either, and eliding after the
+// cap is eliding a home spelling the cut may have taken in half, which no pattern
+// built from the whole spelling can match, so the account name would reach the
+// channel in a fragment on exactly the machines whose home directory is long. And
+// the strip DELETES what it removes, so a non-printable character inside a home
+// spelling breaks it for the first pass and the deletion puts it back together
+// for the second.
+//
+// That second pass runs through scrubAfterStrip, which drops the leading boundary
+// wherever the strip removed anything. The boundary is what keeps a neighbouring
+// directory its own name, and a deleted character can glue a home spelling onto
+// the word in front of it, which the boundary then refuses: two stripped
+// characters, one before a spelling and one inside it, would otherwise carry the
+// account name past both passes. Dropping the boundary on stripped text costs an
+// over-elision there, a path nowhere on disk, which is the cheap direction; text
+// the strip left alone keeps the boundary and so keeps a foreign home path such
+// as /mnt/backup/home/<name>/repo its own name.
+//
+// The cap runs last, over the text the reader will see, and the marks are
+// appended after it so a mark is never itself cut. The strip's mark is read
+// against the text the strip was handed rather than against the argument, since
+// the elision ahead of it shortens a value too and says so for itself.
 function printableAscii(s) {
     return String(s).replace(/[^\x20-\x7E]/g, '');
 }
 
 function sanitizeForOutput(s, max) {
-    const raw = String(s);
-    const stripped = printableAscii(raw);
-    const elided = scrub(stripped);
+    const given = scrub(String(s));
+    const stripped = printableAscii(given);
+    // The strip only ever deletes, so a length change is the whole of whether it
+    // removed anything, and it decides both the mark and the second pass's rule.
+    const removed = stripped.length !== given.length;
+    const elided = scrubAfterStrip(stripped, removed);
     const shown = elided.slice(0, max === undefined ? PRINT_CAP : max);
     const marks = [];
-    if (stripped.length !== raw.length) marks.push('characters removed');
+    if (removed) marks.push('characters removed');
     if (shown.length < elided.length) marks.push('cut to fit');
     return shown + (marks.length === 0 ? '' : ' [' + marks.join('; ') + ']');
 }
@@ -3527,6 +3548,21 @@ function displayPath(full) {
 // doubled-separator spelling of some other path eliding to a path nowhere on
 // disk, the cheap one, which is the direction every edge here fails in.
 //
+// Each literal spelling is compiled twice more, once with both of those edges
+// and once with neither, which is the pair scrub and scrubAfterStrip read. The
+// second table exists because the strip that runs between the two elision passes
+// deletes rather than replaces: a character taken out from beside a home
+// spelling glues it onto whatever text stood on that side, and an edge that
+// refuses an alphanumeric then refuses the site. Neither edge survives that,
+// because a deletion after a spelling glues the following word onto it exactly
+// as one before it glues the preceding word on: a spelling carrying a stripped
+// character inside it, which is what hides it from the first pass, followed by
+// one more stripped character and then a word, reassembles into a whole home
+// spelling with a name character behind it and would print the account name in
+// full. On text a strip has already altered, both edges have lost their premise,
+// so the relaxed table matches a spelling wherever it sits and accepts the
+// over-elision that comes with it.
+//
 // In the flattened spelling the separator is a dash and so is the character a
 // dash was made from, so a child and a sibling are indistinguishable there and
 // any non-alphanumeric character ends the match: where the flattened form cannot
@@ -3559,14 +3595,17 @@ function displayPath(full) {
 // paths that are nowhere on disk. A spelling that names fewer path components
 // than the home directory itself is a different directory, so it is skipped.
 //
-// The literal's separators match either slash, since a path can arrive in
-// either spelling, and win32 matches without regard to letter case, as its
-// filesystem does.
+// The literal's separators match a RUN of either slash, since a path can arrive
+// in either spelling and a doubled separator names the same directory it would
+// name single (C:\\Users\\name and /home//name are both the home directory), so
+// a spelling that doubles one is elided rather than printed with the account
+// name in it. win32 matches without regard to letter case, as its filesystem
+// does.
 function homeElisions() {
     let home = '';
     try { home = os.homedir(); } catch { home = ''; }
     home = String(home);
-    if (home === '') return { known: false, elisions: [] };
+    if (home === '') return { known: false, elisions: [], relaxed: [] };
     const root = String(path.parse(home).root).replace(/[\\/]+$/, '');
     const escape = (s) => s.replace(/[^A-Za-z0-9]/g, (ch) => '\\' + ch);
     const flags = process.platform === 'win32' ? 'gi' : 'g';
@@ -3577,7 +3616,9 @@ function homeElisions() {
     const depth = (s) => s.split(/[\\/]+/).filter((part) => part !== '').length;
     const homeDepth = depth(home.replace(/[\\/]+$/, ''));
     const elisions = [];
+    const relaxed = [];
     const seen = new Set();
+    const seenRelaxed = new Set();
     for (const spelling of [home, printableAscii(home)]) {
         const named = spelling.replace(/[\\/]+$/, '');
         if (!/[A-Za-z0-9]/.test(named) || named === root) continue;
@@ -3586,19 +3627,24 @@ function homeElisions() {
         // account's paths off the channel rather than this account's name.
         if (depth(named) < homeDepth) continue;
         const literal = Array.from(named)
-            .map((ch) => (ch === '\\' || ch === '/' ? '[\\\\/]' : escape(ch)))
+            .map((ch) => (ch === '\\' || ch === '/' ? '[\\\\/]+' : escape(ch)))
             .join('');
         const flattened = escape(named.replace(/[^A-Za-z0-9]/g, '-'));
-        for (const [source, shown] of [
-            [lead + literal + trail, '~'],
-            [flattened + '(?![A-Za-z0-9])', 'flattened-home']
+        for (const [source, unbounded, shown] of [
+            [lead + literal + trail, literal, '~'],
+            [flattened + '(?![A-Za-z0-9])', flattened, 'flattened-home']
         ]) {
-            if (seen.has(source)) continue;
-            seen.add(source);
-            elisions.push({ pattern: new RegExp(source, flags), shown });
+            if (!seen.has(source)) {
+                seen.add(source);
+                elisions.push({ pattern: new RegExp(source, flags), shown });
+            }
+            if (!seenRelaxed.has(unbounded)) {
+                seenRelaxed.add(unbounded);
+                relaxed.push({ pattern: new RegExp(unbounded, flags), shown });
+            }
         }
     }
-    return { known: true, elisions };
+    return { known: true, elisions, relaxed };
 }
 
 // Read once at module load: a process's home directory does not move under it,
@@ -3633,6 +3679,36 @@ function homeElisionsKnown() {
 function scrub(text) {
     let shown = String(text);
     for (const elision of HOME_ELISIONS.elisions) shown = shown.replace(elision.pattern, elision.shown);
+    return shown;
+}
+
+// The same elision for a SECOND pass over text a printable-ASCII strip has
+// already been through, which is the one place the name boundaries are dropped.
+//
+// A caller that strips before it prints runs the elision on both sides of the
+// strip, because the strip deletes: a non-printable character inside a home
+// spelling hides it from the first pass and is gone by the second. What the
+// second pass then meets is text whose neighbouring characters are not the ones
+// the writer put there, so a spelling can arrive glued onto the text beside it,
+// and the boundaries, which exist to keep a directory whose name merely runs on
+// from another its own name, refuse it. Both edges are in that state, not the
+// leading one alone: a deletion in front of a spelling glues the preceding word
+// on, and a deletion after it glues the following word on. Either of them,
+// paired with the stripped character inside the spelling that hid it from the
+// first pass, is enough to carry the OS account name through a guard that keeps
+// its boundaries on both passes.
+//
+// So the caller says whether the strip removed anything, and where it did this
+// matches with no boundary at either edge. The cost is an over-elision on a value
+// that carried a stripped character, a path printed under the home shorthand
+// while sitting somewhere else on disk; the cost of the other direction is the
+// account name on a channel a model reads. Text the strip left untouched takes
+// scrub above and keeps both boundaries, so a foreign home path such as
+// /mnt/backup/home/<name>/repo is still printed under its own name.
+function scrubAfterStrip(text, strippedSomething) {
+    if (!strippedSomething) return scrub(text);
+    let shown = String(text);
+    for (const elision of HOME_ELISIONS.relaxed) shown = shown.replace(elision.pattern, elision.shown);
     return shown;
 }
 
@@ -4368,7 +4444,7 @@ module.exports = {
     markerMomentHolds, markerDeclaresMoment, transcriptPosition,
     stampRegistryBanked, stampRegistryEntry, stampRegistryFields, registryEntryPath,
     coordinatorRoot, coordinatorDir, registryField,
-    sanitizeForOutput, displayPath, scrub, homeElisionsKnown,
+    sanitizeForOutput, displayPath, scrub, scrubAfterStrip, homeElisionsKnown,
     readRegistryEntryText, writeRegistryEntryAtomic,
     projectHoldsSessionTranscript, sessionTranscriptPath, usableSessionId,
     gateStatePath, gateLogPath, readGateState, readGateStateResult, recordGateDecision, GATE_REASONS,

@@ -415,21 +415,22 @@ test('a memq that will not load leaves the hook silent rather than throwing', ()
 // is written from inside the branch that deletes the key, and a case asserts
 // it: a stripped run in which the shim never engaged is byte-identical to an
 // unstripped one, so without the marker the pin would pass vacuously.
-function stripExportFiredMarker(dir) {
-    return path.join(dir, 'strip-export.fired');
+function stripExportFiredMarker(dir, name) {
+    return path.join(dir, 'strip-export-' + name + '.fired');
 }
 
-function exportStrippingPreload(dir, name) {
-    const shim = path.join(dir, 'strip-export.js');
+function exportStrippingPreload(dir, moduleName, name) {
+    const shim = path.join(dir, 'strip-export-' + name + '.js');
     fs.writeFileSync(shim, [
         "'use strict';",
         "const fs = require('fs');",
         "const Module = require('module');",
         'const realLoad = Module._load;',
-        'const marker = ' + JSON.stringify(stripExportFiredMarker(dir)) + ';',
+        'const marker = ' + JSON.stringify(stripExportFiredMarker(dir, name)) + ';',
         'Module._load = function (request) {',
         '    const loaded = realLoad.apply(Module, arguments);',
-        "    if (String(request).endsWith('memq.js') && loaded && " + JSON.stringify(name) + ' in loaded) {',
+        '    if (String(request).endsWith(' + JSON.stringify(moduleName) + ') && loaded && '
+            + JSON.stringify(name) + ' in loaded) {',
         '        delete loaded[' + JSON.stringify(name) + '];',
         "        fs.writeFileSync(marker, 'fired\\n', 'utf8');",
         '    }',
@@ -454,8 +455,8 @@ test('a memq lacking the resolution export leaves an absolute cwd on the ordinar
         // before this branch, so the stripped module here is the state's one
         // deterministic producer.)
         const context = assertBlock(runHook(store, startupPayload(store),
-            { NODE_OPTIONS: exportStrippingPreload(store.root, 'sanitizeProjectPath') }));
-        assert.ok(fs.existsSync(stripExportFiredMarker(store.root)),
+            { NODE_OPTIONS: exportStrippingPreload(store.root, 'memq.js', 'sanitizeProjectPath') }));
+        assert.ok(fs.existsSync(stripExportFiredMarker(store.root, 'sanitizeProjectPath')),
             'the shim engaged: the export was actually stripped off the loaded memq');
         assert.doesNotMatch(context, /does not resolve to a project store/,
             'a missing export is not a refused working directory');
@@ -660,6 +661,115 @@ test('the emitted index is sanitized and bounded: hostile lines cannot forge str
         rmStore(store);
     }
 });
+
+// The fixture account name, chosen the way test/kit-output-channel.test.js
+// chooses its own: a string that appears in no temp directory's own path on
+// any box this suite runs on, so a case asserting the name is absent reads the
+// hook's rendering rather than the machine's.
+const ACCOUNT_NAME = 'zephyrina';
+
+// A store whose root sits under a home directory named for that account, so
+// the memory directory this hook emits is home-anchored the way a real one is.
+function makeAccountHomeStore() {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'memsession-account-'));
+    const home = path.join(parent, ACCOUNT_NAME);
+    const root = path.join(home, '.claude');
+    fs.mkdirSync(root, { recursive: true });
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'memsession-proj-'));
+    return {
+        parent,
+        home,
+        root,
+        proj,
+        memDir: path.join(root, 'projects', proj.replace(/[^A-Za-z0-9]/g, '-'), 'memory')
+    };
+}
+
+test('an index line carrying a home path is elided, while the destination line is not', () => {
+    // The two halves of this block are read differently and so are rendered
+    // differently. An index description is prose a model reads, and store text
+    // is where a home-anchored path arrives from a hand- or model-written
+    // index, so it goes through the channel's own elision. The memory
+    // directory beneath it is a destination the Write tool is given verbatim,
+    // and a path elided to the operator's shorthand names no directory the
+    // tool can create, so that line stays absolute by adjudication.
+    const store = makeAccountHomeStore();
+    try {
+        const homed = path.join(store.home, 'notes', 'build.md');
+        // The second line stages the shape that defeats a single elision pass
+        // over stripped text: memq.sanitize DELETES what it removes, so the
+        // zero-width space inside the home spelling hides it from a pass taken
+        // before the strip and the non-breaking space in front of it leaves the
+        // spelling glued to the word before it once both are gone, which the
+        // elision's leading boundary refuses. The pass that runs after the strip
+        // therefore drops that boundary wherever the strip removed something.
+        const cut = Math.floor(store.home.length / 2);
+        const split = store.home.slice(0, cut) + '\u200b' + store.home.slice(cut);
+        writeProjectIndex(store, '# Memory Index\n\n'
+            + '- [Build](build.md) - the log lives at ' + homed + '\n'
+            + '- [Glue](glue.md) - the log lives at x\u00a0' + split + '\\notes\\glue.md\n'
+            + '- [Tail](tail.md) - the log lives at see ' + store.home + '\u200bfoo\n');
+        const res = spawnHome(store);
+        const context = JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
+        const index = blockStarting(context, 'Kit project memory:');
+
+        const description = index.split('\n').filter((l) => l.includes('[Build]'));
+        assert.strictEqual(description.length, 1, 'the index line is emitted:\n' + index);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(description[0]),
+            'the OS account name must not reach a channel a model reads: ' + description[0]);
+        assert.ok(description[0].includes('~'),
+            'and the home directory is elided to the operator\'s own shorthand rather than the '
+            + 'path being dropped: ' + description[0]);
+
+        const glued = index.split('\n').filter((l) => l.includes('[Glue]'));
+        assert.strictEqual(glued.length, 1, 'the glued index line is emitted:\n' + index);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(glued[0]),
+            'and a stripped character on each side of the spelling does not carry the account '
+            + 'name past the elision either: ' + glued[0]);
+        assert.ok(glued[0].includes('~'),
+            'that line too names the home directory in its elided form: ' + glued[0]);
+
+        // One removed character, and it sits AFTER the spelling: the reduction
+        // deletes it and leaves the next word glued to the end of the home
+        // directory's name, which a trailing name boundary refuses exactly as a
+        // leading one refuses a word glued in front. The pass that runs after
+        // the reduction therefore keeps neither edge.
+        const tail = index.split('\n').filter((l) => l.includes('[Tail]'));
+        assert.strictEqual(tail.length, 1, 'the trailing-glue index line is emitted:\n' + index);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(tail[0]),
+            'a single removed character after the spelling does not carry the account name past '
+            + 'the elision either: ' + tail[0]);
+        assert.ok(tail[0].includes('~foo'),
+            'that line names the home directory in its elided form, with the word the deletion '
+            + 'glued onto it left where it was: ' + tail[0]);
+
+        assert.ok(index.includes('\n  ' + store.memDir + '\n'),
+            'while the destination the Write tool is handed stays the absolute path, account '
+            + 'name and all:\n' + index);
+    } finally {
+        rmAccountHomeStore(store);
+    }
+});
+
+// runHook against a store whose home directory is the fixture's own, which is
+// what puts the account name in the paths under test.
+function spawnHome(store, extra) {
+    const res = runHook(store, startupPayload(store),
+        { HOME: store.home, USERPROFILE: store.home, ...(extra || {}) });
+    assert.strictEqual(res.status, 0, 'the hook always exits 0, got: ' + res.stderr);
+    assert.strictEqual(res.stderr, '', 'the hook never writes stderr');
+    return res;
+}
+
+function rmAccountHomeStore(store) {
+    for (const dir of [store.parent, store.proj]) {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; a leftover temp dir never fails the test.
+        }
+    }
+}
 
 test('a huge type index costs a bounded read and a bounded emission', () => {
     const store = makeStore();
@@ -3096,4 +3206,35 @@ test('hooks.json wires memory-session.js on startup, resume, and compact', () =>
     assert.strictEqual(entries.length, 1,
         'memory-session.js is wired from exactly one SessionStart entry');
     assert.strictEqual(entries[0].matcher, 'startup|resume|compact');
+});
+
+test('a renderer one version behind still elides the index line it renders', () => {
+    // The state an installed cache one version behind puts this hook in: a
+    // kit-compact-lib.js carrying scrub without scrubAfterStrip. The call is
+    // gated on the export's presence rather than made and caught, because a
+    // throw here reaches the hook's outer catch and costs every block already
+    // built; the fall-through is scrub, the same elision with its boundaries
+    // kept, so the account name still comes off every line the reduction left
+    // alone.
+    const store = makeAccountHomeStore();
+    try {
+        writeProjectIndex(store, '# Memory Index\n\n'
+            + '- [Build](build.md) - the log lives at '
+            + path.join(store.home, 'notes', 'build.md') + '\n');
+        const res = spawnHome(store, {
+            NODE_OPTIONS: exportStrippingPreload(store.root, 'kit-compact-lib.js', 'scrubAfterStrip')
+        });
+        assert.ok(fs.existsSync(stripExportFiredMarker(store.root, 'scrubAfterStrip')),
+            'the shim engaged: the export was actually stripped off the loaded renderer');
+        const context = JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
+        const line = blockStarting(context, 'Kit project memory:').split('\n')
+            .filter((l) => l.includes('[Build]'));
+        assert.strictEqual(line.length, 1, 'the index line is emitted at all:\n' + context);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(line[0]),
+            'a renderer one version behind still takes the account name off the line: ' + line[0]);
+        assert.ok(line[0].includes('~'),
+            'and names the home directory in its elided form: ' + line[0]);
+    } finally {
+        rmAccountHomeStore(store);
+    }
 });

@@ -922,7 +922,37 @@ function embedderNudge() {
 // forge its structure; the count cap and the per-line cap bound the whole
 // emission no matter how large the index file grows, with the remainder
 // counted the way the hook canary caps its own listing.
-function indexLines(resolvePath, maxLines, memq) {
+//
+// An index is hand- and model-written, so a description in it can carry a
+// home-anchored path, and this context is read by a model: the channel's own
+// elision runs over each line after the reduction and before the per-line cap.
+// The cap comes last, on the text that will be emitted, because a cut taken
+// ahead of the elision can halve a home spelling and leave a fragment of the OS
+// account name that no whole-spelling pattern reaches afterwards. The
+// destination line the caller emits beneath these is the deliberate exception
+// and stays absolute; emittable() states why.
+//
+// The elision runs through scrubAfterStrip because memq.sanitize DELETES what
+// it removes: a character taken out from inside a home spelling puts the
+// spelling back together here, and one taken out from in front of it leaves the
+// spelling glued to the word before it, which the elision's leading boundary
+// refuses by design. So the boundary is dropped on any line the reduction
+// shortened, at the cost of an over-elision confined to those lines.
+//
+// That export is checked for presence before it is called, the way
+// DRIFT_MEMQ_SYMBOLS checks memq's own symbols before driftNudge calls any of
+// them: an installed cache carrying a kit-compact-lib.js older than
+// scrubAfterStrip would throw here, and the throw reaches the hook's outer
+// catch, which discards every block already built (the decay nudge, the
+// destination line, the sync trigger) rather than costing this one line. The
+// fall-through is scrub, which is the same elision with its boundaries kept,
+// so a skewed cache still takes the account name off every line a reduction
+// left alone. The one-version skew is the whole of what the check closes: a
+// cache carrying neither export throws at the fall-through itself, reaches that
+// same outer catch and costs the block, which is the deliberate bound, a
+// renderer with no elision in it leaving nothing for these lines to go through
+// and an unelided index line being the one thing this must not print.
+function indexLines(resolvePath, maxLines, memq, compact) {
     // A fixed-size prefix read, never the whole file: an index cannot make a
     // session start pay for its size, however large it grows.
     let raw;
@@ -959,7 +989,13 @@ function indexLines(resolvePath, maxLines, memq) {
     if (clipped) rawLines.pop();
     const all = rawLines.map((l) => l.trim()).filter((l) => l !== '');
     if (all.length === 0) return { lines: null, unreadable: false };
-    const shown = all.slice(0, maxLines).map((l) => '  ' + memq.sanitize(l, INDEX_LINE_CAP));
+    const shown = all.slice(0, maxLines).map((l) => {
+        const reduced = memq.sanitize(l, Infinity);
+        const elided = typeof compact.scrubAfterStrip === 'function'
+            ? compact.scrubAfterStrip(reduced, reduced.length !== l.length)
+            : compact.scrub(reduced);
+        return '  ' + elided.slice(0, INDEX_LINE_CAP);
+    });
     if (all.length > maxLines || clipped) {
         // A clipped index has lines beyond the prefix, so the remainder is a
         // floor, marked with '+' rather than stated as exact.
@@ -976,10 +1012,10 @@ function indexLines(resolvePath, maxLines, memq) {
 // nothing is ever joined onto a path from raw file content. Every no-lines
 // condition is the same silence here, unlike the project block: with no
 // destination half, a block that cannot show its lines has nothing to say.
-function typeIndexBlock(cwd, memq) {
+function typeIndexBlock(cwd, memq, compact) {
     const type = memq.projectType(cwd);
     if (type === null) return null;
-    const shown = indexLines(() => memq.typeIndexPath(type), INDEX_MAX_LINES, memq).lines;
+    const shown = indexLines(() => memq.typeIndexPath(type), INDEX_MAX_LINES, memq, compact).lines;
     if (shown === null) return null;
     return 'Kit type-tier memory: this project declares Project-Type \'' + type + '\', so the '
         + 'shared index for that type follows (memory-types/' + type + '/MEMORY.md). Read a '
@@ -1206,11 +1242,11 @@ function pinnedDestinationBlock(cwd, memq) {
 // still ride. The write convention goes with the destination rather than with
 // the block, since a session that cannot be told the directory cannot follow
 // an instruction to write a file in it.
-function projectMemoryBlock(cwd, memq, pinned) {
+function projectMemoryBlock(cwd, memq, pinned, compact) {
     if (pinned !== null && pinned.standDown) return null;
     const memDir = memq.projectMemoryDir(cwd);
     const index = indexLines(() => path.join(memDir, memq.INDEX_FILE),
-        PROJECT_INDEX_MAX_LINES, memq);
+        PROJECT_INDEX_MAX_LINES, memq, compact);
     if (pinned !== null) {
         // An index that is merely absent or empty leaves this row nothing to
         // say, since the index lines are the whole of it and the pin block has
@@ -1301,8 +1337,13 @@ function main() {
 
     // Required inside main() so a damaged plugin cache that cannot supply the
     // store's rules leaves the hook inert (the outer catch owns the failure)
-    // instead of ending the process nonzero.
+    // instead of ending the process nonzero. The channel's renderer is bound
+    // beside it, on the same reasoning and threaded the same way: the blocks
+    // below emit store text into a context a model reads, and the elision that
+    // takes the OS account name out of it belongs to that channel rather than
+    // to whichever block first needed it.
     const memq = require('../scripts/memq.js');
+    const compact = require('./kit-compact-lib.js');
 
     const blocks = [];
     // A store pin the kit cannot honor is resolved first and as its own state,
@@ -1396,7 +1437,7 @@ function main() {
     } else {
         const nudge = decayNudge(cwd, memq);
         if (nudge !== null) blocks.push(nudge);
-        const typeIndex = typeIndexBlock(cwd, memq);
+        const typeIndex = typeIndexBlock(cwd, memq, compact);
         if (typeIndex !== null) blocks.push(typeIndex);
         // One destination, never two: a run's pending directory answers the
         // question when there is a run, and the pinned project directory
@@ -1430,7 +1471,7 @@ function main() {
             if (embedder !== null) blocks.push(embedder);
             const pinnedDestination = pinnedDestinationBlock(cwd, memq);
             if (pinnedDestination !== null) blocks.push(pinnedDestination.text);
-            const projectMemory = projectMemoryBlock(cwd, memq, pinnedDestination);
+            const projectMemory = projectMemoryBlock(cwd, memq, pinnedDestination, compact);
             if (projectMemory !== null) blocks.push(projectMemory);
         }
         // The drift line rides last, after whatever named the project tier's

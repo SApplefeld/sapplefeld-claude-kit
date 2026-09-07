@@ -45,20 +45,34 @@
 
 const fs = require('fs');
 const path = require('path');
-const {
-    armGoal, appendGoal, clearGoal, readGoal, planStatusReadings, lastActivePhrase, isSessionIdShaped,
-    goalPathKind, planPathState, safeForAuthorization, planArmedBy, queuePosition,
-    GOAL_STATE_MAX_BYTES
-} = require('./kit-goal-lib.js');
 
-// Repo-controlled strings (a plan path) are sanitized to printable ASCII and
-// length-capped before they reach stdout/stderr, matching the sibling hooks'
-// convention for any repo data entering a trusted output channel. The cap is
-// sized for a path and for the short fields beside one; a recorded authorization
-// sentence is prose that runs past it and goes through safeForAuthorization
-// instead, the same screen the value was stored under.
-function sanitize(s) {
-    return String(s).replace(/[^\x20-\x7E]/g, '').slice(0, 120);
+// The kit libraries are bound inside the guarded region at the bottom of this
+// file rather than at module scope, so a require that throws prints one elided
+// line instead of Node's own trace: every module path on a `Require stack:` is
+// home-anchored on an installed plugin, and this CLI's output is echoed into a
+// session's context.
+let armGoal, appendGoal, clearGoal, readGoal, planStatusReadings, lastActivePhrase, isSessionIdShaped,
+    goalPathKind, planPathState, safeForAuthorization, planArmedBy, queuePosition,
+    GOAL_STATE_MAX_BYTES;
+
+// Repo-controlled strings (a plan path) are sanitized before they reach
+// stdout/stderr, matching the sibling hooks' convention for any repo data
+// entering a trusted output channel. It is the shared library's renderer under
+// this file's own name: the refusal reasons this CLI prints embed absolute plan
+// paths, so the channel's home elision is what keeps the OS account name out of
+// them, and the library's cap of 120 is the cap this file already used. A
+// recorded authorization sentence is prose that runs past that cap and goes
+// through safeForAuthorization instead, the same screen the value was stored
+// under.
+let sanitize;
+
+function loadKitLibraries() {
+    ({
+        armGoal, appendGoal, clearGoal, readGoal, planStatusReadings, lastActivePhrase,
+        isSessionIdShaped, goalPathKind, planPathState, safeForAuthorization, planArmedBy,
+        queuePosition, GOAL_STATE_MAX_BYTES
+    } = require('./kit-goal-lib.js'));
+    ({ sanitizeForOutput: sanitize } = require('./kit-compact-lib.js'));
 }
 
 function usage() {
@@ -159,7 +173,7 @@ function cmdAppend(planArgs, authority) {
         return;
     }
     unauthorizedWarning(result.unauthorized);
-    process.stdout.write('kit goal queue extended with ' + result.appended.map(sanitize).join(', ')
+    process.stdout.write('kit goal queue extended with ' + result.appended.map((value) => sanitize(value)).join(', ')
         + ' (now ' + result.queue.length + ' plans; working ' + sanitize(result.plan) + ')'
         + (result.boundSession ? ' (binding unchanged)' : ' (still unbound)')
         + armingNote(result.arming)
@@ -229,7 +243,7 @@ function unboundNote(armingSession) {
 // prints through the 120-character cut. Silent when there is nothing to name.
 function unauthorizedWarning(plans) {
     if (!Array.isArray(plans) || plans.length === 0) return;
-    const shown = plans.slice(0, 5).map(sanitize);
+    const shown = plans.slice(0, 5).map((value) => sanitize(value));
     const more = plans.length - shown.length;
     process.stderr.write('kit-goal: armed as this run\'s own, and the scan read no Dispatch'
         + ' Authorization out of these plan docs: ' + shown.join(', ')
@@ -271,14 +285,14 @@ function cmdArm(planArgs, append, selfArmed) {
             // nothing, so the line means something when it appears.
             if (result.dropped.length > 0) {
                 process.stderr.write('kit-goal: this arm replaced the armed queue and these plans are no'
-                    + ' longer armed: ' + result.dropped.map(sanitize).join(', ')
+                    + ' longer armed: ' + result.dropped.map((value) => sanitize(value)).join(', ')
                     + ' (arm --append adds to a queue instead of replacing it)\n');
             }
             unauthorizedWarning(result.unauthorized);
             process.stdout.write('kit goal armed for ' + sanitize(result.plan)
                 + (result.queue.length > 1
                     ? ' (1 of ' + result.queue.length + '; then '
-                        + result.queue.slice(1).map(sanitize).join(', ') + ')'
+                        + result.queue.slice(1).map((value) => sanitize(value)).join(', ') + ')'
                     : '')
                 + (result.boundSession
                     ? ' (bound to this session)'
@@ -542,9 +556,29 @@ function main() {
 // Wrapped so an unexpected defect prints one sanitized line and a nonzero
 // exit instead of a stack trace: this CLI's output is echoed into a session's
 // context by the /kit-goal skill invocation, and a stack dump is noise there.
+// The library load is INSIDE the region because a require is the throw most
+// likely to produce that trace, a damaged plugin cache being its ordinary cause.
 try {
+    loadKitLibraries();
     main();
 } catch (err) {
-    process.stderr.write('kit-goal: ' + sanitize(err && err.message ? err.message : String(err)) + '\n');
+    // A throw during the load leaves the renderer unbound, and it stays unbound
+    // whichever library refused: the renderer lives in kit-compact-lib.js,
+    // which requires kit-goal-lib.js itself, so a load that failed at either
+    // cannot be recovered by requiring the renderer alone. Nothing here can then
+    // take the OS account name out of the error text, whose module path and
+    // `Require stack:` lines are home-anchored on an installed plugin, so that
+    // reading names the failure and withholds the text. The error's CODE still
+    // rides, since a Node error code is an upper-case identifier
+    // (MODULE_NOT_FOUND, ERR_DLOPEN_FAILED) that names the failure's kind and
+    // can carry no path; anything else in that field is dropped. It rides the
+    // withheld leg alone, since a message that survived sanitize already opens
+    // with its own code where it has one (ENOENT: no such file ...).
+    const code = err && typeof err.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(err.code)
+        ? ' (' + err.code + ')' : '';
+    process.stderr.write('kit-goal: ' + (sanitize === undefined
+        ? 'a kit library could not be loaded' + code + ', and the renderer that takes the OS'
+            + ' account name out of an error is in it, so the message itself is withheld'
+        : sanitize(err && err.message ? err.message : String(err))) + '\n');
     process.exitCode = 1;
 }

@@ -849,17 +849,22 @@ test('memq loads code out of a directory only where find and the granted blocks 
     // That ordering is asserted below, because it is the whole of what
     // distinguishes those reaches from the one the grant withholds find for.
     //
-    // Three named exceptions ride in the same contiguous top-of-file block as
+    // Four named exceptions ride in the same contiguous top-of-file block as
     // the node built-ins, each a fixed, kit-shipped sibling under hooks/:
     // kit-network-lib.js for the network-share predicate (Standing Amendment
     // 2), re-exported under memq's own name below; kit-goal-lib.js for the
     // session-id grammar the store's transcript lookup tests a value against;
-    // and kit-read-lib.js for the bounded directory listing that lookup walks
-    // the projects root with. None is a load from a directory the command line
-    // names, the property this test polices, so each is pinned by its exact
-    // spelling rather than by the generic built-in pattern: a relative require
-    // of anything else at this position, or one of these moving, reds here
-    // exactly as a second dynamic load would.
+    // kit-read-lib.js for the bounded directory listing that lookup walks the
+    // projects root with; and kit-compact-lib.js for sanitizeForOutput, scrub
+    // and scrubAfterStrip, the parts of the one renderer that takes the OS
+    // account name out of what memq prints, its stdout being read by a model:
+    // one value rendered at a cap this file passes, a whole composed line, and
+    // that same line on a second pass after a strip has deleted from it. None is a
+    // load from a directory the command line names, the property this test
+    // polices, so each is pinned by its exact spelling rather than by the
+    // generic built-in pattern: a relative require of anything else at this
+    // position, or one of these moving, reds here exactly as a second dynamic
+    // load would.
     const src = fs.readFileSync(MEMQ, 'utf8').split(/\r?\n/);
     const isCode = (line) => !/^\s*(\/\/|\*)/.test(line);
     const enclosing = (lineNo) => {
@@ -869,26 +874,51 @@ test('memq loads code out of a directory only where find and the granted blocks 
         }
         return null;
     };
-    // The boundary is the built-in block itself, so every line after it is
+    // The boundary is the fixed load block itself, so every line after it is
     // scanned: taking the first function declaration instead would leave the
     // constants and the top-level statements between the two unread, and a
     // load placed there runs on every invocation of every verb.
+    //
+    // That block is in two parts. The four siblings sit inside a guard rather
+    // than beside the built-ins, since a require that throws on the CLI leg
+    // would print the runtime's own require stack, whose every module path is
+    // home-anchored on an installed plugin. So each is an assignment into a
+    // binding declared above the try, and what is pinned is that shape: the
+    // built-in lines are contiguous among themselves, the four sibling lines
+    // are contiguous among themselves in this order, and between the two blocks
+    // stands the guard's own `let` and `try` and no other code.
     const SIBLING_LIB_LINES = [
-        'const { namesNetworkShare } = require(\'../hooks/kit-network-lib.js\');',
-        'const { isSessionIdShaped } = require(\'../hooks/kit-goal-lib.js\');',
-        'const { listBoundedNames, DIR_SCAN_MAX_ENTRIES } = require(\'../hooks/kit-read-lib.js\');'
+        '({ namesNetworkShare } = require(\'../hooks/kit-network-lib.js\'));',
+        '({ isSessionIdShaped } = require(\'../hooks/kit-goal-lib.js\'));',
+        '({ listBoundedNames, DIR_SCAN_MAX_ENTRIES } = require(\'../hooks/kit-read-lib.js\'));',
+        '({ sanitizeForOutput, scrub, scrubAfterStrip, homeElisionsKnown } = '
+            + 'require(\'../hooks/kit-compact-lib.js\'));'
     ];
     const builtin = /^const \w+ = require\('[a-z_]+'\);$/;
     const builtins = [];
+    const siblings = [];
     src.forEach((line, i) => {
         const trimmed = line.trim();
-        if (builtin.test(trimmed) || SIBLING_LIB_LINES.includes(trimmed)) builtins.push(i + 1);
+        if (builtin.test(trimmed)) builtins.push(i + 1);
+        if (SIBLING_LIB_LINES.includes(trimmed)) siblings.push(i + 1);
     });
     assert.ok(builtins.length > 0, 'memq.js requires node built-ins at the top of the file');
     assert.deepStrictEqual(builtins, builtins.map((_, k) => builtins[0] + k),
-        'the built-in requires plus the three named hooks/ sibling exceptions are one '
-            + 'contiguous block: ' + JSON.stringify(builtins));
-    const lastBuiltin = builtins[builtins.length - 1];
+        'the built-in requires are one contiguous block: ' + JSON.stringify(builtins));
+    assert.deepStrictEqual(
+        siblings.map((n) => src[n - 1].trim()), SIBLING_LIB_LINES,
+        'the four named hooks/ sibling exceptions are present, once each, in this order: '
+            + JSON.stringify(siblings));
+    assert.deepStrictEqual(siblings, siblings.map((_, k) => siblings[0] + k),
+        'and they are one contiguous block of their own: ' + JSON.stringify(siblings));
+    const between = src.slice(builtins[builtins.length - 1], siblings[0] - 1)
+        .filter((line) => line.trim() !== '' && isCode(line))
+        .map((line) => line.trim());
+    assert.ok(siblings[0] > builtins[builtins.length - 1]
+        && between.every((line) => /^let\b.*;$/.test(line) || line === 'try {'),
+        'and it opens where the built-ins end, with nothing between the two but the guard\'s '
+            + 'own declarations: ' + JSON.stringify(between));
+    const lastBuiltin = siblings[siblings.length - 1];
     // Every way a line of source can bring in code the command line does not
     // name, not require alone: a dynamic import, an indirect require built
     // through createRequire, and the two string-to-code constructors.

@@ -91,6 +91,48 @@ function containedPath(rootDir, filePath) {
     return containedRealPath(rootDir, filePath);
 }
 
+// The one renderer for a channel a model reads, taking the OS account name out
+// of a whole composed line. This runner's stdout and stderr are such a channel,
+// a model being told to run it, and the values the lines below carry are
+// home-anchored on an ordinary box: a scratch directory under the OS temp
+// directory, the operator's own config directory, and a syscall's error text,
+// which names the file it was refused on. Bound the way the read guard above is
+// bound, out of the repo's own plugin directory and on first use, since this
+// runner lives in the repo rather than in an installed cache.
+let scrubLine = null;
+export function elided(text) {
+    if (scrubLine === null) {
+        const lib = path.join(REPO_ROOT, 'plugins', 'claude-kit', 'hooks', 'kit-compact-lib.js');
+        try {
+            scrubLine = requireFromHere(lib).scrub;
+        } catch (err) {
+            // A tree that cannot supply the renderer. Nothing here can elide,
+            // and the loudest of these lines is the one saying a live credential
+            // copy is still on disk, so the lines stand unaltered and one note
+            // says the elision is off. The note is said HERE, once, because it
+            // is about this run rather than about any one line: a clause per
+            // line would repeat one fact as many times as the report has lines,
+            // and it would ride on stdout, which is where the report is.
+            //
+            // Absent and unloadable are two states and send an operator two
+            // ways, to an install and to a repair, so the note names which it
+            // met. The error's code rides on the second, since a Node error code
+            // is an upper-case identifier naming the failure's kind and can
+            // carry no path; the message cannot, there being no renderer here to
+            // take a path out of it.
+            const raw = err && typeof err.code === 'string' ? err.code : '';
+            const code = /^[A-Z0-9_]{1,40}$/.test(raw) ? ' (' + raw + ')' : '';
+            const met = raw === 'ENOENT' || raw === 'MODULE_NOT_FOUND'
+                ? 'is not in this tree'
+                : 'would not load' + code;
+            process.stderr.write('probe-corpus: the kit renderer that elides the home directory '
+                + met + ', so every path this run prints is unelided\n');
+            scrubLine = (line) => line;
+        }
+    }
+    return scrubLine(String(text));
+}
+
 // ---------------------------------------------------------------- arguments
 
 // Parse the CLI. Every refusal names the rule that refused it, because the
@@ -1066,11 +1108,11 @@ export function removeReaderScratch(root) {
             fs.rmSync(path.join(root, 'config'), REMOVE_OPTIONS);
             copyRemoved = true;
         } catch { /* reported below */ }
-        process.stderr.write('the reader scratch ' + root + ' could not be removed ('
+        process.stderr.write(elided('the reader scratch ' + root + ' could not be removed ('
             + (err && err.code ? err.code : 'unknown') + '): '
             + (copyRemoved
                 ? 'its config directory and the credential copy in it are gone, and the empty directory is left to the next run\'s sweep'
-                : 'THE CREDENTIAL COPY IS STILL THERE, and it is removed by hand or by the next run\'s sweep') + '\n');
+                : 'THE CREDENTIAL COPY IS STILL THERE, and it is removed by hand or by the next run\'s sweep')) + '\n');
         return false;
     }
 }
@@ -1562,24 +1604,25 @@ export async function main(argv, env) {
         // from one that never ran. The error itself goes on stderr above it,
         // where the top-level handler writes it.
         if (err && err.partialReport) {
-            process.stdout.write(summaryLine(err.partialReport, REPO_ROOT, { partial: true }) + '\n');
+            process.stdout.write(elided(summaryLine(err.partialReport, REPO_ROOT, { partial: true })) + '\n');
         }
         throw err;
     }
     // The warnings go to stderr, above the summary line, so stdout carries the
     // summary and nothing else for a caller quoting it.
     if (report.errors > 0) {
-        process.stderr.write('WARNING: ' + report.errors + ' pair' + (report.errors === 1 ? '' : 's')
+        process.stderr.write(elided('WARNING: ' + report.errors + ' pair' + (report.errors === 1 ? '' : 's')
             + ' produced no reading at all, and the exit code counts mismatches only. Read the errors in '
-            + path.join(report.runDir, 'report.md') + ' before treating this run as a reading of the corpus.\n');
+            + path.join(report.runDir, 'report.md') + ' before treating this run as a reading of the corpus.') + '\n');
     }
     const refreshFailures = report.pairs.filter((p) => p.credentialRefreshError).length;
     if (refreshFailures > 0) {
-        process.stderr.write('WARNING: the credential copy could not be refreshed before ' + refreshFailures
-            + ' pair' + (refreshFailures === 1 ? '' : 's') + ', which read against an earlier copy. Read those rows in '
-            + path.join(report.runDir, 'report.md') + '.\n');
+        process.stderr.write(elided('WARNING: the credential copy could not be refreshed before '
+            + refreshFailures + ' pair' + (refreshFailures === 1 ? '' : 's')
+            + ', which read against an earlier copy. Read those rows in '
+            + path.join(report.runDir, 'report.md') + '.') + '\n');
     }
-    process.stdout.write(summaryLine(report, REPO_ROOT) + '\n');
+    process.stdout.write(elided(summaryLine(report, REPO_ROOT)) + '\n');
     return report.exitCode;
 }
 
@@ -1601,7 +1644,7 @@ if (invokedDirectly) {
     main(process.argv.slice(2), process.env).then((code) => {
         process.exitCode = code;
     }).catch((err) => {
-        process.stderr.write(String(err && err.message ? err.message : err) + '\n');
+        process.stderr.write(elided(err && err.message ? err.message : err) + '\n');
         process.exitCode = 101;
     });
 }

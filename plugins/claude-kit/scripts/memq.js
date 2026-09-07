@@ -257,13 +257,18 @@
 // carries the reasoning and the trust boundary); every other shape, including
 // a submodule's, keeps the working directory's own derivation.
 //
-// Node core modules only, CommonJS, UTF-8 throughout, with three named
+// Node core modules only, CommonJS, UTF-8 throughout, with four named
 // exceptions, all fixed kit-shipped siblings under hooks/ and all required
 // below alongside the built-ins: kit-network-lib.js for namesNetworkShare,
 // re-exported under this file's own name; kit-goal-lib.js for
 // isSessionIdShaped, the one definition of what a harness session id looks
-// like; and kit-read-lib.js for the bounded directory listing every kit walk
-// over a directory nobody here controls goes through. Every consumer inside
+// like; kit-read-lib.js for the bounded directory listing every kit walk
+// over a directory nobody here controls goes through; and kit-compact-lib.js
+// for sanitizeForOutput, scrub and scrubAfterStrip, the parts of the one
+// renderer that takes the OS account name out of what this CLI prints: one
+// value rendered at a cap this file passes, a whole composed line, and that
+// same line on a second pass after a strip has deleted from it, since a model
+// reads its stdout. Every consumer inside
 // this file already holds them at no extra cost once required here, and
 // requiring them rather than restating what they hold is what keeps the
 // separator test (Standing Amendment 2), the session-id grammar and the
@@ -274,11 +279,14 @@
 // channels; these three lines are the former, not the latter, because their
 // targets are fixed kit-shipped siblings rather than a directory the command
 // line names. This is a load-time coupling: a require failure for any of the
-// three (an install missing the file, a hand-edited plugin cache) throws
+// four (an install missing the file, a hand-edited plugin cache) throws
 // before any of this file's own code runs, refusing every verb rather than
-// only the ones that call into it. Those three are the siblings whose absence
+// only the ones that call into it. Those four are the siblings whose absence
 // can take this whole file down; everything else loaded at the top of it is a
-// Node built-in.
+// Node built-in. None of the four requires this file at its own module scope,
+// so the block adds no load-time cycle: kit-compact-lib.js reaches back here
+// for a transcript path, and that require sits inside the function that needs
+// it and runs long after either file has finished loading.
 
 'use strict';
 
@@ -286,9 +294,55 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { namesNetworkShare } = require('../hooks/kit-network-lib.js');
-const { isSessionIdShaped } = require('../hooks/kit-goal-lib.js');
-const { listBoundedNames, DIR_SCAN_MAX_ENTRIES } = require('../hooks/kit-read-lib.js');
+// The four siblings, bound through a guard that splits the two ways this file is
+// loaded. Run as a CLI, a require that throws is printed by the runtime, and
+// that leg runs before the descriptor wrapper and the handlers at the bottom of
+// this file are installed: Node's `Require stack:` names every module path it
+// tried, each home-anchored on an installed plugin, while this CLI's output is
+// read by a model that was told to run it. So that leg says what kind of failure
+// it met and what code the runtime gave it, both of which can carry no path,
+// withholds the message, which can, and leaves the dispatch unrun. Loaded as a
+// MODULE, the throw rides on unchanged, since a consumer that loaded this file
+// with these unbound would answer undefined where it now fails loudly.
+let namesNetworkShare;
+let isSessionIdShaped;
+let listBoundedNames, DIR_SCAN_MAX_ENTRIES;
+let sanitizeForOutput, scrub, scrubAfterStrip, homeElisionsKnown;
+// Whether that guard fired, which is what the CLI leg reads to leave the
+// dispatch unrun rather than calling into bindings nothing filled.
+let libraryLoadFailed = false;
+try {
+    ({ namesNetworkShare } = require('../hooks/kit-network-lib.js'));
+    ({ isSessionIdShaped } = require('../hooks/kit-goal-lib.js'));
+    ({ listBoundedNames, DIR_SCAN_MAX_ENTRIES } = require('../hooks/kit-read-lib.js'));
+    ({ sanitizeForOutput, scrub, scrubAfterStrip, homeElisionsKnown } = require('../hooks/kit-compact-lib.js'));
+} catch (err) {
+    if (require.main !== module) throw err;
+    libraryLoadFailed = true;
+    // Absent and unloadable are two states and send a reader two ways, to an
+    // install and to a repair, so the line names which it met. The error's CODE
+    // rides with it, a Node error code being an upper-case identifier that names
+    // the failure's kind and can hold no path; a value in that field of any
+    // other shape is dropped rather than printed.
+    const raw = err && typeof err.code === 'string' ? err.code : '';
+    const code = /^[A-Z0-9_]{1,40}$/.test(raw) ? raw : 'no code';
+    const kind = raw === 'ENOENT' || raw === 'MODULE_NOT_FOUND' ? 'missing' : 'unloadable';
+    // Written to the descriptor rather than through process.stderr: the wrapper
+    // that elides this channel is one of the things that just failed to load,
+    // and a write on this leg has no renderer standing behind it. The write can
+    // itself throw, a reader that closed the pipe being the ordinary way, and a
+    // throw here would print the stack trace whose absolute paths this leg
+    // exists to keep off the channel, so a descriptor that will not take the
+    // sentence loses the sentence and nothing more.
+    try {
+        fs.writeSync(2, 'memq: a kit library failed to load (' + kind + ', ' + code
+            + '), and the renderer that takes the OS account name out of a message is in it,'
+            + ' so the message itself is withheld; no verb ran\n');
+    } catch {
+        // The channel is gone; the exit status below is what is left to say it.
+    }
+    process.exitCode = 1;
+}
 
 const JOURNAL_FILE = 'outcomes.jsonl';
 const USAGE_FILE = 'usage.jsonl';
@@ -297,6 +351,7 @@ const GET_CAP = 20;        // full journal entries shown by `get` before truncat
 const SUMMARY_CAP = 120;   // characters of a summary or description, at write and display
 const DETAIL_CAP = 500;    // characters of a detail, at write and display
 const NAME_CAP = 80;       // characters of a key or memory name, at write and display
+const PATH_DISPLAY_CAP = 260;   // characters of a filesystem path this CLI prints back
 const MEMORY_FILE_CAP = NAME_CAP + 3;   // the same cap over a memory filename, '.md' included
 const TAG_CAP = 40;        // characters of a tag, at write and display
 const TYPE_CAP = 40;       // characters of a project-type name, at write and display
@@ -1903,7 +1958,10 @@ function provenanceLines() {
     const lines = ['run: ' + id];
     for (const [field, value] of [['vector', process.env.KIT_SPAWN_VECTOR],
         ['section', process.env.KIT_RUN_SECTION]]) {
-        const clean = value === undefined ? '' : sanitize(value, SUMMARY_CAP).trim();
+        // The charset rule rather than the display gate: these lines are
+        // written into a store file, so a path in one of them is content
+        // rather than something on its way to the channel.
+        const clean = value === undefined ? '' : charsetRule(value, SUMMARY_CAP).trim();
         if (clean !== '') lines.push(field + ': ' + clean);
     }
     lines.push('written: ' + new Date().toISOString().slice(0, 10));
@@ -2613,19 +2671,119 @@ function appliedTally(stamps) {
     return tally;
 }
 
-// Reduce a value to short printable ASCII, with the double quote barred,
-// before it enters stdout. Journal and index content is data entering the
-// session's context through this output, so it is normalized at the
-// boundary, matching the sibling hooks' sanitize-before-trust rule for
-// repo-controlled strings. The quote goes here and not only at the write
-// gate because indexes and frontmatter are hand- and model-editable, so a
-// planted quote can reach display without ever passing a writer:
-// boundedFreeText's guarantee (nothing the store hands back can carry the
-// cmd.exe command break) holds for every value the store hands back only if
+// The one character this CLI bars beyond printable ASCII, spelled once so the
+// gate that removes it on the way to the channel and the gate that removes it
+// on the way to disk cannot come to disagree about which character it is.
+const BARRED_QUOTE = /"/g;
+
+// The charset rule, with no elision in front of it: printable ASCII, the double
+// quote barred, capped. This is the form the store's WRITE gates take, where the
+// value is on its way onto disk rather than onto the channel and a path in it is
+// content that has to survive the round trip.
+//
+// The quote is barred at all because indexes and frontmatter are hand- and
+// model-editable, so a planted quote can reach display without ever passing a
+// writer: boundedFreeText's guarantee (nothing the store hands back can carry
+// the cmd.exe command break) holds for every value the store hands back only if
 // the display gate enforces it too, and the character carries no meaning in
 // displayed store prose.
+function charsetRule(s, max) {
+    return String(s).replace(/[^\x20-\x7E]/g, '').replace(BARRED_QUOTE, '').slice(0, max);
+}
+
+// Whether the output channel is this file's own, which is what the elision
+// below belongs to. The descriptor wrapper at the bottom of this file is
+// installed on the same reading and for the same reason: a module consumer
+// writes to its own descriptors, and what covers the text it puts there is that
+// consumer's own guard or the rule the sweep exempted it under, never this
+// gate. The session hook that emits the memory directory is the worked case,
+// exempted because the line is an absolute destination the Write tool needs.
+// So a consumer that reaches for the gate below gets the charset rule it has
+// always got, and the elision runs where the channel is ours.
+const CHANNEL_IS_OURS = require.main === module;
+
+// Reduce a value to short printable ASCII, with the double quote barred and,
+// on this CLI's own channel, the home directory elided, before it enters
+// stdout. Journal and index content is data entering the session's context
+// through this output, so it is normalized at the boundary, matching the
+// sibling hooks' sanitize-before-trust rule for repo-controlled strings.
+//
+// Four steps in one order on this CLI's own channel, and the order is the
+// whole of what the gate is worth: elide, strip uncapped, elide, cap.
+//
+// The elision runs BEFORE the charset rule because the strip deletes what it
+// removes, so a tab, a non-breaking space or a double quote inside a home
+// spelling breaks it for a whole-spelling pattern while the text still carries
+// it. The first pass takes out every spelling standing whole in the value.
+//
+// The strip runs uncapped and the elision runs again over its result, and the
+// cap comes last, over text both elisions have already been through. Cutting
+// before that second elision is what leaves a fragment behind: the strip can
+// put back together a spelling a barred or non-printable character had broken,
+// and a cut through the middle of the reassembled spelling matches no
+// whole-spelling pattern afterwards, the descriptor's included, so the head of
+// the account name would reach the channel on exactly the values long enough
+// to be cut. Every cap on this channel is decided on the text that will be
+// emitted, which is this file's half of the same rule shownText states.
+//
+// That second pass runs through scrubAfterStrip rather than scrub wherever the
+// charset rule removed anything, which is the renderer's own rule: the deletion
+// can glue a home spelling onto the word in front of it, and the elision's
+// leading boundary refuses a glued site by design, so a quote before a spelling
+// and a quote inside it would otherwise carry the OS account name past every
+// guard on this channel, the descriptor's included. Dropping that boundary on
+// text the strip altered costs an over-elision there and nothing on any other
+// value.
+//
+// Loaded as a module the value takes the charset rule alone, which is what
+// CHANNEL_IS_OURS below is for.
 function sanitize(s, max) {
-    return String(s).replace(/[^\x20-\x7E]|"/g, '').slice(0, max);
+    if (!CHANNEL_IS_OURS) return charsetRule(String(s), max);
+    const elided = scrub(String(s));
+    const stripped = charsetRule(elided, Infinity);
+    return scrubAfterStrip(stripped, stripped.length !== elided.length).slice(0, max);
+}
+
+// A value that IS a filesystem path, for a line this CLI prints. The store sits
+// under the home directory by default and this output is read by a model, so the
+// path goes through the channel's own renderer, which strips, elides the home
+// directory to the operator's own shorthand, caps, and marks what it altered,
+// in that order. The cap it is given is this file's own rather than the
+// renderer's default of 120, because a store path is long by construction and a
+// cut one names no directory an operator can act on: the project segment alone
+// is the whole working directory flattened.
+function shownPath(value) {
+    return shownText(value, PATH_DISPLAY_CAP);
+}
+
+// A value this CLI prints that can carry a path inside it without being one: a
+// lock's reason, an index writer's error, any composed sentence with a cap of
+// its own. It is rendered the way the channel renders a path, in the renderer's
+// own order: elide, strip, elide, cap, mark.
+//
+// The order is the whole of why this exists. The elision installed at the
+// descriptor is textual and matches whole spellings, so a cap applied to a value
+// BEFORE it reaches that descriptor can cut a home spelling in half and leave
+// behind a fragment of the account name that no whole-spelling pattern reaches.
+// Every capped value on this channel that can carry a path comes through here,
+// so the cut is taken on text the elision has already been through.
+//
+// The three steps in front of the renderer are this file's own, and they are
+// the renderer's own order over the one character it does not know about. The
+// elision runs first, taking out every spelling standing whole in the value.
+// The barred quote goes next, ahead of the renderer rather than after it, so the
+// cap and the marks the renderer appends are decided on the text the reader
+// actually sees. Then the elision runs again wherever that removal took
+// something out, with the leading boundary dropped: the quote is deleted rather
+// than replaced, so one quote inside a home spelling and one in front of it
+// leave the spelling glued to the word before it, which the boundary refuses.
+// The renderer's own passes cover the same shape for a non-printable character,
+// which it strips itself; the quote is barred here alone, so this is where its
+// half of the rule lives.
+function shownText(value, cap) {
+    const elided = scrub(String(value));
+    const unquoted = elided.replace(BARRED_QUOTE, '');
+    return sanitizeForOutput(scrubAfterStrip(unquoted, unquoted.length !== elided.length), cap);
 }
 
 // The text of a failure, for the line that reports it.
@@ -2639,9 +2797,72 @@ function sanitize(s, max) {
 // filesystem arrives with a path in it and a failure line is not a place to
 // print an unbounded string, and the marker is there because a reader has to
 // be able to tell a cut sentence from one that ends where it means to.
+//
+// That path is why the line also goes through the channel's home elision. An
+// fs error names the file the syscall was refused on, this store sits under the
+// home directory by default, and this output is read by a model, so the OS
+// account name would otherwise ride out on every failure a syscall reports.
+// scrub is the one renderer for that, shared with every other kit channel.
+//
+// Four steps in one order, which is the order that renderer states: the elision
+// runs first, taking out every spelling standing whole in the message; the strip
+// runs next, uncapped, so the elision that follows reads the text that will
+// actually be printed; that elision runs over the stripped text, so a message
+// carried past the cap only by a home prefix is not cut at all; and the cap runs
+// last, so no cut can take a home spelling in half and leave a fragment no
+// whole-spelling pattern matches. The second pass drops the elision's leading
+// boundary wherever the strip removed something, since a deleted character can
+// glue a home spelling onto the word in front of it and the boundary would then
+// refuse the site. The four are spelled here rather than taken from sanitize,
+// because sanitize elides on this CLI's own channel alone and a failure line is
+// composed the same way whichever way this file was loaded.
 function failureText(err) {
-    const text = sanitize(err && err.message ? err.message : String(err), FAILURE_TEXT_CAP + 1);
+    const raw = err && err.message ? err.message : String(err);
+    const elided = scrub(String(raw));
+    const stripped = charsetRule(elided, Infinity);
+    const text = scrubAfterStrip(stripped, stripped.length !== elided.length);
     return text.length > FAILURE_TEXT_CAP ? text.slice(0, FAILURE_TEXT_CAP) + ' [cut]' : text;
+}
+
+// Every chunk this CLI writes to a descriptor, with the home directory taken out
+// of it in every spelling. Installed once, over both descriptors, in CLI mode
+// alone.
+//
+// The guard sits at the WRITE BOUNDARY rather than at the values, because this
+// channel has better than two hundred write sites and its lines are composed all
+// over the file. Two passes over the values each left a site behind, and a site
+// added later inherits nothing a per-value rule can give it; what the boundary
+// gives it is that no chunk reaches a descriptor carrying the OS account name,
+// whatever composed it.
+//
+// It is a floor rather than a replacement for shownPath, which stays. Eliding
+// says nothing about length, and a store path is long by construction, so the
+// cap and the marks over a value known to be a path are still that value's own
+// renderer's to apply, and they run before this.
+//
+// No write here is exempt, because no machine consumer reads an absolute path
+// out of this CLI's output: the shim forwards this process's stdio untouched
+// without reading it, every other kit caller loads this file as a module and so
+// never reaches this leg, the installer's shim probe matches the usage line's
+// own text, and no verb here writes a machine-readable envelope. A consumer that
+// did parse one would have to be exempted by name here, since the elision takes
+// the path apart.
+//
+// A string chunk is elided as it stands and a Buffer is decoded as UTF-8 first,
+// those being what this file writes; a chunk of any other kind passes through,
+// nothing here composing one. What a boundary cannot see is a path split ACROSS
+// two write calls, and no site here composes a line in more than one.
+function scrubbedDescriptors() {
+    for (const stream of [process.stdout, process.stderr]) {
+        const write = stream.write.bind(stream);
+        stream.write = function (chunk, encoding, callback) {
+            const cb = typeof encoding === 'function' ? encoding : callback;
+            const enc = typeof encoding === 'function' ? undefined : encoding;
+            if (typeof chunk === 'string') return write(scrub(chunk), enc, cb);
+            if (Buffer.isBuffer(chunk)) return write(scrub(chunk.toString('utf8')), 'utf8', cb);
+            return write(chunk, enc, cb);
+        };
+    }
 }
 
 // Bound a free-text field at the write boundary: printable ASCII, no double
@@ -2666,10 +2887,13 @@ function failureText(err) {
 // unnoticed, and what was cut is the tail, which is where a well-written
 // record's actionable part lives.
 function boundedFreeText(value, cap, label) {
-    // The reduction is sanitize's own, applied uncapped: one charset rule
-    // for store text, stated once, with this gate adding the report and the
-    // cap.
-    const stripped = sanitize(value, Infinity);
+    // The charset rule, applied uncapped: one rule for store text, stated once,
+    // with this gate adding the report and the cap. The rule rather than the
+    // display gate, because this value is on its way onto disk: eliding here
+    // would store the operator's shorthand for the home directory where the
+    // author wrote a path, and what the store hands back would then name a
+    // directory that depends on who reads it.
+    const stripped = charsetRule(value, Infinity);
     if (stripped !== String(value)) {
         process.stderr.write('memq: ' + label + ' reduced to printable ASCII without double quotes\n');
     }
@@ -2694,7 +2918,9 @@ function boundedFreeText(value, cap, label) {
 // the cap, is the one report the author can act on in the same breath.
 // Returns the sanitized text, or null after the usage error.
 function sharedFreeText(value, cap, label) {
-    const stripped = sanitize(value, Infinity);
+    // boundedFreeText's rule, for boundedFreeText's reason: a value bound for
+    // disk takes the charset rule without the channel's elision.
+    const stripped = charsetRule(value, Infinity);
     if (stripped !== String(value)) {
         process.stderr.write('memq: ' + label + ' reduced to printable ASCII without double quotes\n');
     }
@@ -2767,7 +2993,7 @@ function sharedFreeText(value, cap, label) {
 // sequence, but that the file channel normalizes to what argv can express and
 // is then judged by the same rules.
 function readBodyFile(file) {
-    const named = '--body-file ' + sanitize(file, 260);
+    const named = '--body-file ' + shownPath(file);
     const refuse = (why) => {
         process.stderr.write('memq: ' + named + ' ' + why + '\n');
         process.exitCode = 1;
@@ -3639,12 +3865,72 @@ function isPathGrammar(value, cap, wildcards) {
 // whitespace intact and invisible on the line, which is the reading a refusal
 // exists to prevent.
 function anchorRefusalText(entry, fault) {
-    const cut = entry.length > ANCHOR_ENTRY_CAP;
-    const head = cut ? entry.slice(0, ANCHOR_ENTRY_CAP) : entry;
-    const shown = head.replace(ANCHOR_INVISIBLE, '').replace(ANCHOR_WHITESPACE, '');
+    return refusedEntryText(entry, fault, ANCHOR_ENTRY_CAP);
+}
+
+// The reduction both refusals take, in the channel's own order, over the one
+// difference between them: the cap each field's entry is shown to.
+//
+// Four steps, elide, strip, elide, cap, and the order is what the elision is
+// worth here. A refused entry is free text by definition, so it can carry an
+// absolute home-anchored path, and this text is display text for a report line
+// on both of the channels that read it: this CLI's stderr, and the deny reason
+// the frontmatter guard composes from it, which a model reads. It is never disk
+// text, so it takes the elision whichever way this file was loaded, the way
+// failureText does, rather than behind CHANNEL_IS_OURS.
+//
+// The first pass takes out every home spelling standing whole. The strip runs
+// next, uncapped, and it DELETES what it removes, which can put back together a
+// spelling a barred character had broken and can equally glue a spelling onto
+// the word beside it, so the second pass runs over the stripped text with the
+// elision's name boundaries dropped wherever the strip removed anything. The
+// cap comes last, over text both passes have been through: a cut taken ahead of
+// them halves a home spelling into a head of the OS account name that no
+// whole-spelling pattern reaches afterwards, this CLI's own descriptor wrapper
+// included, so the name would ride out on exactly the entries long enough to be
+// cut. Both notes are decided on the emitted text for the same reason.
+//
+// Both renderer calls are gated and caught here rather than left to a catch
+// above them, because the readers of this text are on paths where a throw is
+// an ALLOW. The frontmatter guard reaches it by loading this file as a module
+// and asking frontmatterAnchors or frontmatterTriggers for the entry it denies
+// on, and a throw out of that lands in the catch around that guard's main(),
+// which lets the write through; the session hook reaches it through
+// tierAnchorDrift and loses its whole block to its own outer catch. So a cache
+// carrying a kit-compact-lib.js one version behind (scrub present,
+// scrubAfterStrip absent) falls through to scrub, which is the same elision
+// with its name boundaries kept, and one whose exports load and throw when
+// called costs the VALUE and nothing else: the placeholder stands where the
+// text would be, the fault still names what the entry was refused for, and the
+// parse still returns the entry among its bad ones, so every verdict above it
+// stands.
+//
+// What a refused entry reads as when the renderer will not answer for it.
+// Printing the entry unrendered is the one thing this leg cannot do: the text
+// is free text out of a record, so it can carry an absolute home-anchored
+// path, and both channels that read it are read by a model.
+const ENTRY_VALUE_WITHHELD = '[value withheld: the kit library that elides the account name '
+    + 'would not render it]';
+function refusedEntryText(entry, fault, cap) {
     const notes = [];
-    if (shown !== head) notes.push('characters removed for display');
-    if (cut) notes.push('shown to ' + ANCHOR_ENTRY_CAP + ' characters');
+    let shown;
+    try {
+        const elided = scrub(String(entry));
+        const stripped = elided.replace(ANCHOR_INVISIBLE, '').replace(ANCHOR_WHITESPACE, '');
+        const text = typeof scrubAfterStrip === 'function'
+            ? scrubAfterStrip(stripped, stripped.length !== elided.length)
+            : scrub(stripped);
+        const cut = text.length > cap;
+        shown = cut ? text.slice(0, cap) : text;
+        // Both notes are pushed after every renderer call, so a throw leaves
+        // none of them behind describing a reduction that never ran.
+        if (stripped !== elided) notes.push('characters removed for display');
+        if (cut) notes.push('shown to ' + cap + ' characters');
+    } catch {
+        // The error is dropped whole: a renderer's message can itself carry
+        // the path it failed on, so nothing of it is emitted.
+        shown = ENTRY_VALUE_WITHHELD;
+    }
     notes.push(fault);
     return shown + ' [' + notes.join('; ') + ']';
 }
@@ -3929,14 +4215,7 @@ function isTriggerEntry(value) {
 // grammar refused: an entry carrying a tab or a non-breaking space is exactly
 // the entry whose whitespace must not be echoed back intact.
 function triggerRefusalText(entry, fault) {
-    const cut = entry.length > TRIGGER_ENTRY_CAP;
-    const head = cut ? entry.slice(0, TRIGGER_ENTRY_CAP) : entry;
-    const shown = head.replace(ANCHOR_INVISIBLE, '').replace(ANCHOR_WHITESPACE, '');
-    const notes = [];
-    if (shown !== head) notes.push('characters removed for display');
-    if (cut) notes.push('shown to ' + TRIGGER_ENTRY_CAP + ' characters');
-    notes.push(fault);
-    return shown + ' [' + notes.join('; ') + ']';
+    return refusedEntryText(entry, fault, TRIGGER_ENTRY_CAP);
 }
 
 // The `triggers:` value read as its entries, or null when the value is not one
@@ -5003,7 +5282,7 @@ function listMemories(memDir) {
 function memDirOrNote() {
     const memDir = projectMemoryDir(process.cwd());
     if (!fs.existsSync(memDir)) {
-        process.stderr.write('memq: no memory directory at ' + sanitize(memDir, 260) + '\n');
+        process.stderr.write('memq: no memory directory at ' + shownPath(memDir) + '\n');
         return null;
     }
     return memDir;
@@ -5031,7 +5310,7 @@ function memDirOrNote() {
 function readMemDirOrNote() {
     const memDir = projectMemoryDir(process.cwd());
     if (fs.existsSync(memDir)) return memDir;
-    process.stderr.write('memq: no memory directory at ' + sanitize(memDir, 260) + '\n');
+    process.stderr.write('memq: no memory directory at ' + shownPath(memDir) + '\n');
     return operatorTierOrNull() === null ? null : memDir;
 }
 
@@ -6906,25 +7185,33 @@ function printMemoryBody(file, fence, read) {
         return 'error';
     }
     if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
+    // The home elision runs before the cap, which is the order the channel's own
+    // renderer takes and for its reason: the elision matches whole spellings, so
+    // a cut taken first can bisect one and leave a fragment of the account name
+    // that no whole-spelling pattern downstream reaches. It is the elision alone
+    // here rather than the whole renderer, a body being a document whose
+    // punctuation and newlines are content. The length the truncation note
+    // reports is this text's, so the number names what would have printed.
+    const text = scrub(body);
     if (fence !== null) {
         process.stdout.write(fence + '\n');
-        const capped = body.length > BODY_CAP;
-        const shown = capped ? body.slice(0, BODY_CAP) : body;
+        const capped = text.length > BODY_CAP;
+        const shown = capped ? text.slice(0, BODY_CAP) : text;
         const lines = shown.split(/\r?\n/);
         if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
         process.stdout.write(lines.map((l) => '  ' + l).join('\n') + '\n');
         if (capped) {
             process.stdout.write('memq: body truncated at ' + BODY_CAP
-                + ' of ' + body.length + ' characters\n');
+                + ' of ' + text.length + ' characters\n');
         }
         return 'printed';
     }
-    if (body.length > BODY_CAP) {
-        process.stdout.write(body.slice(0, BODY_CAP));
+    if (text.length > BODY_CAP) {
+        process.stdout.write(text.slice(0, BODY_CAP));
         process.stdout.write('\nmemq: body truncated at ' + BODY_CAP
-            + ' of ' + body.length + ' characters\n');
+            + ' of ' + text.length + ' characters\n');
     } else {
-        process.stdout.write(body.endsWith('\n') ? body : body + '\n');
+        process.stdout.write(text.endsWith('\n') ? text : text + '\n');
     }
     return 'printed';
 }
@@ -9828,7 +10115,7 @@ function cmdAnchor(argv) {
     }
     const rootReal = anchorRootReal(root);
     if (rootReal === null) {
-        process.stderr.write('memq: the project root ' + sanitize(root, 260) + ' is not a'
+        process.stderr.write('memq: the project root ' + shownPath(root) + ' is not a'
             + ' directory this can resolve an anchor path against; nothing written\n');
         process.exitCode = 1;
         return;
@@ -9951,7 +10238,7 @@ function cmdAnchor(argv) {
     const decayLock = acquireLock(path.join(memDir, DECAY_LOCK_FILE));
     if (!decayLock.ok) {
         process.stderr.write('memq: project store locked by a decay pass, nothing written: '
-            + sanitize(decayLock.reason, 260) + '\n');
+            + shownText(decayLock.reason, 260) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -9960,7 +10247,7 @@ function cmdAnchor(argv) {
         const lock = acquireLock(path.join(memDir, STORE_LOCK_FILE));
         if (!lock.ok) {
             process.stderr.write('memq: project store locked, nothing written: '
-                + sanitize(lock.reason, 260) + '\n');
+                + shownText(lock.reason, 260) + '\n');
             process.exitCode = 1;
             return;
         }
@@ -10841,7 +11128,7 @@ function cmdTriggers(argv) {
     const decayLock = memDir === null ? null : acquireLock(path.join(memDir, DECAY_LOCK_FILE));
     if (decayLock !== null && !decayLock.ok) {
         process.stderr.write('memq: project store locked by a decay pass, nothing written: '
-            + sanitize(decayLock.reason, 260) + '\n');
+            + shownText(decayLock.reason, 260) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -10850,7 +11137,7 @@ function cmdTriggers(argv) {
         const lock = acquireLock(path.join(lockDir, STORE_LOCK_FILE));
         if (!lock.ok) {
             process.stderr.write('memq: ' + (toType ? 'type' : toOperator ? 'operator' : 'project')
-                + ' store locked, nothing written: ' + sanitize(lock.reason, 260) + '\n');
+                + ' store locked, nothing written: ' + shownText(lock.reason, 260) + '\n');
             process.exitCode = 1;
             return;
         }
@@ -11690,7 +11977,7 @@ function sweepFacts(swept) {
         carried: swept && typeof swept.carried === 'number' ? swept.carried : 0,
         records: swept && Array.isArray(swept.records) ? swept.records.length : 0,
         writeError: swept && swept.written === false && swept.writeError
-            ? sanitize(swept.writeError, 200) : null
+            ? shownText(swept.writeError, 200) : null
     };
 }
 
@@ -13552,8 +13839,12 @@ function archiveStep(memDir, archives, report, tag, options) {
 // would put text
 // this module did not write at column zero in memq's own voice, in the line
 // an operator reads while deciding whether to confirm a destructive act, so
-// the charset is closed on the way out. A name the store minted is unchanged
-// by this. The bound is the path bound (260, as in memDirOrNote) rather than
+// the charset is closed on the way out. On this CLI's own channel the name
+// also takes the home elision, which a store-minted name is not unchanged by:
+// a project segment is the working directory flattened, so one under the home
+// directory carries the account name inside the segment and prints as
+// `flattened-home-...`, which is the elision doing its job on a value that is
+// a path in a different spelling. The bound is the path bound (260, as in memDirOrNote) rather than
 // the memory-name cap, because the segment is derived from a full path and
 // two deep sibling projects truncated shorter would print as one
 // indistinguishable declarer.
@@ -13580,7 +13871,7 @@ function projectsDeclaringType(type) {
     const projectsDir = projectsRootPath();
     const entries = projectSegments();
     if (entries === null) {
-        process.stderr.write('memq: could not scan ' + sanitize(projectsDir, 260)
+        process.stderr.write('memq: could not scan ' + shownPath(projectsDir)
             + ' for declaring projects\n');
         return null;
     }
@@ -14100,7 +14391,7 @@ function cmdDecayPrune(argv) {
 
     const lock = acquireLock(path.join(memDir, DECAY_LOCK_FILE));
     if (!lock.ok) {
-        process.stderr.write('memq: decay pass not started: ' + sanitize(lock.reason, 200) + '\n');
+        process.stderr.write('memq: decay pass not started: ' + shownText(lock.reason, 200) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -14118,7 +14409,7 @@ function cmdDecayPrune(argv) {
         if (!typeLock.ok) {
             lock.release();
             process.stderr.write('memq: decay pass not started: type store locked: '
-                + sanitize(typeLock.reason, 200) + '\n');
+                + shownText(typeLock.reason, 200) + '\n');
             process.exitCode = 1;
             return;
         }
@@ -14131,7 +14422,7 @@ function cmdDecayPrune(argv) {
             if (typeLock !== null) typeLock.release();
             lock.release();
             process.stderr.write('memq: decay pass not started: operator store locked: '
-                + sanitize(operatorLock.reason, 200) + '\n');
+                + shownText(operatorLock.reason, 200) + '\n');
             process.exitCode = 1;
             return;
         }
@@ -15303,7 +15594,7 @@ async function cmdAddType(argv) {
     const lock = acquireLock(path.join(dir, STORE_LOCK_FILE));
     if (!lock.ok) {
         process.stderr.write('memq: type store locked, nothing written: '
-            + sanitize(lock.reason, 260) + '\n');
+            + shownText(lock.reason, 260) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -15895,7 +16186,7 @@ async function cmdAddOperator(argv) {
     const lock = acquireLock(path.join(dir, STORE_LOCK_FILE));
     if (!lock.ok) {
         process.stderr.write('memq: operator store locked, nothing written: '
-            + sanitize(lock.reason, 260) + '\n');
+            + shownText(lock.reason, 260) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -16527,7 +16818,7 @@ function nonRecordRefusal(filePath, name, where, what, creating) {
     }
     process.stderr.write('memq: \'' + sanitize(name, NAME_CAP) + '\'' + where + ' is '
         + found.phrase + ', so ' + what + ' will not act on it: a tier holds records, which'
-        + ' are plain files. Nothing was changed; removing ' + sanitize(filePath, 260)
+        + ' are plain files. Nothing was changed; removing ' + shownPath(filePath)
         + ' by hand is what frees the name'
         + (creating ? ', which until then is not a name to create' : '') + '\n');
     process.exitCode = 1;
@@ -16806,7 +17097,7 @@ function deleteSharedRecord(dir, indexPath, name, where, options) {
     const lock = acquireLock(path.join(dir, STORE_LOCK_FILE));
     if (!lock.ok) {
         process.stderr.write('memq: store locked, nothing deleted: '
-            + sanitize(lock.reason, 260) + '\n');
+            + shownText(lock.reason, 260) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -16872,12 +17163,12 @@ function deleteSharedRecord(dir, indexPath, name, where, options) {
         step = 'listing the directories the copies of its text sit in';
         const liveEntries = listCopyDirectory(dir);
         const archEntries = listCopyDirectory(archiveDir);
-        step = 'removing the copies of its text in ' + sanitize(dir, 260);
+        step = 'removing the copies of its text in ' + shownPath(dir);
         removeRecordCopies(dir, liveEntries, file, place, tookCopy);
-        step = 'removing the copies of its text in ' + sanitize(archiveDir, 260);
+        step = 'removing the copies of its text in ' + shownPath(archiveDir);
         removeRecordCopies(archiveDir, archEntries, file,
             place === null ? null : place + ' under ' + ARCHIVE_DIR + '/', tookCopy);
-        step = 'rewriting the tier index at ' + sanitize(indexPath, 260);
+        step = 'rewriting the tier index at ' + shownPath(indexPath);
         const lines = removeIndexLine(indexPath, file, MEMORY_INDEX_HEADING,
             { sharedTier: options.sharedTier, onBackup: tookBackup });
         if (lines > 0) done.push('index line');
@@ -16885,21 +17176,21 @@ function deleteSharedRecord(dir, indexPath, name, where, options) {
         // description lives once the tier index drops it, so it is a listing
         // of this name exactly as the tier index is.
         step = 'rewriting the archive index at '
-            + sanitize(path.join(archiveDir, INDEX_FILE), 260);
+            + shownPath(path.join(archiveDir, INDEX_FILE));
         const archLines = removeIndexLine(path.join(archiveDir, INDEX_FILE), file,
             ARCHIVE_INDEX_HEADING, { sharedTier: options.sharedTier, onBackup: tookBackup });
         if (archLines > 0) done.push('archive index line');
-        step = 'rewriting the usage sidecar in ' + sanitize(dir, 260);
+        step = 'rewriting the usage sidecar in ' + shownPath(dir);
         const stamps = removeUsageStamps(dir, file,
             { onBackup: tookBackup, recordPresent: live || archived });
         if (stamps > 0) done.push('usage stamps');
         if (live) {
-            step = 'removing the record at ' + sanitize(memPath, 260);
+            step = 'removing the record at ' + shownPath(memPath);
             fs.unlinkSync(memPath);
             done.push('the record');
         }
         if (archived) {
-            step = 'removing the archived copy at ' + sanitize(archPath, 260);
+            step = 'removing the archived copy at ' + shownPath(archPath);
             fs.unlinkSync(archPath);
             done.push('the archived copy');
         }
@@ -17081,7 +17372,7 @@ function main() {
     try {
         pinnedProjectSegment();
     } catch (err) {
-        process.stderr.write('memq: ' + err.message + '\n');
+        process.stderr.write('memq: ' + failureText(err) + '\n');
         process.exitCode = 1;
         return;
     }
@@ -17148,9 +17439,89 @@ function main() {
     else usage(cmd === undefined ? undefined : 'unknown subcommand ' + sanitize(cmd, 40));
 }
 
+// Whether this run has already reported a failure nothing else answered for, so
+// the line is spent once. The report writes to a descriptor, and a descriptor
+// whose reader is gone answers a write with a throw; that throw is itself a
+// failure nothing else answers for, which arrives back here. Without the latch
+// the two feed each other for as long as the loop runs.
+let uncaughtReported = false;
+
+// A failure nothing else answered for, said in this CLI's own voice.
+//
+// It exists because Node's fatal exception writer does not go through
+// process.stderr.write: it writes the message and the stack to the descriptor
+// itself, so the wrapper installed below never sees it and the account name
+// rides out in both the message an fs error carries and every frame's absolute
+// path. What lands here instead is the one line every other failed command
+// prints, elided and bounded by failureText, with the exit status the async
+// verbs already answer a failed command with.
+//
+// The status is set before anything else and on every entry, since it is the
+// one part of this report that cannot fail. The write is guarded because a
+// throw out of it would print the trace whose absolute paths this function
+// exists to keep off the channel: a channel that will not take the line loses
+// the line, and the status is what is left to say the run failed.
+function reportUncaught(err) {
+    process.exitCode = 1;
+    if (uncaughtReported) return;
+    uncaughtReported = true;
+    try {
+        process.stderr.write('memq: ' + failureText(err) + '\n');
+    } catch {
+        // The channel is gone; the status above is what is left to say it.
+    }
+}
+
+// The latch above, cleared. A CLI run spends it once and exits, so this exists
+// for the case that drives reportUncaught in process: the refusal it stages
+// cannot be staged in a child (a write into a pipe whose reader has gone can
+// be buffered by the OS and succeed), and a latch left spent would leave every
+// later in-process caller silent for a reason that is not the code's.
+function resetUncaughtLatch() {
+    uncaughtReported = false;
+}
+
 // Run as a CLI this dispatches; loaded as a module (the test suite) it only
-// exports its internals.
-if (require.main === module) main();
+// exports its internals. The descriptors are wrapped before the first line is
+// written, so the channel's elision covers this run whichever verb it takes; a
+// module consumer writes to its own descriptors and gets none of this, the
+// handlers below included: a consumer's own crash is its own to report.
+//
+// The catch takes a synchronous verb's throw. The two process handlers are the
+// backstop for a throw out of a queued callback, which unwinds to the loop
+// rather than through this frame and so is outside any catch here. The two
+// descriptor handlers are for the other direction: a pipe whose reader has gone
+// fails the stream asynchronously, and a stream error nobody listens for is
+// thrown at the loop, where the uncaught handler would answer a broken channel
+// by writing to it. A refused descriptor is a failed status and nothing else.
+//
+// Nothing on this leg calls process.exit, and a later reader adding one would
+// take the report with it: a pending write to a pipe is dropped on win32 when
+// the process exits under it. What that costs instead is that the run drains
+// and carries on, so a success line composed before the failure can still land
+// after the failure line under a status of 1. The status is the reading, and it
+// is set on every leg that reports one.
+if (require.main === module && !libraryLoadFailed) {
+    scrubbedDescriptors();
+    process.stdout.on('error', () => { process.exitCode = 1; });
+    process.stderr.on('error', () => { process.exitCode = 1; });
+    process.on('uncaughtException', reportUncaught);
+    process.on('unhandledRejection', reportUncaught);
+    // The floor this channel's guard rests on, read once and said once where it
+    // is not standing. An empty elision list answers two facts and only one of
+    // them is news: nothing to elide is ordinary, while no knowable home
+    // directory means every path below carries whatever the OS account name is,
+    // with nothing else here saying so.
+    if (!homeElisionsKnown()) {
+        process.stderr.write('memq: no home directory is known, so paths in this output'
+            + ' are not elided\n');
+    }
+    try {
+        main();
+    } catch (err) {
+        reportUncaught(err);
+    }
+}
 
 module.exports = {
     USAGE_FILE,
@@ -17221,6 +17592,8 @@ module.exports = {
     NEIGHBOURS_SHOWN,
     NEIGHBOUR_TIMEOUT_MS,
     PAIRS_SHOWN,
+    BODY_CAP,
+    SUMMARY_CAP,
     parseSince,
     ARCHIVE_DIR,
     OPERATOR_LABEL,
@@ -17254,6 +17627,9 @@ module.exports = {
     readTagRegistry,
     acquireLock,
     sanitize,
+    charsetRule,
+    reportUncaught,
+    resetUncaughtLatch,
     isTypeName,
     typeDir,
     typeIndexPath,

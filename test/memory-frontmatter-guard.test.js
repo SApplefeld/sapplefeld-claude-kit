@@ -268,6 +268,117 @@ test('a supersedes: value memq reads as no name at all is denied', () => {
     } finally { rmStore(store); }
 });
 
+test('a rejected frontmatter value is quoted back with the home directory elided', () => {
+    // A rejected value is free text by definition: it FAILED the store's own
+    // grammar, so nothing about its shape is guaranteed and a hand- or
+    // model-written record can put an absolute home-anchored path in one. The
+    // deny reason is a channel a model reads, so the value goes onto it through
+    // the same elision every other model-read line takes.
+    //
+    // The fixture home's leaf is the account name under test, and both HOME and
+    // USERPROFILE name it, since os.homedir() reads USERPROFILE on win32 and
+    // HOME elsewhere. The store itself is still found through KIT_MEMORY_ROOT,
+    // so the home directory here is doing one job only: being the name that
+    // must not reach the channel.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        const res = runGuard(store,
+            writeTo(store, target, record(['supersedes: ' + path.join(home, 'x')])),
+            undefined, { HOME: home, USERPROFILE: home });
+        assertDeny(res, /one record name/);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(res.stderr),
+            'the OS account name must not reach the deny reason: ' + res.stderr);
+        assert.match(res.stderr, /~/,
+            'and the home directory is named in its elided form rather than the value being '
+            + 'dropped: ' + res.stderr);
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+// A preload module written under the store and named on the spawned guard's
+// NODE_OPTIONS: its body runs inside that child before the guard's own
+// requires, which is the one shape every fault injection in this file takes.
+// The path is forward-slashed because Node parses NODE_OPTIONS with backslash
+// as an escape character, and a backslashed one fails to resolve, killing the
+// child before the guard runs.
+function preloadEnv(store, name, lines) {
+    const shim = path.join(store.base, name);
+    fs.writeFileSync(shim, ["'use strict';", ...lines].join('\n') + '\n', 'utf8');
+    return { NODE_OPTIONS: '--require "' + shim.replace(/\\/g, '/') + '"' };
+}
+
+// The two libraries this guard loads, each by the path the guard resolves.
+const TRAP_LIBRARY = {
+    compact: ['plugins', 'claude-kit', 'hooks', 'kit-compact-lib.js'],
+    memq: ['plugins', 'claude-kit', 'scripts', 'memq.js']
+};
+
+// A preload that loads one of those libraries and patches it before the guard
+// requires it, which is how a state the guard cannot be argued into is stood
+// up: an installed cache one version behind, a renderer whose exports throw,
+// or a throw planted at an exact point of the guard's walk. The module cache
+// hands the guard the same object, so this is a fault injection rather than a
+// stub and every other reader stays real. `patch` is source with `lib` bound
+// to the loaded exports and `resolved` to the key they are cached under, so a
+// patch moves one export (`lib.x = ...`) or replaces the table whole
+// (`require.cache[resolved].exports = ...`).
+function libraryTrap(store, which, patch) {
+    const libPath = path.resolve(__dirname, '..', ...TRAP_LIBRARY[which]);
+    return preloadEnv(store, which + '-trap.js', [
+        "const path = require('path');",
+        'const resolved = require.resolve(path.resolve('
+            + JSON.stringify(libPath.replace(/\\/g, '/')) + '));',
+        'const lib = require(resolved);',
+        patch
+    ]);
+}
+
+test('a renderer the cache cannot supply costs the value and never the deny', () => {
+    // This guard is one of the enforcement points the hook canary probes, so
+    // the verdict is what has to survive a damaged cache. A renderer that
+    // cannot be called leaves the value withheld and every deny standing,
+    // rather than throwing into the catch around main(), which allows.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        const payload = writeTo(store, target, record(['supersedes: ' + path.join(home, 'x')]));
+        const res = runGuard(store, payload, undefined, {
+            ...libraryTrap(store, 'compact',
+                'require.cache[resolved].exports = { sanitizeForOutput: (s) => String(s) };'),
+            HOME: home,
+            USERPROFILE: home
+        });
+        assertDeny(res, /one record name/);
+        assert.match(res.stderr, /value withheld/,
+            'the value is withheld rather than printed unelided: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(res.stderr),
+            'so no account name reaches the reason: ' + res.stderr);
+        // The control: the same payload with the real library renders the value
+        // and elides it, so the withholding above is the trap speaking and not
+        // a guard that withholds everything.
+        const real = runGuard(store, payload, undefined, { HOME: home, USERPROFILE: home });
+        assertDeny(real, /one record name/);
+        assert.doesNotMatch(real.stderr, /value withheld/,
+            'an undamaged cache shows the value: ' + real.stderr);
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
 test('a supersedes: is checked under metadata: too, where the harness relocates it', () => {
     const store = makeStore();
     try {
@@ -1197,22 +1308,6 @@ test('a relative file_path is resolved against the payload cwd', () => {
     } finally { rmStore(store); }
 });
 
-// A preload that patches one memq export before the guard's own require runs,
-// so a throw can be planted at an exact point of the guard's walk. The module
-// cache hands the guard the same patched object, which is what makes this a
-// fault injection rather than a stub: every other reader stays real.
-function memqTrap(store, patchSource) {
-    const shim = path.join(store.base, 'memq-trap.js');
-    const memqPath = path.resolve(__dirname, '..', 'plugins', 'claude-kit', 'scripts', 'memq.js');
-    fs.writeFileSync(shim, [
-        "'use strict';",
-        "const path = require('path');",
-        'const memq = require(path.resolve(' + JSON.stringify(memqPath.replace(/\\/g, '/')) + '));',
-        patchSource
-    ].join('\n') + '\n', 'utf8');
-    return { NODE_OPTIONS: '--require "' + shim.replace(/\\/g, '/') + '"' };
-}
-
 test('a throw out of the check on a placed project-tier record is allowed and says the check itself failed', () => {
     // The error boundary above the readers: every enumerated cause below it
     // could speak while a throw out of a helper answered with the clean
@@ -1222,7 +1317,7 @@ test('a throw out of the check on a placed project-tier record is allowed and sa
     try {
         seed(store);
         const target = path.join(store.project, 'new-record.md');
-        const env = memqTrap(store, "memq.frontmatterAnchors = () => { throw new Error('trap'); };");
+        const env = libraryTrap(store, 'memq', "lib.frontmatterAnchors = () => { throw new Error('trap'); };");
         const text = assertNotChecked(runGuard(store, writeTo(store, target, CLEAN), undefined, env),
             /the check itself failed/);
         assert.match(text, /project-tier/, 'the line names the tier the target was placed in: ' + text);
@@ -1241,7 +1336,7 @@ test('a throw between placing a shared-tier target and refusing it is allowed an
     const store = makeStore();
     try {
         const target = path.join(store.type, 'a-type-record.md');
-        const env = memqTrap(store, "memq.isTypeName = () => { throw new Error('trap'); };");
+        const env = libraryTrap(store, 'memq', "lib.isTypeName = () => { throw new Error('trap'); };");
         const text = assertNotChecked(runGuard(store, writeTo(store, target, CLEAN), undefined, env),
             /the check itself failed/);
         assert.match(text, /type-tier/, 'the line names the shared tier: ' + text);
@@ -1264,7 +1359,7 @@ test("tierOf names the tier memq's own tierNameFor answers, so a shape memq move
     const store = makeStore();
     try {
         const target = path.join(store.type, 'a-type-record.md');
-        const env = memqTrap(store, "memq.tierNameFor = () => 'operator';");
+        const env = libraryTrap(store, 'memq', "lib.tierNameFor = () => 'operator';");
         assertDeny(runGuard(store, writeTo(store, target, CLEAN), undefined, env),
             /memq add-operator/,
             'the guard names the operator fix once memq answers operator for this directory');
@@ -1331,7 +1426,7 @@ test('a throw before any placement says nothing at all', () => {
     // on every write on the machine would be noise rather than a signal.
     const store = makeStore();
     try {
-        const env = memqTrap(store, "memq.tierDirFor = () => { throw new Error('trap'); };");
+        const env = libraryTrap(store, 'memq', "lib.tierDirFor = () => { throw new Error('trap'); };");
         const res = runGuard(store, writeTo(store, path.join(store.repo, 'notes.md'), DANGLING),
             undefined, env);
         assert.strictEqual(res.status, 0, 'fails open: ' + res.stderr);
@@ -1457,7 +1552,7 @@ test('a cause from one field never swallows a fault from another', () => {
     } finally { rmStore(store); }
 });
 
-test('each shownCap trigger probe reaches the fault it is named for', () => {
+test('each shownCap probe reaches the fault and the notes it is named for', () => {
     // shownCap measures the display bound from memq's own reduction rather
     // than declaring it, which only works while each probe reaches the fault
     // it was written for. The failure mode is silent: a probe that trips an
@@ -1498,6 +1593,25 @@ test('each shownCap trigger probe reaches the fault it is named for', () => {
     // would measure a shorter annotation than a real refusal can produce.
     assert.strictEqual(items.filter((it) => it.text.includes('characters removed for display')).length, 3,
         'the three lead-carrying probes each carry the reduction note');
+
+    // The anchors half of the same measurement, read out of the guard the same
+    // way. The bound has to cover the longest annotation memq can hand back,
+    // which is one carrying BOTH notes, so the first anchors probe is written
+    // to be stripped and then cut. Nothing about a probe that stopped being cut
+    // would fail on its own: it would still parse, still be refused, and still
+    // contribute a length, while the measured bound quietly shrank by the
+    // length of the note it no longer carries.
+    const declaredAnchors = /const probes = \[([\s\S]*?)\n {4}\];/.exec(src);
+    assert.ok(declaredAnchors, 'the guard declares its anchors probes as an array literal');
+    const anchorProbes = new Function('cap',
+        'return [' + declaredAnchors[1] + '];')(MEMQ_MODULE.ANCHOR_ENTRY_CAP);
+    const anchorItems = MEMQ_MODULE.parseAnchors(anchorProbes.join(', ')).items;
+    assert.strictEqual(anchorItems.length, anchorProbes.length,
+        'every anchors probe is refused and read back as its own entry');
+    assert.match(anchorItems[0].text,
+        /\[characters removed for display; shown to \d+ characters; /,
+        'the first anchors probe is cut as well as stripped, so the bound covers both notes: '
+            + anchorItems[0].text);
 });
 
 test('a triggers: line cut at memq\'s bound is allowed and says the unread tail was not checked', () => {
@@ -1778,17 +1892,14 @@ test('the real-path resolver is asked only for a target already under the store 
     const store = makeStore();
     try {
         const log = path.join(store.base, 'realpath.log');
-        const shim = path.join(store.base, 'record-realpath.js');
-        fs.writeFileSync(shim, [
-            "'use strict';",
+        const env = preloadEnv(store, 'record-realpath.js', [
             "const fs = require('fs');",
             'const real = fs.realpathSync.native;',
             'fs.realpathSync.native = function (p) {',
             '    fs.appendFileSync(' + JSON.stringify(log.replace(/\\/g, '/')) + ", String(p) + '\\n');",
             '    return real.apply(fs, arguments);',
             '};'
-        ].join('\n') + '\n', 'utf8');
-        const env = { NODE_OPTIONS: '--require "' + shim.replace(/\\/g, '/') + '"' };
+        ]);
         const unc = '\\\\kit-no-such-host\\share\\projects\\proj\\memory\\rec.md';
         const res = runGuard(store, writeTo(store, unc, CLEAN), undefined, env);
         assert.strictEqual(res.status, 0, 'a UNC target outside the store allows: ' + res.stderr);
@@ -1961,8 +2072,8 @@ test('a target placed in a tier directory whose tier cannot be named is allowed 
     const store = makeStore();
     try {
         const odd = path.join(store.base, 'odd-tier');
-        const env = memqTrap(store,
-            'memq.tierDirFor = () => ' + JSON.stringify(odd.replace(/\\/g, '/')) + ';');
+        const env = libraryTrap(store, 'memq',
+            'lib.tierDirFor = () => ' + JSON.stringify(odd.replace(/\\/g, '/')) + ';');
         const text = assertNotChecked(runGuard(store,
             writeTo(store, path.join(store.repo, 'a-record.md'), DANGLING), undefined, env),
             /could not be named/);
@@ -1981,8 +2092,8 @@ test('the containment refusal quotes an anchor path with its own visible charact
     const store = makeStore();
     try {
         const target = path.join(store.project, 'new-record.md');
-        const env = memqTrap(store,
-            "memq.frontmatterAnchors = () => ({ items: [], entries: [{ path: '../café-dir/tricky.js', sha: '"
+        const env = libraryTrap(store, 'memq',
+            "lib.frontmatterAnchors = () => ({ items: [], entries: [{ path: '../café-dir/tricky.js', sha: '"
             + SHA + "' }], bad: [], truncated: false });");
         const res = runGuard(store, writeTo(store, target,
             record(['anchors: src/a.js@' + SHA])), undefined, env);
@@ -2055,9 +2166,7 @@ test('a byte written to stdout by anything this guard loads cannot swallow the n
     // guard's own two lines are descriptor writes, under the fence.
     const store = makeStore();
     try {
-        const shim = path.join(store.base, 'noisy-dependency.js');
-        fs.writeFileSync(shim, [
-            "'use strict';",
+        const env = preloadEnv(store, 'noisy-dependency.js', [
             "const Module = require('module');",
             'const real = Module.prototype.require;',
             'Module.prototype.require = function (id) {',
@@ -2065,8 +2174,7 @@ test('a byte written to stdout by anything this guard loads cannot swallow the n
             "    if (String(id).includes('memq')) process.stdout.write('a note from a dependency\\n');",
             '    return loaded;',
             '};'
-        ].join('\n') + '\n', 'utf8');
-        const env = { NODE_OPTIONS: '--require "' + shim.replace(/\\/g, '/') + '"' };
+        ]);
         const res = runGuard(store, {
             tool_name: 'Write',
             cwd: store.repo,
@@ -2323,7 +2431,7 @@ test('a record whose anchors memq could not read is allowed and says it checked 
     try {
         const target = path.join(store.project, 'new-record.md');
         const anchored = record(['anchors: src/a.js@' + SHA]);
-        const env = memqTrap(store, 'memq.frontmatterAnchors = () => null;');
+        const env = libraryTrap(store, 'memq', 'lib.frontmatterAnchors = () => null;');
         assertNotChecked(runGuard(store, writeTo(store, target, anchored), undefined, env),
             /anchors could not be read/);
         // The control: the same payload with every reader real is checked and
@@ -2344,7 +2452,7 @@ test('a record whose triggers memq could not read is allowed and says it checked
     try {
         const target = path.join(store.project, 'new-record.md');
         const declared = record(['triggers: cmd:git stash']);
-        const env = memqTrap(store, 'memq.frontmatterTriggers = () => null;');
+        const env = libraryTrap(store, 'memq', 'lib.frontmatterTriggers = () => null;');
         assertNotChecked(runGuard(store, writeTo(store, target, declared), undefined, env),
             /triggers could not be read/);
         // The control: the same payload with every reader real is checked and
@@ -2372,5 +2480,264 @@ test('a tier whose archive cannot be listed is allowed and says it checked nothi
         // directory is refused, naming the reason the listing establishes.
         assertDeny(runGuard(store, writeTo(store, path.join(store.project, 'new-record.md'), DANGLING)),
             /holds no such record/);
+    } finally { rmStore(store); }
+});
+
+
+test('a refused anchors entry whose home spelling straddles memq\'s entry cap carries no'
+    + ' fragment of the account name', () => {
+    // memq reduces a refused entry for display and this guard quotes that
+    // reduction onto a deny reason, so the reduction's own cap is on this
+    // channel. It is taken on text the elision has already been through: a cut
+    // taken first halves a home spelling into a head of the OS account name
+    // that no whole-spelling pattern reaches afterwards, this guard's included.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        const target = path.join(store.project, 'new-record.md');
+        // Forward-slashed, which the elision matches as readily as the native
+        // separator, and led by one, since a home spelling running on from an
+        // alphanumeric names something else and is left as it stands.
+        const spelling = home.split(path.sep).join('/');
+        const filler = 'a'.repeat(MEMQ_MODULE.ANCHOR_ENTRY_CAP - 5 - spelling.length
+            + ACCOUNT.length);
+        const entry = filler + '/' + spelling + '/x';
+        assert.ok(entry.length > MEMQ_MODULE.ANCHOR_ENTRY_CAP,
+            'test setup: the entry runs past memq\'s cap, so a cut is what is under test');
+        const res = runGuard(store, writeTo(store, target, record(['anchors: ' + entry])),
+            undefined, { HOME: home, USERPROFILE: home });
+        assertDeny(res, /anchors: carries an entry outside the grammar/);
+        // Every window of the name longer than three characters, not the name
+        // whole: the head a cut leaves behind is what a whole-name assertion
+        // cannot see.
+        for (let n = 0; n + 4 <= ACCOUNT.length; n++) {
+            const window = ACCOUNT.slice(n, n + 4);
+            assert.ok(!new RegExp(window, 'i').test(res.stderr),
+                'no fragment of the OS account name reaches the deny reason, and ' + window
+                    + ' did: ' + res.stderr);
+        }
+        assert.match(res.stderr, /~/,
+            'and the home directory is named in its elided form rather than the entry being '
+            + 'dropped: ' + res.stderr);
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test('a renderer that loads and throws costs the value and never the deny', () => {
+    // The other half of the damaged-cache rule: a renderer whose exports are
+    // there and throw when called reaches the same catch around main() that a
+    // missing one would, and that catch ALLOWS. So the call is wrapped where
+    // the value is rendered rather than only where the module is bound.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        const payload = writeTo(store, target, record(['supersedes: ' + path.join(home, 'x')]));
+        const res = runGuard(store, payload, undefined, {
+            ...libraryTrap(store, 'compact',
+                "require.cache[resolved].exports = "
+                    + "{ scrub: () => { throw new Error('the fixture throws'); } };"),
+            HOME: home,
+            USERPROFILE: home
+        });
+        assertDeny(res, /one record name/);
+        assert.match(res.stderr, /value withheld/,
+            'the value is withheld rather than costing the verdict: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(res.stderr),
+            'so no account name reaches the reason either: ' + res.stderr);
+        // The control: the same payload with the real library renders the
+        // value, so the withholding above is the trap speaking.
+        const real = runGuard(store, payload, undefined, { HOME: home, USERPROFILE: home });
+        assertDeny(real, /one record name/);
+        assert.doesNotMatch(real.stderr, /value withheld/,
+            'an undamaged cache shows the value: ' + real.stderr);
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test('a renderer one version behind elides through the pass it does carry', () => {
+    // The state an installed cache one version behind puts this guard in: a
+    // kit-compact-lib.js carrying scrub without scrubAfterStrip. scrub is the
+    // same elision with its name boundaries kept, so it stands in, and the
+    // value is rendered rather than withheld.
+    //
+    // The value carries a double quote, which memq.sanitize bars: that is what
+    // routes the second pass through scrubAfterStrip at all, so a pin written
+    // without one would exercise the fall-through nowhere.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        const payload = writeTo(store, target,
+            record(['supersedes: ' + path.join(home, 'x') + '"y']));
+        const res = runGuard(store, payload, undefined, {
+            ...libraryTrap(store, 'compact',
+                'require.cache[resolved].exports = { scrub: lib.scrub };'),
+            HOME: home,
+            USERPROFILE: home
+        });
+        assertDeny(res, /one record name/);
+        assert.doesNotMatch(res.stderr, /value withheld/,
+            'a renderer carrying the fall-through renders the value: ' + res.stderr);
+        assert.match(res.stderr, /~/,
+            'and elides the home directory through the pass it does carry: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(res.stderr),
+            'so no account name reaches the reason: ' + res.stderr);
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test('a renderer that throws costs the value on the parser route too, and never the deny', () => {
+    // The same rule one layer down, on the route this guard does not render
+    // for itself. An `anchors:` or `triggers:` entry outside the grammar is
+    // reduced for display by memq, inside memq's own parse, and this guard
+    // reads back the text that parse hands it. So a renderer that loads and
+    // throws throws inside frontmatterAnchors or frontmatterTriggers, ahead of
+    // every wrapper here, and lands in the catch around main(), which ALLOWS.
+    // memq's own refusedEntryText is what makes that a withheld value instead:
+    // the entry still comes back among the parse's bad ones, and the deny that
+    // names it still runs.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        // Each field's entry carries the home directory and a double quote,
+        // the quote being what puts the entry outside both grammars on every
+        // platform rather than only where a path separator is the backslash.
+        const cases = [
+            ['anchors', 'anchors: ' + path.join(home, 'x') + '"y',
+                /anchors: carries an entry outside the grammar/],
+            ['triggers', 'triggers: cmd:' + path.join(home, 'x') + '"y',
+                /triggers: carries an entry outside the grammar/]
+        ];
+        for (const [field, line, pattern] of cases) {
+            const payload = writeTo(store, target, record([line]));
+            const res = runGuard(store, payload, undefined, {
+                ...libraryTrap(store, 'compact',
+                    "require.cache[resolved].exports = "
+                        + "{ scrub: () => { throw new Error('the fixture throws'); } };"),
+                HOME: home,
+                USERPROFILE: home
+            });
+            assertDeny(res, pattern, 'the ' + field + ' deny stands under a throwing renderer');
+            // The deny above is what proves the parser answered; this match
+            // does not say which layer withheld, since the guard's own shown()
+            // withholds under the same trap, and test/memq.test.js pins
+            // memq's placeholder on the module route directly.
+            assert.match(res.stderr, /value withheld/,
+                'a withheld value rides the ' + field + ' reason in place of the entry: ' + res.stderr);
+            assert.ok(!new RegExp(ACCOUNT, 'i').test(res.stderr),
+                'so no account name reaches the ' + field + ' reason: ' + res.stderr);
+            // The control: the same record with the real library denies and
+            // shows the entry, so the withholding above is the trap speaking.
+            const real = runGuard(store, payload, undefined, { HOME: home, USERPROFILE: home });
+            assertDeny(real, pattern, 'the ' + field + ' deny with an undamaged cache');
+            assert.doesNotMatch(real.stderr, /value withheld/,
+                'an undamaged cache shows the ' + field + ' entry: ' + real.stderr);
+        }
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+test('a memq one version behind renders a refused entry through the pass it does carry', () => {
+    // The skew half of the same route: memq calls the second pass by name at
+    // module scope, so a kit-compact-lib.js carrying scrub without
+    // scrubAfterStrip is a TypeError inside the parse rather than a missing
+    // elision. scrub is that same elision with its name boundaries kept, so it
+    // stands in and the entry is rendered rather than withheld.
+    const ACCOUNT = 'zephyrina';
+    const store = makeStore();
+    const homeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mfg-acct-'));
+    const home = path.join(homeBase, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        const payload = writeTo(store, target,
+            record(['anchors: ' + path.join(home, 'x') + '"y']));
+        const res = runGuard(store, payload, undefined, {
+            ...libraryTrap(store, 'compact',
+                'require.cache[resolved].exports = { scrub: lib.scrub };'),
+            HOME: home,
+            USERPROFILE: home
+        });
+        assertDeny(res, /anchors: carries an entry outside the grammar/);
+        assert.doesNotMatch(res.stderr, /value withheld/,
+            'a library carrying the fall-through renders the entry: ' + res.stderr);
+        assert.match(res.stderr, /~/,
+            'and elides the home directory through the pass it does carry: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(res.stderr),
+            'so no account name reaches the reason: ' + res.stderr);
+    } finally {
+        rmStore(store);
+        fs.rmSync(homeBase, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+});
+
+// A preload that refuses one module's require outright, standing in for an
+// install missing a file rather than for a cache carrying a skewed one.
+function requireRefusingPreload(store, basename) {
+    return preloadEnv(store, 'refuse-require.js', [
+        "const Module = require('module');",
+        'const realLoad = Module._load;',
+        'Module._load = function (request) {',
+        '    if (String(request).endsWith(' + JSON.stringify(basename) + ')) {',
+        "        const err = new Error('the fixture refuses this require');",
+        "        err.code = 'MODULE_NOT_FOUND';",
+        '        throw err;',
+        '    }',
+        '    return realLoad.apply(Module, arguments);',
+        '};'
+    ]);
+}
+
+test('a renderer that will not load at all leaves this guard where an unloadable memq does', () => {
+    // The withheld value covers a renderer that loads and lacks or breaks an
+    // export. One that will not load is a different state and lands earlier:
+    // memq requires the same library at its own module scope and rethrows that
+    // failure when it is itself loaded as a module, so the require of memq in
+    // main() throws before any target has been placed in a tier, and the catch
+    // around main() allows with nothing to say, exactly as it does for an
+    // unloadable memq. The not-checked note needs a placed tier to name, and
+    // there is none yet.
+    const store = makeStore();
+    try {
+        seed(store);
+        const target = path.join(store.project, 'new-record.md');
+        const payload = writeTo(store, target, DANGLING);
+        for (const basename of ['kit-compact-lib.js', 'memq.js']) {
+            const res = runGuard(store, payload, undefined,
+                requireRefusingPreload(store, basename));
+            assert.strictEqual(res.status, 0,
+                'a library that will not load allows: ' + res.stderr);
+            assert.strictEqual(res.stdout, '', 'with no context: ' + res.stdout);
+            assert.strictEqual(res.stderr, '', 'and nothing on the deny channel: ' + res.stderr);
+        }
+        // The control: the same payload with both libraries real denies, so
+        // the silence above is the refused require speaking.
+        assertDeny(runGuard(store, payload), /holds no such record/);
     } finally { rmStore(store); }
 });

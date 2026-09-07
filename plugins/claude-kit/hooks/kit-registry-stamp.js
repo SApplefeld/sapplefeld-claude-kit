@@ -87,15 +87,56 @@
 
 const fs = require('fs');
 const path = require('path');
-const {
-    readRegistryEntryText, stampRegistryFields,
+
+// The kit libraries, bound through a guard that splits the two ways this file
+// is loaded. Run as a CLI, a require that throws would print Node's own trace,
+// and every module path on a `Require stack:` is home-anchored on an installed
+// plugin, while this tool's output is read by a model that was told to run it;
+// so that leg names the failure, withholds the text and exits nonzero. Required
+// as a MODULE, the throw rides on unchanged: the constants this file exports are
+// derived from the libraries' at module scope just below, so a module that
+// loaded with them unbound would answer undefined where it now fails loudly.
+let readRegistryEntryText, stampRegistryFields,
     usableSessionId, CHECKPOINT_FUTURE_SKEW_MS,
-    coordinatorRoot, coordinatorDir,
-    registryField: field, sanitizeForOutput: sanitize
-} = require('./kit-compact-lib.js');
-const { namesNetworkShare } = require('./kit-network-lib.js');
-const { containedRealPath, listBoundedNames, DIR_SCAN_MAX_ENTRIES } = require('./kit-read-lib.js');
-const { HEARTBEAT_THROTTLE_MS } = require('./seat-stop.js');
+    coordinatorRoot, coordinatorDir, field, sanitize,
+    namesNetworkShare,
+    containedRealPath, listBoundedNames, DIR_SCAN_MAX_ENTRIES,
+    HEARTBEAT_THROTTLE_MS;
+try {
+    ({
+        readRegistryEntryText, stampRegistryFields,
+        usableSessionId, CHECKPOINT_FUTURE_SKEW_MS,
+        coordinatorRoot, coordinatorDir,
+        registryField: field, sanitizeForOutput: sanitize
+    } = require('./kit-compact-lib.js'));
+    ({ namesNetworkShare } = require('./kit-network-lib.js'));
+    ({ containedRealPath, listBoundedNames, DIR_SCAN_MAX_ENTRIES } = require('./kit-read-lib.js'));
+    ({ HEARTBEAT_THROTTLE_MS } = require('./seat-stop.js'));
+} catch (err) {
+    if (require.main !== module) throw err;
+    // The error's CODE still rides, since a Node error code is an upper-case
+    // identifier (MODULE_NOT_FOUND, ERR_DLOPEN_FAILED) that names the failure's
+    // kind and can carry no path; anything else in that field is dropped.
+    const code = err && typeof err.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(err.code)
+        ? ' (' + err.code + ')' : '';
+    // Written to the descriptor rather than through process.stderr: a write to a
+    // pipe is asynchronous on win32, and process.exit below does not wait for
+    // one, so the single sentence this leg exists to print is the one thing an
+    // exit here can drop.
+    //
+    // The write itself can throw, a reader that closed the pipe being the
+    // ordinary way (EPIPE), and a throw here would print the stack trace whose
+    // absolute paths this leg exists to keep off the channel. So a descriptor
+    // that will not take the sentence loses the sentence and nothing more.
+    try {
+        fs.writeSync(2, 'kit-registry-stamp: a kit library could not be loaded' + code
+            + ', and the renderer that takes the OS account name out of an error is in it, so the'
+            + ' message itself is withheld; nothing written\n');
+    } catch {
+        // The channel is gone; the exit code below is what is left to say it.
+    }
+    process.exit(1);
+}
 
 // The entry's session-written time fields, per the role skill's registry shape.
 // `Heartbeat:` and `Banked:` are the machine-stamped lines that contract names,
@@ -752,10 +793,21 @@ if (require.main === module) {
         // An unguarded throw prints a stack trace, and a stack trace carries
         // absolute paths, which is the account name this module elides from
         // every line it composes deliberately. The catch keeps the one channel
-        // that bypasses those lines held to the same guard.
-        process.stderr.write('kit-registry-stamp: '
-            + sanitize(err && err.message ? err.message : 'the run failed')
-            + '; nothing written\n');
+        // that bypasses those lines held to the same guard. It writes to the
+        // descriptor for the reason the load-failure leg above does: a write to
+        // a pipe is asynchronous on win32 and the exit below does not wait for
+        // one, so this line is what an exit here would drop. And it is guarded
+        // for that same reason: a descriptor that refuses the write (a reader
+        // that closed the pipe, EPIPE) would otherwise throw out of the catch
+        // that exists to keep a stack trace off this channel, printing the one
+        // thing it was written to prevent.
+        try {
+            fs.writeSync(2, 'kit-registry-stamp: '
+                + sanitize(err && err.message ? err.message : 'the run failed')
+                + '; nothing written\n');
+        } catch {
+            // The channel is gone; the exit code below is what is left to say it.
+        }
         process.exit(1);
     }
 }

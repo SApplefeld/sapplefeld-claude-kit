@@ -52,7 +52,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { invokeReader, makeReaderScratch, removeReaderScratch, resolveReaderBinary, SCRATCH_PREFIX } from './run.mjs';
+import { elided, invokeReader, makeReaderScratch, removeReaderScratch, resolveReaderBinary, SCRATCH_PREFIX } from './run.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -121,12 +121,18 @@ try {
         cwd,
         args: variant === 'inherit' ? INHERIT_ARGS : undefined
     });
+    // Four of these carry a path, and this output is read by a model: the
+    // reader binary and the operator's own config directory are home-anchored on
+    // an ordinary box, the working directory is a scratch one under the OS temp
+    // directory, and a failed invocation's error text names the file it was
+    // refused on. They go through the runner's binding of the shared renderer,
+    // which is the one place the elision is spelled.
     process.stdout.write('variant: ' + variant + '\n');
-    process.stdout.write('reader: ' + bin + '\n');
-    process.stdout.write('configDir: ' + configDir + '\n');
-    process.stdout.write('cwd: ' + cwd + '\n');
+    process.stdout.write(elided('reader: ' + bin) + '\n');
+    process.stdout.write(elided('configDir: ' + configDir) + '\n');
+    process.stdout.write(elided('cwd: ' + cwd) + '\n');
     process.stdout.write('ok: ' + result.ok + '\n');
-    process.stdout.write('error: ' + (result.error || 'none') + '\n');
+    process.stdout.write(elided('error: ' + (result.error || 'none')) + '\n');
     process.stdout.write('cost: ' + result.costUsd + '\n');
     process.stdout.write('wall_ms: ' + (Date.now() - started) + '\n');
     process.stdout.write('---- reply ----\n' + result.text + '\n---- end ----\n');

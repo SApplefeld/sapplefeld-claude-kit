@@ -111,12 +111,16 @@
 // through the goal library's printable-ASCII screen first: a budget key and a
 // tracked path are repository-supplied text, and the `report` output is quoted
 // into plan-doc Chapters, where a newline inside a path would forge a row. One
-// message is outside that channel by construction, the refusal printed when the
+// message is outside that channel by construction, the refusal printed when a
 // library itself did not load, and it carries the printable-ASCII screen, the
 // backtick strip and the leading-hash strip applied inline, since the library that
 // owns them is the thing missing. The length cap is the one rule it cannot reuse.
-// Every path printed after the repository is resolved takes a second screen at the
-// write, which spells it relative to that repository: repoRelativeText below.
+// Every path printed after the repository is resolved takes two more screens at
+// the write. The first spells it relative to the repository under measurement
+// (repoRelativeText below); the second is the shared channel renderer, which
+// takes the OS account name out of whatever the first left absolute, since the
+// repository's own top level and a path outside it have no relative spelling
+// that means anything and this output is read by a model.
 //
 // Node core modules only, CommonJS, zero dependencies, UTF-8 throughout.
 
@@ -125,9 +129,10 @@
 const fs = require('fs');
 const path = require('path');
 
-// The three shared libraries every hostile boundary here runs through: the git
-// runner, the bounded file reader with its containment helper, and the
-// printable-ASCII screen. The require is guarded the way
+// The four shared libraries every hostile boundary here runs through: the git
+// runner, the bounded file reader with its containment helper, the
+// printable-ASCII screen, and the channel renderer this tool's every printed
+// line goes out through. The require is guarded the way
 // scripts/kit-goal-statusline.js guards its own hooks require, because a payload
 // carrying scripts/ without hooks/ is a real state: an unguarded MODULE_NOT_FOUND
 // at load exits 1, and 1 is the code this tool reserves for a ratchet failure, so
@@ -156,6 +161,21 @@ let libsDetail = null;
 // specifier is what the refusal carries, rather than the stack's own first line,
 // which is an absolute payload path.
 let loading = null;
+// The channel's renderer, bound ahead of the block below and separately from
+// it, because it is what the block's own refusal has to go out through: a
+// loader's message names the module path it was refused on, which is
+// home-anchored on an installed plugin, and this refusal reaches a model. Bound
+// on its own it survives any of the four requires below failing, and the one
+// state it cannot survive is its own library being the one that will not load,
+// which is what the withheld leg in the catch is for. It is loaded a second time
+// in the block below so that its absence is a run that could not take a reading
+// like any other missing library, rather than a silent loss of the elision.
+let scrubLine = null;
+try {
+    ({ scrub: scrubLine } = require('../hooks/kit-compact-lib.js'));
+} catch {
+    scrubLine = null;
+}
 try {
     loading = '../hooks/kit-git-lib.js';
     const git = require(loading);
@@ -163,14 +183,28 @@ try {
     const read = require(loading);
     loading = '../hooks/kit-goal-lib.js';
     const goal = require(loading);
+    loading = '../hooks/kit-compact-lib.js';
+    const channel = require(loading);
     libs = {
         gitOutput: git.gitOutput,
         gitRun: git.gitRun,
         readFileBounded: read.readFileBounded,
         containedRealPath: read.containedRealPath,
-        safeForAuthorization: goal.safeForAuthorization
+        safeForAuthorization: goal.safeForAuthorization,
+        scrub: channel.scrub
     };
 } catch (err) {
+    // The loader's own words say which of the two states this is, a module that
+    // is present and will not parse or a payload that carries none, so they ride
+    // in the refusal through the channel's renderer: a MODULE_NOT_FOUND message
+    // carries a `Require stack:` naming the absolute path of this file, which is
+    // home-anchored on an installed plugin and would otherwise put the OS account
+    // name into a line a model reads. Where the renderer is itself what would not
+    // load there is nothing to elide with, and the message is WITHHELD; the
+    // error's code still rides there, an anchored upper-case identifier being
+    // what a Node error code is and what can carry no path, and the specifier
+    // this file named as it issued the require names the module either way.
+    //
     // The three rules safePath applies, applied inline, because the library that
     // owns them is the thing that would not load: the printable-ASCII screen, the
     // backtick strip and the leading-hash strip. All three are the destination's
@@ -178,9 +212,14 @@ try {
     // destination as every other line here, a fenced block inside a plan-doc
     // Chapter, where a loader message carrying a backtick closes the fence early.
     // What cannot be reused is the length cap, which lives with the screen.
-    libsDetail = ('the require of ' + loading + ', one of the hooks libraries this tool reads git and files through, did not return one, so no reading can be taken: '
-        + String((err && err.message) || err).replace(/[^\x20-\x7E]/g, ' '))
-        .replace(/`/g, '').replace(/^#+/, '');
+    const code = err && typeof err.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(err.code)
+        ? ' (' + err.code + ')' : '';
+    const said = scrubLine === null
+        ? '; the loader\'s message is withheld, since the renderer that takes the OS account name out of a path is the library that would not load'
+        : ': ' + scrubLine(String((err && err.message) || err));
+    libsDetail = ('the require of ' + loading + ', one of the hooks libraries this tool reads git, files and its own output through, did not return one' + code
+        + ', so no reading can be taken' + said)
+        .replace(/[^\x20-\x7E]/g, ' ').replace(/`/g, '').replace(/^#+/, '');
 }
 
 // The refusal every function that dereferences `libs` opens with. It throws
@@ -1687,9 +1726,17 @@ function main() {
         process.exitCode = 2;
         return;
     }
+    // The refusals an argument earns, through the channel's own renderer. They
+    // are composed before the repository is resolved, so the rule that spells a
+    // path relative to it has nothing to answer against yet, and a token a
+    // caller passed can be an absolute path under the home directory: an
+    // unknown flag and a mistyped verb are printed back as they were written,
+    // and this output is read by a model. `libs` is bound wherever this runs,
+    // the one refusal composed without it having returned above.
+    const refuseArg = (text) => process.stderr.write('kit-size: ' + libs.scrub(text) + '\n');
     const args = parseArgs(process.argv.slice(2));
     if (args.invalid !== null) {
-        process.stderr.write('kit-size: ' + invalidMessage(args) + '\n' + USAGE + '\n');
+        refuseArg(invalidMessage(args) + '\n' + USAGE);
         process.exitCode = 2;
         return;
     }
@@ -1697,12 +1744,12 @@ function main() {
     // usage block tells a reader what the tool takes and not which of their tokens
     // it would not take, and a typo and a forgotten verb are different mistakes.
     if (args.verb === null) {
-        process.stderr.write('kit-size: no verb was given, and this tool takes one of check, report or init\n' + USAGE + '\n');
+        refuseArg('no verb was given, and this tool takes one of check, report or init\n' + USAGE);
         process.exitCode = 2;
         return;
     }
     if (args.verb !== 'check' && args.verb !== 'report' && args.verb !== 'init') {
-        process.stderr.write('kit-size: ' + safePath(args.verb) + ' is not a verb this tool takes; only check, report and init are\n' + USAGE + '\n');
+        refuseArg(safePath(args.verb) + ' is not a verb this tool takes; only check, report and init are\n' + USAGE);
         process.exitCode = 2;
         return;
     }
@@ -1714,8 +1761,15 @@ function main() {
     // to remember the rule for itself. The repository's own top level has no relative
     // spelling and comes through as it stands, which is what the subject line and the
     // git-failure details print.
-    const out = (text) => process.stdout.write(repoRelativeText(repoDir, text) + '\n');
-    const refuse = (text) => process.stderr.write('kit-size: ' + repoRelativeText(repoDir, text) + '\n');
+    // And through the channel's own renderer after it, which takes the OS
+    // account name out of whatever is left absolute: the repository's own top
+    // level has no relative spelling, and a path outside the repository has none
+    // that means anything, so those two reach this line home-anchored on the
+    // ordinary layout and this output is read by a model. `libs` is bound
+    // wherever these run, the one refusal composed without it returning above.
+    const shown = (text) => libs.scrub(repoRelativeText(repoDir, text));
+    const out = (text) => process.stdout.write(shown(text) + '\n');
+    const refuse = (text) => process.stderr.write('kit-size: ' + shown(text) + '\n');
     // A --repo naming anything but a repository's top level is refused. Git
     // resolves this tool's relative pathspecs and its own output paths against the
     // directory it is pointed at, so a subdirectory yields a reading whose corpus

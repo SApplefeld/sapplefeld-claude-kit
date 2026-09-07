@@ -29651,3 +29651,995 @@ test('an expired pairs block leaves the sweep behind it not entered: the scan ex
         rmHomeStore(store);
     }
 });
+// --- The account name in a filesystem error ------------------------------
+
+// The fixture account name for the case below, chosen the way
+// test/kit-output-channel.test.js chooses its own: a string that appears in no
+// temp directory's own path on any box this suite runs on. The operator's real
+// account name sits inside os.tmpdir() on win32, so a case asserting "the
+// account name is absent from this line" against a common name would read the
+// machine's own path and fail for a reason that is not memq's.
+const ACCOUNT_NAME = 'zephyrina';
+
+// A home-redirected store whose home directory's LEAF is that account name, so
+// every store path under it carries the name the channel has to take out. The
+// parent rides along because rmHomeStore removes the home directory and this
+// fixture puts one more directory above it.
+function makeAccountHomeStore() {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-account-'));
+    const home = path.join(parent, ACCOUNT_NAME);
+    fs.mkdirSync(home);
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-proj-'));
+    return { parent, home, proj, root: path.join(home, '.claude') };
+}
+
+test('a filesystem failure reaches stderr with the OS account name elided out of the path', (t) => {
+    // An fs error names the file the syscall was refused on, the store sits
+    // under the home directory, and this CLI's stdout and stderr are read by a
+    // model, so the failure line is where the account name rides out. The
+    // fixture makes the directory unreadable in the one way that is portable
+    // and that carries the path in the message: the memory directory is a plain
+    // file, so scandir refuses with ENOTDIR and names it.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(path.dirname(memDir), { recursive: true });
+        fs.writeFileSync(memDir, 'a file where the memory directory belongs', 'utf8');
+        const res = runHome(store, ['recent']);
+        assert.match(res.stderr, /could not read memory directory/,
+            'test setup: the failure under test is the one this fixture stages: ' + res.stderr);
+        assert.match(res.stderr, /ENOTDIR/,
+            'test setup: and it is the error whose message carries the path: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.ok(res.stderr.includes('~'),
+            'and the home directory is elided to the operator\'s own shorthand rather than the '
+            + 'path being dropped: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+test('the store path in a resolution note is elided the same way', (t) => {
+    // The other class of path this CLI prints: not an error's, but one it
+    // resolved itself and hands back so an operator can see where it looked.
+    // The whole of it is home-anchored on an ordinary box, since the store lives
+    // under the home directory.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const res = runHome(store, ['touch', 'nothing-here', '--applied']);
+        assert.match(res.stderr, /no memory directory at /,
+            'test setup: the note under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.match(res.stderr, /no memory directory at ~/,
+            'and what is printed is the store path with the home directory elided, rather than '
+            + 'the path dropped: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+// The same fixture with a deep working directory, so the store path this CLI
+// prints back runs past the shared renderer's own default cap of 120 characters
+// while staying inside memq's path cap of 260. That length band is the only one
+// where the two caps are distinguishable, and a store path lands in it on an
+// ordinary box: the project segment is the whole cwd flattened.
+// The store path as this CLI prints it back for a given working directory: the
+// project segment is that directory flattened whole. One spelling, read by the
+// fixture that has to reach past a cap and by the case that asserts against the
+// printed line, so the two cannot measure different strings.
+function shownStorePath(proj) {
+    return ['~', '.claude', 'projects', proj.replace(/[^A-Za-z0-9]/g, '-'), 'memory']
+        .join(path.sep);
+}
+
+function makeDeepAccountHomeStore() {
+    const store = makeAccountHomeStore();
+    // How much nesting it takes to reach past the lower cap is a property of
+    // the box, the temp directory's own path being longer on some than on
+    // others, so the segments are appended until the printed form measures past
+    // it rather than fixed at a count that is right on one machine. The ceiling
+    // is there so a measurement that never grows ends the loop and fails in the
+    // case's own setup assertion rather than here.
+    let deep = store.proj;
+    for (let n = 1; shownStorePath(deep).length <= 120 && n <= 40; n++) {
+        deep = path.join(deep, 'nested-checkout-' + n);
+    }
+    fs.mkdirSync(deep, { recursive: true });
+    return { ...store, projRoot: store.proj, proj: deep };
+}
+
+function rmDeepAccountHomeStore(store) {
+    rmHomeStore(store);
+    for (const dir of [store.projRoot, store.parent]) {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+}
+
+test('a store path longer than the renderer\'s own cap is printed whole, not cut to it', (t) => {
+    // A path is printed back so an operator can act on it, and a cut one names
+    // no directory, so this CLI carries its own wider cap for the class. The
+    // reading is both halves at once: the whole path is there, and the mark that
+    // says a value was shortened is not.
+    const store = makeDeepAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const shown = shownStorePath(store.proj);
+        assert.ok(shown.length > 120 && shown.length < 260,
+            'test setup: the path has to sit between the two caps or the case cannot tell them '
+            + 'apart, got ' + shown.length + ' characters');
+        const res = runHome(store, ['touch', 'nothing-here', '--applied']);
+        assert.match(res.stderr, /no memory directory at /,
+            'test setup: the note under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(res.stderr.includes('no memory directory at ' + shown),
+            'the whole store path is printed, elided head and all: ' + res.stderr);
+        assert.ok(!/cut to fit/.test(res.stderr),
+            'and nothing was cut, so no mark says it was: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+    } finally {
+        rmDeepAccountHomeStore(store);
+    }
+});
+
+test('the projects root of a store that cannot be scanned is elided too', (t) => {
+    // The scan that establishes which projects declare a type names the root it
+    // could not read, and that root is home-anchored like every other store
+    // path. It is printed on a failure branch, which is where an unelided path
+    // survives longest: the healthy runs never print it.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(memDir, { recursive: true });
+        fs.writeFileSync(path.join(memDir, 'MEMORY.md'), 'Project-Type: ptype\n', 'utf8');
+        assert.strictEqual(runHome(store, ['add-type', 'ptype', 'a-fact', 'type words']).status, 0);
+        const res = runHome(store, ['delete-type', 'ptype', 'a-fact'],
+            { NODE_OPTIONS: refuseProjectsScanPreload(store.proj) });
+        assert.match(res.stderr, /could not scan .* for declaring projects/,
+            'test setup: the note under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.match(res.stderr, /could not scan ~/,
+            'and what is printed is the projects root with the home directory elided, rather '
+            + 'than the path dropped: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a delete that stops part-way names the step it stopped on without the OS account name', (t) => {
+    // A delete's failure line names the step that blocked, and every step this
+    // verb names carries the directory it was working in, home-anchored like
+    // the rest of the store. That line is composed nowhere near a renderer,
+    // which is the shape the write boundary is for: no site here elides
+    // anything, and the elision is the descriptor's.
+    //
+    // The stop staged is the permanent one the removal's own reasoning names: a
+    // directory standing where the archived copy's .bak belongs, which the
+    // archive sweep cannot unlink and a re-run meets again.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        assert.strictEqual(runHome(store, ['add-type', 'ptype', 'a-fact', 'type words']).status, 0);
+        fs.mkdirSync(path.join(typeDirPath(store, 'ptype'), 'archive', 'a-fact.md.bak'),
+            { recursive: true });
+        const res = runHome(store, ['delete-type', 'ptype', 'a-fact', '--confirm-shared']);
+        assert.strictEqual(res.status, 1,
+            'test setup: the delete has to stop for this line to exist: ' + res.stdout + res.stderr);
+        assert.match(res.stderr, /the step that blocked was removing the copies of its text in /,
+            'test setup: the failure under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.match(res.stderr, /the copies of its text in ~/,
+            'and the step still names the directory it stopped in, with the home directory '
+            + 'elided rather than the path dropped: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a declaring project named after a home-anchored checkout is listed with the account name out of the middle of it', (t) => {
+    // The listing an operator weighs an irreversible delete against prints
+    // project DIRECTORY names, and one of those is a whole absolute path with
+    // its separators flattened. A checkout under the home directory therefore
+    // carries the OS account name in the middle of that name rather than at its
+    // head, where no leading-prefix rule reaches it: the elision that does is
+    // the flattened spelling the shared renderer carries.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        assert.strictEqual(runHome(store, ['add-type', 'ptype', 'a-fact', 'type words']).status, 0);
+        const segment = path.join(store.home, 'work', 'repo').replace(/[^A-Za-z0-9]/g, '-');
+        assert.ok(new RegExp(ACCOUNT_NAME).test(segment) && !segment.startsWith(ACCOUNT_NAME),
+            'test setup: the account name has to sit inside the segment rather than at its head: '
+            + segment);
+        const declaring = path.join(store.root, 'projects', segment, 'memory');
+        fs.mkdirSync(declaring, { recursive: true });
+        fs.writeFileSync(path.join(declaring, 'MEMORY.md'), 'Project-Type: ptype\n', 'utf8');
+        const res = runHome(store, ['delete-type', 'ptype', 'a-fact']);
+        assert.strictEqual(res.status, 1, 'a delete without consent refuses: ' + res.stderr);
+        assert.match(res.stderr, /is declared by 1 project: /,
+            'test setup: the listing under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.match(res.stderr, /is declared by 1 project: \S*flattened-home/,
+            'and the project is still named, with the flattened home directory elided rather '
+            + 'than the name dropped: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+// Refuse the memory directory's existence check, standing in for any
+// filesystem call this CLI makes outside a guard: the throw unwinds through
+// the verb and out of main, which is the path Node's own fatal-exception
+// writer takes over. The message carries the path the call was refused on,
+// the way a real fs error names its file.
+function throwOnMemDirCheckPreload(dir) {
+    const shim = path.join(dir, 'throw-on-memdir-check.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        "const fs = require('fs');",
+        'const realExistsSync = fs.existsSync;',
+        'fs.existsSync = function (target) {',
+        "    if (/[\\\\/]memory$/.test(String(target))) {",
+        "        throw new Error('EIO: the fixture refuses this check on ' + target);",
+        '    }',
+        '    return realExistsSync.apply(fs, arguments);',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+test('a verb that throws where nothing catches reports one line rather than the runtime\'s'
+    + ' own trace', (t) => {
+    // The descriptors this CLI writes through are wrapped so every chunk is
+    // elided, and Node's fatal-exception writer is the one printer that does
+    // not go through them: it writes the message and every stack frame to the
+    // descriptor itself. So an uncaught throw is where the store path in an fs
+    // error's message and this file's own absolute path would ride out
+    // together, past a guard that covers every other line of the run.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const res = runHome(store, ['touch', 'nothing-here', '--applied'],
+            { NODE_OPTIONS: throwOnMemDirCheckPreload(store.proj) });
+        assert.strictEqual(res.status, 1,
+            'test setup: the throw under test has to reach the top: '
+            + res.stdout + res.stderr);
+        assert.match(res.stderr, /^memq: .*the fixture refuses this check/m,
+            'the failure is reported in this CLI\'s own voice: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.ok(!/Require stack/.test(res.stderr),
+            'and no require stack rides with it: ' + res.stderr);
+        assert.ok(!/^\s+at\s/m.test(res.stderr),
+            'nor any stack frame, each of which names an absolute path: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a body cut at the print cap is cut on the elided text, so no half of the account'
+    + ' name survives', (t) => {
+    // The elision this channel takes at the descriptor matches whole spellings.
+    // A cut taken before it therefore leaves a fragment nothing downstream
+    // reaches, and a memory body is the one value here big enough to be cut at
+    // all. The fixture puts the home directory across the cap so that the head
+    // of the account name is exactly what a cut-then-elide order would leave.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const head = ACCOUNT_NAME.slice(0, ACCOUNT_NAME.length - 4);
+        const tail = ACCOUNT_NAME.slice(-6);
+        // The filler ends in a newline because the elision refuses a match that
+        // runs on from an alphanumeric: text glued to a home spelling names a
+        // different thing, and the renderer leaves it alone by design. A body
+        // carries its paths at a boundary like this one.
+        const straddle = 'x'.repeat(memq.BODY_CAP - store.home.length + 3) + '\n';
+        writeOperatorMemory(store, 'long-body.md',
+            straddle + store.home + '\ny'.repeat(1000) + '\n');
+        const res = runHome(store, ['get', 'long-body', '--operator']);
+        assert.strictEqual(res.status, 0, 'the record reads: ' + res.stderr);
+        assert.match(res.stdout, /body truncated at /,
+            'test setup: the body has to be cut for the cut to be under test: '
+            + res.stdout.slice(-200));
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stdout + res.stderr),
+            'the OS account name must not reach a channel a model reads');
+        assert.ok(!new RegExp(head, 'i').test(res.stdout + res.stderr),
+            'nor the head of it a cut-then-elide order would leave: ' + head);
+        assert.ok(!new RegExp(tail, 'i').test(res.stdout + res.stderr),
+            'nor its tail: ' + tail);
+        assert.ok(res.stdout.includes('~'),
+            'and the home directory is elided rather than the text dropped');
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a display cap is taken after the elision, so a cut cannot bisect a home spelling', (t) => {
+    // The reduction a displayed value takes on this channel runs the elision,
+    // the charset strip and the cap, and the descriptor's own elision is what
+    // reads the chunk after that. A cap taken before the second elision hands
+    // the descriptor a spelling already cut in half, which matches no
+    // whole-spelling pattern, so the head of the account name reaches the
+    // channel. The fixture puts a barred character inside the account name,
+    // which is what leaves the first elision no whole spelling to match and
+    // the strip a spelling to put back together; the cap then lands inside the
+    // name the strip has just reassembled.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const quoted = path.join(store.home, 'file')
+            .replace(ACCOUNT_NAME, ACCOUNT_NAME.slice(0, 4) + '"' + ACCOUNT_NAME.slice(4));
+        // Sized so the cap falls four characters short of the home directory's
+        // end, which is inside the account name: the cut a cap-then-elide
+        // order takes is exactly the one that leaves the name's head behind.
+        const fillerLength = memq.SUMMARY_CAP - (store.home.length - 4) - 'capfixture '.length;
+        assert.ok(fillerLength > 0,
+            'test setup: the fixture home must sit inside the display cap, or no filler can put '
+            + 'the cut inside the account name: ' + store.home.length + ' characters of home '
+            + 'against a cap of ' + memq.SUMMARY_CAP);
+        // The filler ends in a space because the elision refuses a match that
+        // runs on from an alphanumeric: text glued to a home spelling names a
+        // different thing, and the renderer leaves it alone by design.
+        const description = 'capfixture ' + 'x'.repeat(fillerLength - 1) + ' ' + quoted;
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(memDir, { recursive: true });
+        fs.writeFileSync(path.join(memDir, 'capped-desc.md'), '# capped\n\nbody\n', 'utf8');
+        fs.writeFileSync(path.join(memDir, 'MEMORY.md'),
+            '# Memory Index\n\n- [capped-desc](capped-desc.md) - ' + description + '\n', 'utf8');
+        const res = runHome(store, ['find', 'capfixture', '--memories']);
+        assert.strictEqual(res.status, 0, 'the record is found: ' + res.stderr);
+        assert.match(res.stdout, /^capped-desc /m,
+            'test setup: the hit whose description is under test is the one printed: ' + res.stdout);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stdout + res.stderr),
+            'the OS account name must not reach a channel a model reads: ' + res.stdout);
+        assert.ok(!new RegExp(ACCOUNT_NAME.slice(0, 5), 'i').test(res.stdout + res.stderr),
+            'nor the head of it a cap-then-elide order would leave: ' + res.stdout);
+        assert.ok(!new RegExp(ACCOUNT_NAME.slice(-6), 'i').test(res.stdout + res.stderr),
+            'nor its tail: ' + res.stdout);
+        assert.ok(res.stdout.includes('~'),
+            'and the home directory is elided rather than the description dropped: ' + res.stdout);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+// --- The load guard, the backstops and the floor -------------------------
+
+// A child's module cache carrying a kit-compact-lib.js whose exports have been
+// changed, installed by a preload that runs before memq is required. This is
+// how an installed cache one version behind, or one whose renderer throws when
+// called, is stood up without a payload copy on disk: the copy keeps every
+// other export real, so the case is the one export it names and nothing else.
+// Node parses NODE_OPTIONS with backslash as an escape character, so both paths
+// are passed forward-slashed.
+function compactLibTrap(dir, patch) {
+    const lib = path.resolve(__dirname, '..', 'plugins', 'claude-kit', 'hooks', 'kit-compact-lib.js');
+    const shim = path.join(dir, 'compact-trap.js');
+    fs.writeFileSync(shim, ["'use strict';",
+        'const resolved = require.resolve(' + JSON.stringify(lib.replace(/\\/g, '/')) + ');',
+        'const real = require(resolved);',
+        'const copy = Object.assign({}, real);',
+        patch,
+        'require.cache[resolved].exports = copy;'].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+// A child that loads memq as a MODULE, the way the frontmatter guard and the
+// session hook load it, and prints back the entries its anchors parse refused.
+// The module route rather than the CLI because that is the route the rule is
+// about: a throw on it costs the guard its deny, since the catch around that
+// guard's main() allows the write.
+function refusedAnchorsIn(dir, entry, home, nodeOptions) {
+    const memqPath = path.resolve(__dirname, '..', 'plugins', 'claude-kit', 'scripts', 'memq.js');
+    const probe = path.join(dir, 'anchors-probe.js');
+    fs.writeFileSync(probe, ["'use strict';",
+        'const memq = require(' + JSON.stringify(memqPath.replace(/\\/g, '/')) + ');',
+        'const text = ' + JSON.stringify('---\nname: ""\nanchors: ' + entry + '\n---\n\nbody\n') + ';',
+        "process.stdout.write(JSON.stringify(memq.frontmatterAnchors(text).bad) + '\\n');"
+    ].join('\n') + '\n', 'utf8');
+    // Every other casing of the two home keys is removed first: a Windows
+    // environment block's key casing is not the spelling a JS object copy is
+    // indexed by, so an inherited one would otherwise decide what the child
+    // elides, which is the same care childEnv above takes.
+    const env = { ...process.env };
+    for (const k of Object.keys(env)) {
+        const lower = k.toLowerCase();
+        if (lower === 'home' || lower === 'userprofile') delete env[k];
+    }
+    env.HOME = home;
+    env.USERPROFILE = home;
+    // The control run carries no preload at all, so a NODE_OPTIONS the suite
+    // itself was launched under cannot make the undamaged run a damaged one.
+    if (nodeOptions !== undefined) env.NODE_OPTIONS = nodeOptions;
+    else delete env.NODE_OPTIONS;
+    return spawnSync(process.execPath, [probe], { cwd: dir, encoding: 'utf8', env });
+}
+
+test('a refused entry costs the value and never the parse when the renderer will not answer', () => {
+    // memq binds both elision passes at module scope and its refusal text calls
+    // them, so a cache carrying a kit-compact-lib.js one version behind (scrub
+    // present, scrubAfterStrip absent) or one whose exports load and throw
+    // would make the reduction a TypeError. What that costs is not this file's
+    // to lose: the frontmatter guard reads this parse for the entry it denies
+    // on and its own catch ALLOWS, and the session hook reads it through
+    // tierAnchorDrift and loses its whole block. So the second pass is gated on
+    // the export being a function, with scrub as the fall-through, and both
+    // calls are caught: the entry stays among the refused, the fault still says
+    // what it was refused for, and only the value is withheld.
+    const ACCOUNT = 'zephyrina';
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-render-'));
+    const home = path.join(dir, ACCOUNT);
+    try {
+        fs.mkdirSync(home, { recursive: true });
+        // The entry carries the home directory and a double quote, the quote
+        // being what puts it outside the grammar on every platform rather than
+        // only where a path separator is the backslash.
+        const entry = path.join(home, 'x') + '"y';
+
+        const throwing = refusedAnchorsIn(dir, entry, home,
+            compactLibTrap(dir, "copy.scrub = () => { throw new Error('the fixture throws'); };"));
+        assert.strictEqual(throwing.status, 0,
+            'the parse answers rather than throwing into its caller: ' + throwing.stderr);
+        const thrownBad = JSON.parse(throwing.stdout);
+        assert.strictEqual(thrownBad.length, 1, 'the entry is still refused: ' + throwing.stdout);
+        assert.match(thrownBad[0], /^\[value withheld:/,
+            'with the value withheld in place of text no renderer reduced: ' + thrownBad[0]);
+        assert.match(thrownBad[0], /not <path>@<40 hex>\]$/,
+            'and the fault still names what it was refused for: ' + thrownBad[0]);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(throwing.stdout),
+            'and no account name rides out on the leg with no renderer: ' + throwing.stdout);
+
+        const behind = refusedAnchorsIn(dir, entry, home,
+            compactLibTrap(dir, 'delete copy.scrubAfterStrip;'));
+        assert.strictEqual(behind.status, 0,
+            'a library one version behind answers too: ' + behind.stderr);
+        const behindBad = JSON.parse(behind.stdout);
+        assert.strictEqual(behindBad.length, 1, 'the entry is still refused: ' + behind.stdout);
+        assert.doesNotMatch(behindBad[0], /value withheld/,
+            'the fall-through renders it rather than withholding it: ' + behindBad[0]);
+        assert.match(behindBad[0], /~/,
+            'through the pass that library does carry: ' + behindBad[0]);
+        assert.ok(!new RegExp(ACCOUNT, 'i').test(behind.stdout),
+            'so no account name reaches the entry either: ' + behind.stdout);
+
+        // The control: the same entry with an undamaged cache renders the same
+        // elided text, so neither answer above is a parse that refuses
+        // everything.
+        const real = refusedAnchorsIn(dir, entry, home, undefined);
+        assert.strictEqual(real.status, 0, 'the undamaged run answers: ' + real.stderr);
+        assert.deepStrictEqual(JSON.parse(real.stdout), behindBad,
+            'the fall-through renders this entry as the relaxed pass does (the home spelling '
+            + 'stands at the front with nothing glued to its leading edge once the quote is '
+            + 'stripped, so the two passes agree on it): ' + real.stdout);
+    } finally {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+// A copy of the plugin payload with one kit library taken out of it. memq
+// requires four kit-shipped siblings before any of its own code runs, and a
+// payload missing one of them is how an install or a hand-edited cache meets
+// that leg; the copy is hooks/ and scripts/ whole, since each sibling reaches
+// for its own neighbours.
+function payloadWithoutLib(missing) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-payload-'));
+    const src = path.join(__dirname, '..', 'plugins', 'claude-kit');
+    for (const dir of ['hooks', 'scripts']) {
+        fs.cpSync(path.join(src, dir), path.join(root, dir), { recursive: true });
+    }
+    fs.rmSync(path.join(root, 'hooks', missing), { force: true });
+    return root;
+}
+
+test('a kit library that will not load is one line rather than the runtime\'s require stack', (t) => {
+    // The four sibling requires run before the descriptor wrapper and the
+    // handlers below them are installed, so a throw there is printed by the
+    // runtime rather than by this CLI: Node's require stack names every module
+    // path it tried, and each is home-anchored on an installed plugin. What
+    // this leg prints instead names the failure's kind and its code, both of
+    // which can carry no path, and says nothing else.
+    const store = makeAccountHomeStore();
+    const payload = payloadWithoutLib('kit-compact-lib.js');
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const res = spawnSync(process.execPath,
+            [path.join(payload, 'scripts', 'memq.js'), 'recent'],
+            { cwd: store.proj, encoding: 'utf8', env: homeChildEnv(store) });
+        assert.strictEqual(res.status, 1,
+            'the run refuses every verb rather than carrying on unbound: ' + res.stderr);
+        assert.match(res.stderr, /^memq: a kit library failed to load \(missing, MODULE_NOT_FOUND\)/m,
+            'the failure is named in this CLI\'s own voice, by kind and by code: ' + res.stderr);
+        assert.ok(!/Require stack/.test(res.stderr),
+            'the require stack the runtime prints must not reach the channel: ' + res.stderr);
+        assert.ok(!/^\s+at\s/m.test(res.stderr),
+            'nor any stack frame: ' + res.stderr);
+        assert.ok(!/[\\/][^\s]*\.js/.test(res.stderr),
+            'nor any module path, each of which is home-anchored on an installed plugin: '
+            + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'and no account name rides on the leg that has no renderer: ' + res.stderr);
+    } finally {
+        try {
+            fs.rmSync(payload, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+// A store with one operator-tier record and the index line that describes it,
+// planted directly the way the other operator-tier cases plant theirs, so a
+// case below has a verb that reads a store and prints nothing on stderr.
+function plantOperatorRecord(store, description) {
+    writeOperatorMemory(store, 'a-fact.md', '# a-fact\n\nthe body of a fact\n');
+    writeOperatorMemory(store, 'MEMORY.md',
+        '# Memory Index\n\n- [a-fact](a-fact.md) - ' + description + '\n');
+}
+
+// Throw from a callback the loop runs, which is the shape no try/catch around
+// the dispatch can reach: the frame that queued it has already returned.
+function throwFromQueuedCallbackPreload(dir, carried) {
+    const shim = path.join(dir, 'throw-from-queued-callback.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        'setImmediate(function () {',
+        '    throw new Error(' + JSON.stringify('the fixture throws from a queued callback on ')
+            + ' + ' + JSON.stringify(carried) + ');',
+        '});'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+// The other half of the same class: a rejection nothing ever attaches a handler
+// to, which reaches the loop rather than any frame of this CLI's.
+function unhandledRejectionPreload(dir, carried) {
+    const shim = path.join(dir, 'unhandled-rejection.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        'Promise.reject(new Error(' + JSON.stringify('the fixture rejects with ')
+            + ' + ' + JSON.stringify(carried) + '));'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+for (const [what, preload] of [
+    ['a queued callback', throwFromQueuedCallbackPreload],
+    ['an unhandled rejection', unhandledRejectionPreload]
+]) {
+    test('a failure out of ' + what + ' is reported in one line with no frame', (t) => {
+        // The catch around the dispatch takes a synchronous verb's throw and
+        // nothing else. A failure that unwinds to the loop instead is the
+        // runtime's to print, and its fatal writer goes to the descriptor
+        // rather than through the wrapper this CLI installs, so the message's
+        // path and every frame's would ride out together. The two process
+        // handlers are what stands there instead, and both are read here
+        // because from outside the two failures look alike.
+        const store = makeAccountHomeStore();
+        try {
+            if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+            plantOperatorRecord(store, 'a description');
+            const res = runHome(store, ['get', 'a-fact', '--operator'],
+                { NODE_OPTIONS: preload(store.proj, store.home) });
+            assert.strictEqual(res.status, 1,
+                'the run answers a failed command\'s status: ' + res.stdout + res.stderr);
+            const said = res.stderr.split('\n').filter((l) => l.startsWith('memq: '));
+            assert.strictEqual(said.length, 1,
+                'the failure is said once, in this CLI\'s own voice: ' + res.stderr);
+            assert.match(said[0], /the fixture/,
+                'and it is the failure this fixture staged: ' + res.stderr);
+            assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+                'the OS account name must not reach a channel a model reads: ' + res.stderr);
+            assert.ok(!/^\s+at\s/m.test(res.stderr),
+                'nor any stack frame, each of which names an absolute path: ' + res.stderr);
+            assert.ok(!/Require stack/.test(res.stderr),
+                'nor a require stack: ' + res.stderr);
+        } finally {
+            rmHomeStore(store);
+            try {
+                fs.rmSync(store.parent, { recursive: true, force: true });
+            } catch {
+                // Best-effort cleanup; leaving a temp dir behind never fails the test.
+            }
+        }
+    });
+}
+
+test('reporting a failure the channel refuses costs the line and never a loop', () => {
+    // A descriptor whose reader is gone refuses the write, and the refusal
+    // arrives as a throw. The handler that reports an uncaught failure is the
+    // one place where that throw becomes another uncaught failure, which the
+    // same handler answers by writing again: without the latch the pair feeds
+    // itself for as long as the loop runs.
+    //
+    // This is asked of the function rather than of a spawned CLI because a
+    // closed pipe is not a state a case can put a win32 child into on demand:
+    // a write into a pipe whose reader has gone can be buffered by the OS and
+    // succeed, so a spawn would pin the latch only on the runs where the race
+    // fell one way.
+    const attempts = [];
+    const realWrite = process.stderr.write;
+    const beforeExitCode = process.exitCode;
+    try {
+        process.stderr.write = function () {
+            attempts.push(1);
+            const err = new Error('the fixture refuses this write');
+            err.code = 'EPIPE';
+            throw err;
+        };
+        memq.reportUncaught(new Error('the first failure'));
+        memq.reportUncaught(new Error('the second failure'));
+    } finally {
+        process.stderr.write = realWrite;
+        // The latch is module state, so it is cleared here: left spent, it
+        // would leave every later in-process caller in this file silent for a
+        // reason that is not the code's.
+        memq.resetUncaughtLatch();
+        const answered = process.exitCode;
+        process.exitCode = beforeExitCode;
+        assert.strictEqual(answered, 1,
+            'a failure nothing else answered for leaves a failed command\'s status');
+    }
+    assert.strictEqual(attempts.length, 1,
+        'the line is attempted once: the refusal costs that line, and the second entry has'
+        + ' nothing left to say');
+});
+
+// Fail the stderr stream itself, asynchronously, which is how a reader that
+// walked away reaches this process: the stream emits 'error', and a stream
+// with no listener for it throws that error at the loop.
+function failStderrStreamPreload(dir) {
+    const shim = path.join(dir, 'fail-stderr-stream.js');
+    fs.writeFileSync(shim, [
+        "'use strict';",
+        'setImmediate(function () {',
+        "    const err = new Error('the fixture closes this pipe');",
+        "    err.code = 'EPIPE';",
+        "    process.stderr.emit('error', err);",
+        '});'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shim.replace(/\\/g, '/') + '"';
+}
+
+test('a descriptor that fails is a failed status rather than a report about the descriptor', (t) => {
+    // Both descriptors carry an error listener, so a refused pipe is answered
+    // by the exit status alone. Without one the error reaches the uncaught
+    // handler, which answers a broken channel by writing to it.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        plantOperatorRecord(store, 'a description');
+        const res = runHome(store, ['get', 'a-fact', '--operator'],
+            { NODE_OPTIONS: failStderrStreamPreload(store.proj) });
+        assert.strictEqual(res.status, 1,
+            'the run answers a failed command\'s status: ' + res.stdout + res.stderr);
+        assert.deepStrictEqual(res.stderr.split('\n').filter((l) => l.startsWith('memq: ')), [],
+            'and says nothing about it on the channel that just refused a write: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a home directory this shell cannot name is said once rather than elided silently', () => {
+    // An empty elision list answers two facts and only one of them is news:
+    // nothing to elide is ordinary, while no knowable home directory means
+    // every path below carries whatever the OS account name is, with nothing
+    // else on this channel saying so.
+    //
+    // The store here is the one KIT_MEMORY_ROOT resolves rather than a
+    // home-redirected one, because the note has to ride on a run that answers:
+    // a store under the home directory cannot resolve at all once os.homedir
+    // answers nothing, and a run that refused its verb would leave the note
+    // proven only on a channel that printed no path of its own.
+    const store = makeStore();
+    const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memq-homeless-'));
+    try {
+        writeMemoryFile(store, 'a-fact.md', '# a-fact\n\nthe body of a fact\n');
+        const shim = path.join(shimDir, 'no-home.js');
+        fs.writeFileSync(shim, [
+            "'use strict';",
+            "const os = require('os');",
+            "os.homedir = function () { return ''; };"
+        ].join('\n') + '\n', 'utf8');
+        const res = run(store, ['get', 'a-fact'],
+            { NODE_OPTIONS: '--require "' + shim.split(path.sep).join('/') + '"' });
+        const emitted = res.stdout + res.stderr;
+        assert.strictEqual(res.status, 0,
+            'the run answers its verb, the floor being a note rather than a refusal: ' + emitted);
+        assert.match(res.stdout, /the body of a fact/,
+            'test setup: the verb printed its record, so the note rides on a run that put this '
+            + 'store\'s paths on the channel: ' + res.stdout);
+        assert.strictEqual(
+            (emitted.match(/no home directory is known/g) || []).length, 1,
+            'the floor is reported as not standing, once for the run: ' + emitted);
+        // The control, and it is the whole reason the note is worth anything:
+        // an ordinary run must not carry it, or the sentence says nothing
+        // about which of the two facts held.
+        const ordinary = run(store, ['get', 'a-fact']);
+        assert.strictEqual(ordinary.status, 0, ordinary.stderr);
+        assert.ok(!(ordinary.stdout + ordinary.stderr).includes('no home directory is known'),
+            'and a run with a knowable home says nothing about it: ' + ordinary.stderr);
+    } finally {
+        try {
+            fs.rmSync(shimDir, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+        rmStore(store);
+    }
+});
+
+test('a character the display strips from beside a home spelling does not glue the'
+    + ' account name past the elision', (t) => {
+    // The strip that reduces store text to printable ASCII DELETES what it
+    // removes, so a tab between a word and a home spelling leaves the two
+    // glued; the elision then refuses the site, its match requiring the
+    // spelling to begin a component rather than to run on from an
+    // alphanumeric. An index description is hand- and model-editable, which is
+    // where a tab beside a path comes from, so the elision runs before the
+    // strip as well as after it.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        plantOperatorRecord(store, 'see\t' + store.home + '\\x');
+        const res = runHome(store, ['find', 'a-fact']);
+        assert.match(res.stdout, /a-fact/,
+            'test setup: the record has to be listed for its description to be under test: '
+            + res.stdout + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stdout + res.stderr),
+            'the OS account name must not reach a channel a model reads: ' + res.stdout);
+        assert.ok(res.stdout.includes('see~'),
+            'and the description is still shown, with the home directory elided where the'
+            + ' stripped tab was: ' + res.stdout);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('one stripped character on each side of a home spelling still leaves no account name', (t) => {
+    // The gates on this channel DELETE what they remove, so two characters
+    // defeat a pair of elision passes that both keep the leading boundary: one
+    // inside the home spelling hides it from the first pass, and one in front of
+    // it leaves the spelling glued to the word before it once both are gone,
+    // which the boundary refuses. So the pass that runs after the removal drops
+    // that boundary wherever something was removed.
+    //
+    // Both removing gates are staged, since they are two rules in two places:
+    // the renderer's own strip of everything outside printable ASCII, and this
+    // CLI's bar on the double quote. An index description is hand- and
+    // model-editable, which is where characters like these come from, and one
+    // find prints both descriptions.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const cut = Math.floor(store.home.length / 2);
+        const withZeroWidth = store.home.slice(0, cut) + '\u200b' + store.home.slice(cut);
+        const withQuote = store.home.slice(0, cut) + '"' + store.home.slice(cut);
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(memDir, { recursive: true });
+        fs.writeFileSync(path.join(memDir, 'np-fact.md'), '# np-fact\n\nbody\n', 'utf8');
+        fs.writeFileSync(path.join(memDir, 'quote-fact.md'), '# quote-fact\n\nbody\n', 'utf8');
+        fs.writeFileSync(path.join(memDir, 'MEMORY.md'),
+            '# Memory Index\n\n'
+            + '- [np-fact](np-fact.md) - gluefixture x\u00a0' + withZeroWidth + '\\repo\n'
+            + '- [quote-fact](quote-fact.md) - gluefixture x"' + withQuote + '\\repo\n', 'utf8');
+        const res = runHome(store, ['find', 'gluefixture', '--memories']);
+        assert.strictEqual(res.status, 0, 'the records are found: ' + res.stderr);
+        assert.match(res.stdout, /^np-fact /m,
+            'test setup: the non-printable case has to be printed to be under test: ' + res.stdout);
+        assert.match(res.stdout, /^quote-fact /m,
+            'test setup: and so does the barred-quote case: ' + res.stdout);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stdout + res.stderr),
+            'the OS account name must not reach a channel a model reads: ' + res.stdout);
+        assert.strictEqual((res.stdout.match(/~/g) || []).length, 2,
+            'and each description is still shown, with the home directory elided where the two '
+            + 'removed characters were: ' + res.stdout);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a barred character inside a home spelling and one after it leave no account name', (t) => {
+    // The other edge of the same two-character shape. This CLI's own bar on the
+    // double quote DELETES, so a quote inside the home spelling hides it from
+    // the pass taken before the removal and a quote right after it leaves the
+    // following word glued to the end of the spelling once both are gone. A
+    // trailing name boundary refuses that site exactly as a leading one refuses
+    // a glued word in front, so the pass that runs after the removal keeps
+    // neither edge.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const cut = Math.floor(store.home.length / 2);
+        const withQuote = store.home.slice(0, cut) + '"' + store.home.slice(cut);
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(memDir, { recursive: true });
+        fs.writeFileSync(path.join(memDir, 'tail-fact.md'), '# tail-fact\n\nbody\n', 'utf8');
+        fs.writeFileSync(path.join(memDir, 'MEMORY.md'),
+            '# Memory Index\n\n'
+            + '- [tail-fact](tail-fact.md) - tailfixture see ' + withQuote + '"foo\n', 'utf8');
+        const res = runHome(store, ['find', 'tailfixture', '--memories']);
+        assert.strictEqual(res.status, 0, 'the record is found: ' + res.stderr);
+        assert.match(res.stdout, /^tail-fact /m,
+            'test setup: the description has to be printed to be under test: ' + res.stdout);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stdout + res.stderr),
+            'the OS account name must not reach a channel a model reads: ' + res.stdout);
+        assert.match(res.stdout, /~foo/,
+            'and the description still reads, with the home directory elided where the two '
+            + 'removed quotes were: ' + res.stdout);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a home spelling glued to an alphanumeric is left alone whether or not the cap cuts it', (t) => {
+    // The residual this documents rather than fixes. The elision matches a home
+    // spelling that begins a path component, so text running on from an
+    // alphanumeric names something else and is left as it stands: a body
+    // carrying `xC:\Users\name` prints that text whole. Cutting such a body at
+    // the print cap therefore takes nothing off the channel that was not
+    // already on it, which is the reading this pins: the cut leaves the same
+    // characters the whole rendering leaves, up to where it cut.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const glued = 'g' + store.home;
+        // The cut lands four characters before the end of the account name, so
+        // the two renderings are distinguishable: the whole one carries the
+        // name and the cut one carries that much of it.
+        const filler = 'x'.repeat(memq.BODY_CAP - glued.length + 4);
+        writeOperatorMemory(store, 'cut-body.md', filler + glued + '\n' + 'y'.repeat(1000) + '\n');
+        writeOperatorMemory(store, 'whole-body.md', glued + '\n');
+        const cut = runHome(store, ['get', 'cut-body', '--operator']);
+        const whole = runHome(store, ['get', 'whole-body', '--operator']);
+        assert.strictEqual(cut.status, 0, 'the cut record reads: ' + cut.stderr);
+        assert.strictEqual(whole.status, 0, 'the whole record reads: ' + whole.stderr);
+        assert.match(cut.stdout, /body truncated at /,
+            'test setup: the body has to be cut for the cut to be under test: '
+            + cut.stdout.slice(-200));
+        assert.ok(whole.stdout.includes(glued),
+            'a home spelling running on from an alphanumeric names something else and is'
+            + ' printed as it stands: ' + whole.stdout);
+        assert.ok(cut.stdout.includes(glued.slice(0, glued.length - 4)),
+            'and the cut rendering carries that same text as far as the cap: ' + cut.stdout.slice(-200));
+        assert.ok(!cut.stdout.includes(glued),
+            'no further: what the cap took off is the tail: ' + cut.stdout.slice(-200));
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});
+
+test('a refused anchor path whose home spelling straddles the entry cap leaves no fragment of the'
+    + ' account name', (t) => {
+    // A refused entry is reduced for display, and that reduction takes this
+    // channel's order: elide, strip, elide again where the strip deleted
+    // anything, and cap last. The cap is what the order is for. Taken first, a
+    // cut through a home spelling leaves a head of the OS account name that no
+    // whole-spelling pattern reaches afterwards, the descriptor's own included,
+    // so the name rides out on exactly the entries long enough to be cut.
+    const store = makeAccountHomeStore();
+    try {
+        if (!homeRedirected(store)) return t.skip(HOME_REDIRECT_SKIP);
+        const memDir = homeMemDir(store);
+        fs.mkdirSync(memDir, { recursive: true });
+        fs.writeFileSync(path.join(memDir, 'fact.md'),
+            '---\nname: ""\n---\n\n# Fact\n\nbody\n', 'utf8');
+        // Forward-slashed, which the elision matches as readily as the native
+        // separator, and preceded by one, since a home spelling running on from
+        // an alphanumeric names something else and is left as it stands.
+        const home = store.home.split(path.sep).join('/');
+        // The filler puts the entry cap four characters into the account name,
+        // so the cut lands inside the spelling rather than around it.
+        const filler = 'a'.repeat(memq.ANCHOR_ENTRY_CAP - 5 - home.length + ACCOUNT_NAME.length);
+        const given = filler + '/' + home + '/x';
+        assert.ok(given.length > memq.ANCHOR_ENTRY_CAP,
+            'test setup: the entry as given runs past the cap, so a cut is what is under test');
+        const res = runHome(store, ['anchor', 'fact', given]);
+        assert.strictEqual(res.status, 1, 'the path is refused: ' + res.stdout + res.stderr);
+        assert.match(res.stderr, /not a path an anchor may name/,
+            'test setup: the refusal under test is the grammar one: ' + res.stderr);
+        // Every window of the name longer than three characters, not the name
+        // whole: the head a cut leaves behind is exactly what a whole-name
+        // assertion cannot see.
+        for (let n = 0; n + 4 <= ACCOUNT_NAME.length; n++) {
+            const window = ACCOUNT_NAME.slice(n, n + 4);
+            assert.ok(!new RegExp(window, 'i').test(res.stderr + res.stdout),
+                'no fragment of the OS account name reaches the channel, and ' + window
+                    + ' did: ' + res.stderr);
+        }
+        assert.ok(res.stderr.includes('~'),
+            'and the home directory is named in its elided form rather than the entry being '
+            + 'dropped: ' + res.stderr);
+    } finally {
+        rmHomeStore(store);
+        try {
+            fs.rmSync(store.parent, { recursive: true, force: true });
+        } catch {
+            // Best-effort cleanup; leaving a temp dir behind never fails the test.
+        }
+    }
+});

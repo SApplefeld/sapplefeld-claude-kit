@@ -179,6 +179,82 @@ test('exits 1 with a note naming the fix when no payload is installed', () => {
     }
 });
 
+// --- What the two failure notes may carry --------------------------------
+//
+// This shim's stderr is read by a model: it is what runs when a session invokes
+// memq. Both values its failure notes would naturally carry are home-anchored
+// (the plugins directory under ~/.claude, and the payload inside it), and the
+// renderer that takes the OS account name out of a path lives in the payload
+// this file has just failed to find or to run, with the installed copy of this
+// file sitting outside every payload. So the notes name no path at all, which
+// is what these two cases hold.
+
+test('the no-payload note names no path, since nothing here could elide one', () => {
+    const root = makePluginsRoot();
+    try {
+        const res = runShim(root, ['find', 'x']);
+        assert.strictEqual(res.status, 1);
+        assert.match(res.stderr, /no installed claude-kit payload/,
+            'test setup: the note under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(!res.stderr.includes(root),
+            'the searched directory is withheld rather than printed: ' + res.stderr);
+        assert.ok(!res.stderr.includes(path.basename(root)),
+            'and no component of it rides out either: ' + res.stderr);
+        assert.match(res.stderr, /withheld/,
+            'while the note says the path is missing rather than leaving a reader to wonder: '
+            + res.stderr);
+        assert.match(res.stderr, /doctor/,
+            'and the remedy still stands in its place: ' + res.stderr);
+    } finally {
+        rmDir(root);
+    }
+});
+
+// A preload that makes the shim's own spawn fail the way a broken interpreter
+// or a refused executable does: with an error object rather than an exit code.
+// It runs before the shim loads, so the patch is in place before the shim's
+// `const { spawnSync } = require('child_process')` captures the binding, and
+// the message it fails with carries the payload path the way a real one does.
+// Forward-slashed for NODE_OPTIONS, which parses a backslash as an escape.
+function spawnRefusingPreload(dir) {
+    const shimFile = path.join(dir, 'refuse-spawn.js');
+    fs.writeFileSync(shimFile, [
+        "'use strict';",
+        "const cp = require('child_process');",
+        'cp.spawnSync = function (file, args) {',
+        "    const err = new Error('the fixture refuses to start ' + file + ' ' + args.join(' '));",
+        "    err.code = 'ERR_FIXTURE_REFUSED';",
+        '    return { error: err, status: null, signal: null, stdout: null, stderr: null };',
+        '};'
+    ].join('\n') + '\n', 'utf8');
+    return '--require "' + shimFile.replace(/\\/g, '/') + '"';
+}
+
+test('a spawn this shim cannot start reports the code, and neither the payload path nor the message', () => {
+    const root = makePluginsRoot();
+    try {
+        const entry = addCacheEntry(root, 'applefeld', 'aaaa');
+        const res = runShim(root, ['find', 'x'],
+            { NODE_OPTIONS: spawnRefusingPreload(root) });
+        assert.strictEqual(res.status, 1, res.stderr);
+        assert.match(res.stderr, /could not run the installed claude-kit payload/,
+            'test setup: the spawn was refused, which is the leg under test: '
+            + JSON.stringify(res.stderr));
+        assert.ok(!res.stderr.includes(entry),
+            'the payload path is withheld rather than printed: ' + res.stderr);
+        assert.ok(!res.stderr.includes('refuses to start'),
+            'and so is the error text, which names the file the spawn was refused on: '
+            + res.stderr);
+        assert.ok(res.stderr.includes('(ERR_FIXTURE_REFUSED)'),
+            'while the error code, an identifier that can carry no path, names the kind of '
+            + 'failure: ' + res.stderr);
+        assert.match(res.stderr, /doctor/,
+            'and the remedy is named: ' + res.stderr);
+    } finally {
+        rmDir(root);
+    }
+});
+
 test('propagates the resolved memq exit code', () => {
     const root = makePluginsRoot();
     try {

@@ -576,6 +576,157 @@ test('a scratch whose removal failed is removed again when the process exits', a
     }
 });
 
+// --- the OS account name in what this runner prints ----------------------
+
+// The fixture account name for the two cases below, chosen the way
+// test/kit-output-channel.test.js chooses its own: a string that appears in no
+// temp directory's own path on any box this suite runs on. The operator's real
+// account name sits inside os.tmpdir() on win32, so a case asserting "the
+// account name is absent from this line" against a common name would read the
+// machine's own path and fail for a reason that is not the runner's.
+const RUNNER_ACCOUNT = 'zephyrina';
+
+// A fixture home directory whose LEAF is that account name, with the scratch
+// root inside it, so the line under test carries a path the elision has to
+// reach. The child gets the home directory under both spellings, since
+// os.homedir() reads USERPROFILE on win32 and HOME everywhere else.
+function accountHome(dir) {
+    const home = path.join(dir, RUNNER_ACCOUNT);
+    fs.mkdirSync(home);
+    fs.mkdirSync(path.join(home, 'src'));
+    fs.writeFileSync(path.join(home, 'src', '.credentials.json'), '{"token":"first"}');
+    return home;
+}
+
+// The failed-removal warning is the runner's loudest line: it says a live
+// credential copy is still on disk. It names the scratch directory, which is
+// under the OS temp directory, itself under the home directory on an ordinary
+// Windows box, and this runner's stderr is read by a model that was told to run
+// it. The child holds its own scratch as its working directory, which is what
+// makes the removal fail, the same fixture the retry case above uses.
+test('the failed-removal warning carries no OS account name', async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-elide-'));
+    try {
+        const home = accountHome(dir);
+        const tmpRoot = path.join(home, 'tmp');
+        fs.mkdirSync(tmpRoot);
+        const script = path.join(dir, 'held-open-elide.mjs');
+        fs.writeFileSync(script, [
+            "import os from 'node:os';",
+            'import { makeReaderScratch, removeReaderScratch } from '
+                + JSON.stringify(pathToFileURL(RUNNER).href) + ';',
+            'const scratch = makeReaderScratch(' + JSON.stringify(path.join(home, 'src'))
+                + ', ' + JSON.stringify(tmpRoot) + ');',
+            'process.chdir(scratch.root);',
+            'const removed = removeReaderScratch(scratch.root);',
+            'process.chdir(os.tmpdir());',
+            'process.stdout.write(String(removed));'
+        ].join('\n'), 'utf8');
+        const res = spawnSync(process.execPath, [script], {
+            encoding: 'utf8',
+            env: { ...process.env, HOME: home, USERPROFILE: home }
+        });
+        assert.strictEqual(res.status, 0, res.stderr);
+        if (res.stdout === 'true') {
+            t.skip('this platform removed the scratch its own process was sitting in, so the failed '
+                + 'removal this case rests on is not producible here');
+            return;
+        }
+        assert.match(res.stderr, /the reader scratch/,
+            'test setup: the warning under test is the one this fixture stages: ' + res.stderr);
+        assert.ok(!new RegExp(RUNNER_ACCOUNT, 'i').test(res.stderr),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.ok(res.stderr.includes('~'),
+            'and the home directory is elided to the operator\'s own shorthand rather than the '
+            + 'line being dropped: ' + res.stderr);
+        assert.match(res.stderr, /CREDENTIAL COPY IS STILL THERE|credential copy in it are gone/,
+            'while the warning itself, which is what says a live credential is on disk, stands: '
+            + res.stderr);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+// And the other direction of that binding: a tree whose plugin directory does
+// not carry the renderer has nothing to load, which is the state this suite's
+// own harness was in before it copied the library. The lines still print,
+// because the loudest of them names a live credential copy still on disk. What
+// says the elision is off is one note on stderr at the moment the binding
+// failed, not a clause on every line: the note is about this run rather than
+// about any one line, and a copy of it per line would be the only thing a long
+// report is made of.
+//
+// A tree carrying no renderer and a renderer that will not load are two states,
+// so the note names which one it met.
+function stageRendererlessTree(libSource) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-nolib-'));
+    const runner = path.join(dir, 'tools', 'probe-corpus', 'run.mjs');
+    fs.mkdirSync(path.dirname(runner), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'plugins', 'claude-kit', 'hooks'), { recursive: true });
+    fs.copyFileSync(RUNNER, runner);
+    fs.copyFileSync(path.join(__dirname, '..', 'tools', 'probe-corpus', 'probe-file.mjs'),
+        path.join(path.dirname(runner), 'probe-file.mjs'));
+    // Everything the runner and the parser load, except the renderer.
+    for (const lib of ['kit-read-lib.js', 'kit-goal-lib.js']) {
+        fs.copyFileSync(path.join(HOOKS, lib),
+            path.join(dir, 'plugins', 'claude-kit', 'hooks', lib));
+    }
+    if (libSource !== null) {
+        fs.writeFileSync(path.join(dir, 'plugins', 'claude-kit', 'hooks', 'kit-compact-lib.js'),
+            libSource, 'utf8');
+    }
+    // Two lines through the binding, because the note is said once per run and
+    // one call cannot tell that from once per line.
+    const script = path.join(dir, 'no-lib.mjs');
+    fs.writeFileSync(script, [
+        'import { elided } from ' + JSON.stringify(pathToFileURL(runner).href) + ';',
+        "process.stdout.write(elided('a line naming ' + process.argv[2]) + '\\n');",
+        "process.stdout.write(elided('a second line naming ' + process.argv[2]) + '\\n');"
+    ].join('\n'), 'utf8');
+    return { dir, script };
+}
+
+test('with no renderer in the tree, the runner says so once and leaves the lines alone', async () => {
+    const { dir, script } = stageRendererlessTree(null);
+    try {
+        const res = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.strictEqual(res.stdout, 'a line naming ' + dir + '\n'
+            + 'a second line naming ' + dir + '\n',
+            'the lines themselves are neither withheld nor annotated, since the loudest of them '
+            + 'names a live credential copy still on disk: ' + res.stdout);
+        assert.strictEqual(res.stderr.split('\n').filter((l) => l.includes('unelided')).length, 1,
+            'and the note that says the elision did not run is said once for the run: '
+            + res.stderr);
+        assert.match(res.stderr, /is not in this tree/,
+            'naming the state it met, which here is a tree that carries no renderer at all: '
+            + res.stderr);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('a renderer that will not load is named as that, not as a missing one', async () => {
+    // The other state: the file is where it belongs and throws on load, which
+    // sends an operator to a repair rather than to an install.
+    const { dir, script } = stageRendererlessTree(
+        "throw Object.assign(new Error('fixture refusal'), { code: 'ERR_FIXTURE_REFUSED' });\n");
+    try {
+        const res = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
+        assert.strictEqual(res.status, 0, res.stderr);
+        assert.ok(res.stdout.startsWith('a line naming ' + dir),
+            'the lines still print: ' + res.stdout);
+        assert.match(res.stderr, /would not load \(ERR_FIXTURE_REFUSED\)/,
+            'and the note names the failure\'s kind by its code, an identifier that can carry no '
+            + 'path, while the message itself stays out of a channel with no renderer to elide '
+            + 'it: ' + res.stderr);
+        assert.ok(!res.stderr.includes('fixture refusal'),
+            'the error text itself is not printed: ' + res.stderr);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 // The runner sits inside the repository it reads, and a bare name is resolved by
 // the platform at each spawn against a search order this file does not own. The
 // binary is resolved once, to a file, exactly as the reader binary is.
@@ -1560,9 +1711,11 @@ function makeHarness(fixtures, corpus) {
     fs.mkdirSync(path.join(root, 'home'), { recursive: true });
     fs.copyFileSync(RUNNER, path.join(root, 'tools', 'probe-corpus', 'run.mjs'));
     fs.copyFileSync(TEMPLATE, path.join(root, 'tools', 'probe-corpus', 'template.md'));
-    // The containment guard the runner loads out of its own repository root,
-    // and the library it is written against.
-    for (const lib of ['kit-read-lib.js', 'kit-goal-lib.js']) {
+    // The two libraries the runner loads out of its own repository root, and
+    // the library each is written against: the containment guard for every path
+    // it reads, and the channel renderer that takes the OS account name out of
+    // the lines it prints.
+    for (const lib of ['kit-read-lib.js', 'kit-goal-lib.js', 'kit-compact-lib.js']) {
         fs.copyFileSync(path.join(HOOKS, lib), path.join(root, 'plugins', 'claude-kit', 'hooks', lib));
     }
     fs.writeFileSync(path.join(root, 'tools', 'probe-corpus', 'probe-file.mjs'), PARSER_STUB, 'utf8');

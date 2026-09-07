@@ -2843,3 +2843,145 @@ test('no line either reading verb prints carries a path rooted outside the repos
         rmDir(dir);
     }
 });
+
+// --- The OS account name in a path this tool prints ------------------------
+
+// The fixture account name for the two cases below, chosen the way
+// test/kit-output-channel.test.js chooses its own: a string that appears in no
+// temp directory's own path on any box this suite runs on, since the operator's
+// real account name sits inside os.tmpdir() on win32.
+const ACCOUNT_NAME = 'zephyrina';
+
+// A home directory whose LEAF is that name, so a path under it carries the name
+// the channel has to take out.
+function stageAccountHome() {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-size-home-'));
+    const home = path.join(parent, ACCOUNT_NAME);
+    fs.mkdirSync(home);
+    return { parent, home };
+}
+
+test('a path outside the repository under measurement carries no OS account name', () => {
+    // The rule that spells a path relative to the repository reaches only paths
+    // INSIDE it, and the repository's own top level is not one of them: it is the
+    // reading's subject. So a refusal naming the directory it could not read is
+    // where an absolute, home-anchored path reaches this tool's stdout and
+    // stderr, both of which a model reads, and which the `report` verb's output
+    // is quoted from into a plan doc.
+    const { parent, home } = stageAccountHome();
+    try {
+        const notRepo = path.join(home, 'not-a-repo');
+        fs.mkdirSync(notRepo);
+        const refused = runScript(['check', '--repo', notRepo, '--budget', BUDGET], home);
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /returned nothing usable for/,
+            'test setup: the refusal under test is the one this fixture stages: ' + refused.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(refused.stderr + refused.stdout),
+            'the OS account name must not reach a channel a model reads: ' + refused.stderr);
+        assert.match(refused.stderr, /~/,
+            'and the home directory is elided to the operator\'s own shorthand rather than the '
+            + 'path being dropped: ' + refused.stderr);
+    } finally {
+        rmDir(parent);
+    }
+});
+
+test('a hooks library that is absent is named without the loader\'s own paths', () => {
+    // The one refusal composed before the renderer is bound, and here the
+    // renderer is part of what did not load: the payload carries no hooks
+    // directory at all. A loader message carries a `Require stack:` naming the
+    // absolute path of this file, which is home-anchored on an installed plugin,
+    // so with nothing able to elide it the message is withheld and what stands
+    // is the specifier this file named and the error's code.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-size-payload-'));
+    try {
+        fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+        const lone = path.join(dir, 'scripts', 'kit-size.js');
+        fs.copyFileSync(SCRIPT, lone);
+        const refused = spawnSync(process.execPath, [lone, 'check', '--repo', REPO, '--budget', BUDGET], {
+            cwd: os.tmpdir(),
+            encoding: 'utf8',
+            env: scriptEnv(),
+            timeout: FIXTURE_GIT_TIMEOUT_MS
+        });
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /the require of .*did not return one/,
+            'test setup: the refusal under test is the one this fixture stages: ' + refused.stderr);
+        assert.match(refused.stderr, /kit-git-lib/,
+            'and it still names the module that would not load: ' + refused.stderr);
+        assert.match(refused.stderr, /\(MODULE_NOT_FOUND\)/,
+            'with the error\'s code, an upper-case identifier that can carry no path: '
+            + refused.stderr);
+        assert.ok(!/Require stack/i.test(refused.stderr),
+            'the loader\'s own trace must not reach the channel: ' + refused.stderr);
+        assert.ok(!refused.stderr.includes(dir),
+            'nor the absolute path of the payload this file was run from: ' + refused.stderr);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+test('a hooks library that is present and throws is named with its message elided', () => {
+    // The other leg of the same refusal, and the one the renderer is bound on: a
+    // hooks directory the payload does hold, whose channel library loads and
+    // whose git library throws. So the loader's own words ride out, and they are
+    // where a home-anchored path reaches this channel, since an error thrown at
+    // module scope names the file it was thrown in.
+    const { parent, home } = stageAccountHome();
+    try {
+        const dir = path.join(home, 'payload');
+        fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+        fs.copyFileSync(SCRIPT, path.join(dir, 'scripts', 'kit-size.js'));
+        fs.cpSync(path.join(REPO, 'plugins', 'claude-kit', 'hooks'), path.join(dir, 'hooks'),
+            { recursive: true });
+        fs.writeFileSync(path.join(dir, 'hooks', 'kit-git-lib.js'),
+            "throw Object.assign(new Error('the fixture refuses this library: ' + __filename),"
+            + " { code: 'ERR_FIXTURE_REFUSED' });\n", 'utf8');
+        const refused = spawnSync(process.execPath,
+            [path.join(dir, 'scripts', 'kit-size.js'), 'check', '--repo', REPO, '--budget', BUDGET], {
+                cwd: os.tmpdir(),
+                encoding: 'utf8',
+                env: scriptEnv(home),
+                timeout: FIXTURE_GIT_TIMEOUT_MS
+            });
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /the require of .*did not return one/,
+            'test setup: the refusal under test is the one this fixture stages: ' + refused.stderr);
+        assert.match(refused.stderr, /\(ERR_FIXTURE_REFUSED\)/,
+            'test setup: carrying the code the fixture threw: ' + refused.stderr);
+        assert.match(refused.stderr, /the fixture refuses this library/,
+            'test setup: and the loader\'s own message, which is the leg under test rather than '
+            + 'the withheld one: ' + refused.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(refused.stderr + refused.stdout),
+            'the OS account name must not reach a channel a model reads: ' + refused.stderr);
+        assert.match(refused.stderr, /~/,
+            'and the path inside that message is elided to the operator\'s own shorthand rather '
+            + 'than dropped: ' + refused.stderr);
+        assert.ok(!/Require stack/i.test(refused.stderr),
+            'no loader trace rides along: ' + refused.stderr);
+    } finally {
+        rmDir(parent);
+    }
+});
+
+test('an argument this tool will not take is refused with the account name out of it', () => {
+    // The argument refusals are composed before the repository is resolved, so
+    // the rule that spells a path relative to it has nothing to answer against
+    // yet: a caller who passed an absolute path where this tool takes no second
+    // one gets that path printed back, home directory and all, into a channel a
+    // model reads.
+    const { parent, home } = stageAccountHome();
+    try {
+        const res = runScript(['check', path.join(home, 'a-second-argument.md')], home);
+        assert.strictEqual(res.status, 2, res.stdout + res.stderr);
+        assert.match(res.stderr, /is a second bare argument/,
+            'test setup: the refusal under test is the one this call stages: ' + res.stderr);
+        assert.ok(!new RegExp(ACCOUNT_NAME, 'i').test(res.stderr + res.stdout),
+            'the OS account name must not reach a channel a model reads: ' + res.stderr);
+        assert.match(res.stderr, /~/,
+            'and the argument is still named, with the home directory elided rather than the '
+            + 'path dropped: ' + res.stderr);
+    } finally {
+        rmDir(parent);
+    }
+});

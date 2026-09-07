@@ -80,13 +80,25 @@ sweep is over what reaches a model-read channel carrying a path, not over the wo
    the failure path only: the report lines are composed in-process from raw values (no strip, no
    cap, so no cut can bisect a home spelling), handed to a single child spawned from the same root
    as JSON, and the child requires `kit-compact-lib.js` and renders each line through
-   `sanitizeForOutput` (strip, elide, cap, marked). The parent owns the verdict sentence, the
-   failure count and the instructions, and never sends them to the child; it refuses the
-   rendering whole when the child fails, exits nonzero, or returns a different number of lines,
-   and on that leg prints the same lines with every path-derived value taken back out
-   (`[path withheld]`) plus one note, so the diagnosis survives and a tampered library can blank
-   the paths and never write a report of its own. No in-process require of any cache file,
-   guarded or not.
+   `sanitizeForOutput` (strip, elide, cap, marked). What the parent checks on the way back is a
+   shape-and-bound check and not an integrity check: it refuses the rendering whole when the child
+   fails, exits nonzero, returns a different number of lines, returns a non-printable character, or
+   returns a detail line that does not begin with the fixed head the parent composed for it (the
+   bullet, hook, label and expectation, carried beside the line rather than found by searching it),
+   and it caps every returned line. On the refused leg it prints the same lines with every
+   path-derived value taken back out (`[path withheld]`) plus one note, so the diagnosis survives. The
+   verdict sentence, the failure count, the bullet structure and the instructions are the parent's
+   and never reach the child; the root line and each detail line's body past its head are the
+   child's within the cap, which is the reach a replaced library keeps and the security document
+   states. No in-process require of any cache file, guarded or not.
+
+2. (2026-09-07, section 2) A channel with more than a handful of writers takes its guard at the write
+   boundary, never per site: two review rounds each found a memq.js path site guarded per value that
+   the previous round's per-site fixes had missed, which is the class the doctrine's channel-property
+   rule names. So memq.js in CLI mode routes every stdout and stderr chunk through the shared `scrub`
+   once at the descriptor, keeps `shownPath` as the cap over a value known to be a path, and exempts
+   by name only a write a machine consumer parses for an absolute path, with that consumer stated.
+   Any later section that adds a writer to a many-writer channel inherits this rule.
 
 ## Sections of Work
 
@@ -201,3 +213,9 @@ Next: read the second dispatch's report, verify its diff and lane, then the revi
 Section 2 at 2026-09-07T07:07:46Z on this main checkout at 224cd43: the second implementer-opus dispatch returned DONE_WITH_CONCERNS (its lane 2691/2683/1/7 exit 1 over 27 files, the one red the permanent memory-session case), and review round 1 is adjudicated. The dispatch folded Amendment 1 from whole-report withholding to per-value withholding on the child-failure leg (two pre-existing canary cases need the diagnosis kept), carried the lines as JSON rather than newline-delimited, and fixed three more memq.js sites printing a resolved absolute path; the amendment text was rewritten to the shape as built (approval-region edit, deliberate). Round 1 at fable through the Agent tool, both brackets clean: adversarial CHANGES_REQUIRED 0/3/4, blind CHANGES_REQUIRED 0/3/3, security CONCERNS 0/3/4. Majors adjudicated and sent to a fix round: memq.js projects-root line still unelided (two reviewers); memq shownPath dead cap of 260 because displayPath already caps at 120; the canary child renderer printing returned lines verbatim so a same-count replaced library can author rows (fix: parent-side strip, cap, maxBuffer and a fixed-prefix check per line, and the amendment claim narrowed to a shape-and-bound check); kit-registry-stamp.js stderr write followed by process.exit on win32 pipes; sweep coverage (the taint instrument follows declarations only, so the eleven additionalContext producers were unswept, and memory-session.js prints the memory directory whole, adjudicated exempt: the Write tool needs an absolute destination and the harness prompt already prints the home-anchored CLAUDE.md path; a control shaped like the miss, a re-sweep of the eleven producers, and the deny-reason enumeration are owed). Minors sent with it: p() registering error codes and short stdout, the probe runner fallback note once, a prose pin anchored to a path shape, memq raw err.message, the note naming a kit library. Live dispatch: implementer-opus fix round 1 at opus, brief at .kit/scratch/eliding/brief-s2-fix.md, dispatched 06:42Z, first-turn reading 62 assistant lines and 0 synthetic, awaited in-turn.
 
 Gate baseline unchanged from board 2. Next: read the fix report, verify, round 2 (the fix delta touches the child spawn and the sanitizing path, both security-trigger surfaces), then docs/security-model.md in the main thread, close gate, whole gate, Chapter 2, commit, push, checkpoint. This entry is committed with the plan doc alone and not pushed; the push lands with the section close.
+
+### Interim board 4 - 2026-09-07
+
+Section 2 at 2026-09-07T08:03:55Z on this main checkout at 42805cf: fix round 1 landed (implementer-opus, DONE_WITH_CONCERNS, lane 2699/2691/1/7 exit 1 over 27 files with the one permanent red; it also scrubbed kit-size.js's printed paths and pinned them, a fold, and repaired a memq-grant require-block pin its own change reddened), and review round 2 is adjudicated, both brackets clean: adversarial CHANGES_REQUIRED 0/2/2, blind CHANGES_REQUIRED 0/2/2, security CONCERNS 0/1/6. Majors: the canary's fixed-head check searched the whole line for any registered value, so a cache hook echoing its own bullet prefix as stdout emptied the head (two reviewers; fix: the head is composed and carried beside the line, never found by search); memq.js still guarded per value at its path-cap sites and each round found a fresh miss (the delete step string, backupClause, the flattened projectLabel segment carrying the account name mid-string), which is the recurrence rule's trigger, so Standing Brief Amendment 2 now binds many-writer channels to a write-boundary guard and memq takes scrub once at the descriptor in CLI mode with machine consumers enumerated; kit-size.js's bound-renderer load-failure leg was unpinned under a test name claiming it. Minors sent with the round: kit-size argument refusals before the scrub binds, a maxBuffer on the canary's runHook, try/catch around the registry-stamp writeSync legs, the sweep instrument's function-range regex widened to export and async forms with a control, the disposition tables written to .kit/scratch/eliding/enumeration.md, and the silent no-knowable-home floor recorded as a residual. Amendment 1 was rewritten to the shape-and-bound claim (approval-region edit, deliberate). Live dispatch: implementer-opus fix round 2 at opus, brief at .kit/scratch/eliding/brief-s2-fix2.md, dispatched 07:38Z, first-turn reading 77 assistant lines and 0 synthetic, awaited in-turn.
+
+Gate baseline unchanged from board 2. Next: read the fix report, verify, round 3 over the fix delta (the memq write-boundary wrapper and the canary head are both security-trigger surfaces), then docs/security-model.md in the main thread, close gate, whole gate, Chapter 2, commit, push, checkpoint. Committed with the plan doc alone and not pushed; the push lands with the section close.

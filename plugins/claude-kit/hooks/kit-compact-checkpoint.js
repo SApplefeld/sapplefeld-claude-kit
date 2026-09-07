@@ -123,8 +123,6 @@
 
 'use strict';
 
-const os = require('os');
-const path = require('path');
 // The kit libraries this CLI is written against, bound here and LOADED inside
 // the guarded region at the foot of this file rather than required at module
 // scope. A require that throws (a damaged or partially written plugin cache)
@@ -135,6 +133,10 @@ const path = require('path');
 // sibling hook compact-deferral-nudge.js defers its kit requires into the guards
 // that use them for the same failure mode.
 let readGoal, sessionHoldsLeash, goalPathKind;
+// The shared output renderer, bound under this file's own names: `sanitize` for
+// one repo-controlled value, displayPath for a value known to be a path, scrub
+// for a whole composed line, and homeElisionsKnown for the floor note below.
+let sanitize, displayPath, scrub, homeElisionsKnown;
 let readCheckpointResult, writeCheckpoint, clearCheckpoint, checkpointMatches,
     checkpointAdoptable, storableCheckpointOwner,
     readGateStateResult, gateStatePath, gateEpisodeOpen, pendingOfferCorroborated, checkpointOwner,
@@ -173,7 +175,8 @@ function loadKitLibraries() {
         writeRoleBoundary, writeConsent, clearRoleBoundary, sameSessionId,
         markerMatches, markerMomentHolds, markerDeclaresMoment, stampRegistryBanked,
         projectHoldsSessionTranscript, sessionTranscriptPath, usableSessionId,
-        ROLE_BOUNDARY_MAX_AGE_MS, CONSENT_MAX_AGE_MS
+        ROLE_BOUNDARY_MAX_AGE_MS, CONSENT_MAX_AGE_MS,
+        sanitizeForOutput: sanitize, displayPath, scrub, homeElisionsKnown
     } = require('./kit-compact-lib.js'));
     ORDINARY_MINUTES = Math.round(CHECKPOINT_MAX_AGE_MS / (60 * 1000));
     PENDING_HOURS = Math.round(CHECKPOINT_PENDING_MAX_AGE_MS / (60 * 60 * 1000));
@@ -227,245 +230,6 @@ function pendingHold(cwd, goal) {
     };
 }
 
-// The length a repo-controlled string is printed within. One number, so the
-// value and the mark that says it was shortened cannot be decided against two.
-const PRINT_CAP = 120;
-
-// Repo-controlled strings (a timestamp read back from disk, a session id, a
-// verdict word) are sanitized to printable ASCII and length-capped before they
-// reach stdout/stderr, matching the sibling hooks' convention for any repo data
-// entering a trusted output channel. A value that is a PATH takes displayPath
-// below instead.
-//
-// Both ways of DISCARDING text are marked, because both leave the reader
-// looking at something that is not the value. The cap takes the tail off. The
-// strip deletes characters from the middle of an accented or CJK name and
-// leaves a plausible-looking shorter one, which is the worse of the two on the
-// legs that hand the operator a path and tell them to remove that file: a name
-// altered without a mark sends them after something that is not on disk. A
-// value can take both marks, so the two are decided separately and read
-// together. The third alteration, the channel's home elision, shortens a value
-// too and carries no mark of its own; scrub below states why it needs none.
-//
-// Three steps in one order, and the order is what both marks rest on. The strip
-// runs first, so the cut is decided on what is actually
-// EMITTED rather than on the string before sanitizing: a value carried past the
-// cap only by characters the strip removes is not cut at all, and marking it as
-// cut would name a truncation that did not happen. The channel's home elision
-// runs next, for that same reason and for a second one that is not cosmetic. A
-// value carried past the cap only by a home prefix the channel takes out is not
-// cut either; and eliding after the cap is eliding a home spelling the cut may
-// have taken in half, which no pattern built from the whole spelling can match,
-// so the account name reaches the channel in a fragment on exactly the machines
-// whose home directory is long. The cap runs last, over the text the reader
-// will see.
-function printableAscii(s) {
-    return String(s).replace(/[^\x20-\x7E]/g, '');
-}
-
-function sanitize(s) {
-    const raw = String(s);
-    const stripped = printableAscii(raw);
-    const elided = scrub(stripped);
-    const shown = elided.slice(0, PRINT_CAP);
-    const marks = [];
-    if (stripped.length !== raw.length) marks.push('characters removed');
-    if (shown.length < elided.length) marks.push('cut to fit');
-    return shown + (marks.length === 0 ? '' : ' [' + marks.join('; ') + ']');
-}
-
-// A filesystem path for the operator's eye. The home prefix is elided to `~`,
-// because the OS account name is in it and this output is read by a model.
-// Eliding is what keeps a realistic path inside the cap, so the cut mark
-// sanitize appends is the rare case rather than the ordinary one.
-//
-// This is the renderer for a value KNOWN to be a path, and it runs beside the
-// channel's own floor rather than instead of it: sanitize elides every value it
-// is handed and emitOut and emitErr elide whatever text a caller composed, path
-// or sentence, and a value elided here passes through both unchanged. The two
-// are aimed at different problems. The containment test here is boundary-aware
-// and answers on components, so it reaches a spelling the text of the home
-// directory does not appear in at all (a path routed through `..`, or one
-// differing only in letter case on win32); the elision the channel applies is
-// textual, which is what a path embedded in the middle of an error sentence
-// allows.
-//
-// Containment is decided by path.relative rather than by a prefix test on the
-// text, because a prefix test is wrong in both directions once the input is not
-// home-composed. It over-elides a sibling whose name merely starts with the home
-// directory's (home /home/ad, project /home/admin/repo prints as ~min/repo), and
-// on win32 it under-elides a path differing from the home directory only in
-// letter case, printing the OS account name raw into a channel a model reads.
-// path.relative answers on components rather than characters and is
-// case-insensitive on win32, which is both directions at once; kitScratchDir in
-// the library decides the same question the same way. A relative result that is
-// absolute, or that escapes upward, means the path is somewhere else; the empty
-// result means the path IS the home directory and elides to `~` alone, which is
-// the one reading where the account name would otherwise be the whole output.
-//
-// A RELATIVE input is never elided, which is what keeps a repo-relative plan
-// path printing as itself. path.relative would otherwise resolve it against the
-// process's own cwd first, so `docs/plans/x.md` in a checkout under the home
-// directory would come back rewritten as an absolute ~-anchored path: a longer,
-// stranger rendering of a value that carried no home prefix to elide.
-function displayPath(full) {
-    const text = String(full);
-    let home = '';
-    try { home = os.homedir(); } catch { home = ''; }
-    let shown = text;
-    if (home !== '' && path.isAbsolute(text)) {
-        const rel = path.relative(home, text);
-        if (!path.isAbsolute(rel) && !/^\.\.(?:[\\/]|$)/.test(rel)) {
-            shown = rel === '' ? '~' : '~' + path.sep + rel;
-        }
-    }
-    // The marks the sanitize appends are what say the name on the line is not
-    // the name on disk, in both directions: a cut tail and a stripped middle.
-    return sanitize(shown);
-}
-
-// The home directory in the spellings this CLI's output can carry it in, as the
-// patterns the channel elides it by, beside an explicit reading of whether a
-// home directory is knowable at all.
-//
-// The two are separated because one empty list would otherwise answer both, and
-// they are opposite news for a channel whose floor is this elision. Nothing to
-// elide is the floor standing. No knowable home directory is the floor OFF, and
-// os.homedir() can throw and follows USERPROFILE and HOME, so a stripped
-// environment turns the whole guard off silently: the emitters state that case
-// out loud rather than passing values through unmarked.
-//
-// The flattened spelling is what a transcript path carries: a session's
-// transcript is filed under a directory named by the whole project path with
-// each non-alphanumeric character turned to a dash (sanitizeProjectPath in
-// scripts/memq.js), so for a checkout under the home directory the account name
-// sits in the MIDDLE of that path, inside one component, where eliding a
-// leading prefix cannot reach it.
-//
-// A match has to end at a boundary rather than mid-name, which is the bug a raw
-// substring replace reproduces: home C:\Users\a against C:\Users\admin\repo
-// renders as ~dmin\repo, a path that is nowhere on disk, on legs whose purpose
-// is naming a file to act on. Both edges of the literal are therefore DENY-lists
-// of the characters that would make the text a different name, never allow-lists
-// of the characters that may stand beside it. That direction is what the two
-// failure costs decide: over-elision prints a path nowhere on disk, while
-// under-elision prints the OS account name into a channel a model reads, and an
-// allow-list leaks on every neighbour nobody thought to name, an equals sign, a
-// comma, a colon, an angle bracket, a parenthesis. So the trailing edge refuses
-// an alphanumeric, a dot, an underscore and a dash, which are the characters
-// that would make this another name (<home>-sib and <home>X keep their own
-// names), and admits everything else, a separator and a quote and a bracket and
-// a comma alike; sanitize's own marks ride on that, since it appends them as
-// ` [cut to fit]` and a home directory at the end of a marked value is followed
-// by a space and then a bracket.
-//
-// The leading edge refuses the same characters and a separator besides. Without
-// a leading edge at all the match floats: POSIX home /home/admin turns
-// /mnt/backup/home/admin/repo/.kit/x.json into /mnt/backup~/repo/.kit/x.json,
-// and win32 is not immune by design, only by its home spelling starting with a
-// drive letter. Refusing an alphanumeric in front is what kills that case, the
-// candidate /home/admin there being preceded by the p of backup; refusing a
-// separator additionally refuses a doubled-separator spelling of some other
-// path.
-//
-// In the flattened spelling the separator is a dash and so is the character a
-// dash was made from, so a child and a sibling are indistinguishable there and
-// any non-alphanumeric character ends the match: where the flattened form cannot
-// tell the two apart, eliding is the direction that keeps the account name off
-// the channel. It takes no leading boundary at all, deliberately: it rides
-// inside one component by construction, which is the whole reason it is elided
-// separately from the leading prefix.
-//
-// Each spelling is built TWICE, from the raw home directory and from its
-// printable-ASCII form, because the text this elides has already been stripped:
-// sanitize strips before it elides, so on a home directory carrying an accented
-// or CJK character the raw spelling is one no emitted line can ever contain, and
-// C:\Users\Jose with an accent on the e reaches the channel as C:\Users\Jos.
-// Building the same patterns from printableAscii(home) covers the text as it
-// will actually be emitted. On an all-ASCII home the two are identical and the
-// duplicates are dropped. What that costs is a real sibling directory spelled
-// like the stripped home being elided too, which is the flattened spelling's own
-// trade taken for the same reason: where the strip has made two names
-// indistinguishable, eliding keeps the account name off the channel.
-//
-// A home directory AT A FILESYSTEM ROOT yields no patterns at all. C:\ reduces
-// to C:, which carries an alphanumeric and would otherwise elide the drive
-// prefix of every path on this channel, printing `removing ~\proj\.kit\x.json`
-// for a file at C:\proj. A root holds no account name, so there is nothing here
-// to take out of it. The same refusal covers a spelling the strip SHORTENED by a
-// whole component, which the root test alone does not reach: a home whose final
-// component is wholly non-ASCII strips to C:\Users\, and a pattern for C:\Users
-// elides every account's paths on this channel, other accounts' included, into
-// paths that are nowhere on disk. A spelling that names fewer path components
-// than the home directory itself is a different directory, so it is skipped.
-//
-// The literal's separators match either slash, since a path can arrive in
-// either spelling, and win32 matches without regard to letter case, as its
-// filesystem does.
-function homeElisions() {
-    let home = '';
-    try { home = os.homedir(); } catch { home = ''; }
-    home = String(home);
-    if (home === '') return { known: false, elisions: [] };
-    const root = String(path.parse(home).root).replace(/[\\/]+$/, '');
-    const escape = (s) => s.replace(/[^A-Za-z0-9]/g, (ch) => '\\' + ch);
-    const flags = process.platform === 'win32' ? 'gi' : 'g';
-    const lead = '(?<![A-Za-z0-9\\\\/._-])';
-    const trail = '(?![A-Za-z0-9._-])';
-    // How many path components a spelling names, which is the measure the guard
-    // below compares the stripped spelling against.
-    const depth = (s) => s.split(/[\\/]+/).filter((part) => part !== '').length;
-    const homeDepth = depth(home.replace(/[\\/]+$/, ''));
-    const elisions = [];
-    const seen = new Set();
-    for (const spelling of [home, printableAscii(home)]) {
-        const named = spelling.replace(/[\\/]+$/, '');
-        if (!/[A-Za-z0-9]/.test(named) || named === root) continue;
-        // A spelling naming fewer components than the home directory is some
-        // ancestor of it rather than it, and eliding an ancestor takes every
-        // account's paths off the channel rather than this account's name.
-        if (depth(named) < homeDepth) continue;
-        const literal = Array.from(named)
-            .map((ch) => (ch === '\\' || ch === '/' ? '[\\\\/]' : escape(ch)))
-            .join('');
-        const flattened = escape(named.replace(/[^A-Za-z0-9]/g, '-'));
-        for (const [source, shown] of [
-            [lead + literal + trail, '~'],
-            [flattened + '(?![A-Za-z0-9])', 'flattened-home']
-        ]) {
-            if (seen.has(source)) continue;
-            seen.add(source);
-            elisions.push({ pattern: new RegExp(source, flags), shown });
-        }
-    }
-    return { known: true, elisions };
-}
-
-// Read once: this is a CLI process whose home directory does not move under it,
-// and the patterns are compiled rather than rebuilt per line.
-const HOME_ELISIONS = homeElisions();
-
-// A text as the channel prints it, with the home directory's name taken out of
-// it in every spelling wherever in the text it sits. Two callers: sanitize,
-// which hands it one repo-controlled value before the cap is applied, and the
-// two emitters below, which hand it a whole composed line. The value the second
-// catches that displayPath cannot is a path the library embedded in an error
-// reason: fs errors name the file the syscall was refused on, and a caller
-// printing that reason is printing a sentence rather than a path.
-//
-// The substitution is not marked the way sanitize marks its cut and its strip,
-// and it needs no mark: both replacements say for themselves that the text was
-// altered and what was taken out. `~` is the operator's own shorthand for the
-// home directory, and `flattened-home` is not a spelling any component on disk
-// carries, so a reader who needs the real path can put their home directory back
-// where the mark is. A cut tail and a stripped middle have no such self-evident
-// spelling, which is why those two are marked and this is not.
-function scrub(text) {
-    let shown = String(text);
-    for (const elision of HOME_ELISIONS.elisions) shown = shown.replace(elision.pattern, elision.shown);
-    return shown;
-}
-
 // Whether this run has already said that its floor is not standing, so the
 // sentence is spent once rather than on every line.
 let floorStated = false;
@@ -478,26 +242,37 @@ let floorStated = false;
 // reading speaks rather than passing values through unmarked, which is the
 // direction a floor has to fail in. It rides whichever descriptor is written to
 // first, since both are read by the same reader and the fact is about neither
-// one in particular.
+// one in particular. An unbound reading is neither of those two: the only line
+// reachable before the libraries are bound is the guarded region's own failure
+// sentence, which carries no path, so there is nothing there for a floor to
+// stand under.
 function floorNote() {
-    if (floorStated || HOME_ELISIONS.known) return '';
+    if (floorStated || homeElisionsKnown === undefined || homeElisionsKnown()) return '';
     floorStated = true;
     return 'kit-compact-checkpoint: no home directory is knowable in this shell, so nothing'
         + ' below is elided and any path on these lines carries the OS account name as it stands\n';
 }
 
+// The shared library's whole-line elision, or the text unchanged where the
+// libraries have not been bound. That second reading is reachable on one line
+// only, the guarded region's failure sentence for a require that threw, and that
+// sentence is composed without a path for exactly this reason.
+function elided(text) {
+    return scrub === undefined ? String(text) : scrub(text);
+}
+
 // The two writes this CLI makes to its output descriptors. Each routes its
-// argument through the scrub above, so a line composed anywhere in this file
+// argument through the shared elision, so a line composed anywhere in this file
 // carries the guard by reaching the channel here rather than by its author
 // having remembered it. What keeps a print site from reaching a descriptor
 // directly is the source-side pin in test/kit-compact-gate.test.js, which reads
 // this file's own text; a sentence here could not.
 function emitOut(text) {
-    process.stdout.write(floorNote() + scrub(text));
+    process.stdout.write(floorNote() + elided(text));
 }
 
 function emitErr(text) {
-    process.stderr.write(floorNote() + scrub(text));
+    process.stderr.write(floorNote() + elided(text));
 }
 
 function usage() {
@@ -2065,12 +1840,30 @@ function main() {
 // The kit-library loading is INSIDE the region for that reason: a require is the
 // throw most likely to produce that trace, a damaged plugin cache being its
 // ordinary cause. What remains outside is this file's own module-scope
-// evaluation and the two Node built-in requires above it, neither of which
-// carries a plugin path or reads anything off disk.
+// evaluation, which carries no plugin path and reads nothing off disk.
 try {
     loadKitLibraries();
     main();
 } catch (err) {
-    emitErr('kit-compact-checkpoint: ' + sanitize(err && err.message ? err.message : String(err)) + '\n');
+    // A throw during the library load leaves the renderer unbound, and it stays
+    // unbound whichever kit library refused: the renderer lives in
+    // kit-compact-lib.js, which requires kit-goal-lib.js itself, so a load that
+    // failed at either one cannot be recovered by requiring the renderer alone.
+    // Nothing here can then take the OS account name out of the error text,
+    // whose module path and `Require stack:` lines are home-anchored on an
+    // installed plugin, so that reading names the failure and withholds the
+    // text: withholding is the direction this channel's floor fails in, and it
+    // is the same direction the guarded region itself takes. The error's CODE
+    // still rides, since a Node error code is an upper-case identifier
+    // (MODULE_NOT_FOUND, ERR_DLOPEN_FAILED) that names the failure's kind and
+    // can carry no path; anything else in that field is dropped. It rides the
+    // withheld leg alone, since a message that survived sanitize already opens
+    // with its own code where it has one (ENOENT: no such file ...).
+    const code = err && typeof err.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(err.code)
+        ? ' (' + err.code + ')' : '';
+    emitErr('kit-compact-checkpoint: ' + (sanitize === undefined
+        ? 'a kit library could not be loaded' + code + ', and the renderer that takes the OS'
+            + ' account name out of an error is in it, so the message itself is withheld'
+        : sanitize(err && err.message ? err.message : String(err))) + '\n');
     process.exitCode = 1;
 }

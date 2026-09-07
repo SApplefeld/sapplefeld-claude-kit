@@ -6969,7 +6969,9 @@ function libraryRefusingPreload(dir, moduleFile) {
         'const realLoad = Module._load;',
         'Module._load = function (request) {',
         "    if (String(request).endsWith(" + JSON.stringify(moduleFile) + ')) {',
-        "        throw new Error('the fixture refuses this require');",
+        "        const err = new Error('the fixture refuses this require');",
+        "        err.code = 'ERR_FIXTURE_REFUSED';",
+        '        throw err;',
         '    }',
         '    return realLoad.apply(Module, arguments);',
         '};'
@@ -6984,14 +6986,28 @@ test('cli: a kit library that will not load is reported as one line, not as a re
     // installed plugin. A require sitting at module scope throws before any
     // guard this file installs, so the requires run inside the guarded region
     // instead, which is the shape the sibling hook already takes.
+    //
+    // The error TEXT is withheld on this leg, and the sentence the CLI composes
+    // says so. The renderer that would take the account name out of it lives in
+    // kit-compact-lib.js, which requires kit-goal-lib.js itself, so a load that
+    // failed at either library leaves the CLI with no elision to apply to a
+    // message whose module path is home-anchored on an installed plugin. What
+    // this pin holds either way is the shape of the write: one line the CLI
+    // composed, carrying no path, no require stack and no frame.
     const shimDir = makeDir('kit-r10-require-shim-');
     const repo = makeDir('kit-r10-require-repo-');
     try {
         for (const lib of ['kit-compact-lib.js', 'kit-goal-lib.js']) {
             const res = runCli(['status'], repo, { NODE_OPTIONS: libraryRefusingPreload(shimDir, lib) });
             assert.notStrictEqual(res.status, 0, lib + ': the run fails: ' + res.stderr);
-            assert.ok(res.stderr.includes('kit-compact-checkpoint: the fixture refuses this require'),
+            assert.ok(res.stderr.startsWith('kit-compact-checkpoint: '),
                 lib + ': the failure is one sentence this CLI composed: ' + res.stderr);
+            assert.ok(!res.stderr.includes('the fixture refuses this require'),
+                lib + ': and the error text itself is withheld, since no renderer here survived '
+                + 'the load that failed: ' + res.stderr);
+            assert.ok(res.stderr.includes('(ERR_FIXTURE_REFUSED)'),
+                lib + ': while the error code, an identifier that can carry no path, still names '
+                + 'the kind of failure: ' + res.stderr);
             assert.ok(!res.stderr.includes('Require stack'),
                 lib + ': the require stack the runtime prints must not reach the channel: ' + res.stderr);
             assert.ok(!res.stderr.includes('.js'),
@@ -10720,7 +10736,10 @@ const NON_SCRATCH_PATH_EXPORTS = {
     registryEntryPath: 'the coordinator registry entry, home-anchored by contract',
     // The harness's own transcript store, under ~/.claude/projects, whose layout
     // the harness owns and this library only reads.
-    sessionTranscriptPath: 'the harness transcript store, whose layout is not this library\'s'
+    sessionTranscriptPath: 'the harness transcript store, whose layout is not this library\'s',
+    // Not a resolver at all: it RENDERS a path it is handed for a channel a
+    // model reads, home prefix elided, and reaches no directory of its own.
+    displayPath: 'a renderer of a path it is handed rather than a resolver of one'
 };
 
 // The functions that reach the scratch directory in the shape below and are not

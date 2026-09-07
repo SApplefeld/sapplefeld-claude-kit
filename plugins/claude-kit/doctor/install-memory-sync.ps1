@@ -387,6 +387,48 @@ function Get-MemorySyncProbePaths {
 # Run git in the store root and return its output plus exit code. Output is
 # captured rather than printed so the caller decides what reaches the report,
 # and stderr joins it so a git error is diagnosable instead of silent.
+#
+# Every git call in the sync path passes through here, so the child
+# environment is hardened here rather than at any one caller: a hand run of
+# the sync script inherits the same protections the unattended background run
+# gets from the hook's own gitChildEnv() in kit-git-lib.js, which cannot be
+# called from PowerShell and is pinned against this guard instead.
+#
+# What the guard covers:
+#
+# Every GIT_* variable is removed, case-insensitively. None is needed, since
+# each call names its repository with -C, and several of them beat what the
+# arguments say (GIT_DIR and GIT_WORK_TREE redirect the repository,
+# GIT_CONFIG_* injects arbitrary config, the identity variables rewrite
+# authorship).
+#
+# GIT_TERMINAL_PROMPT refuses a credential prompt, so a run with no operator
+# at the keyboard fails with a diagnosable error instead of blocking on a
+# hidden dialog.
+#
+# NoDefaultCurrentDirectoryInExePath is defence in depth for anything git
+# spawns through a shell (an alias, a credential helper): cmd.exe reads that
+# variable from its own environment and then resolves a bare command name
+# against PATH alone rather than against the current directory.
+#
+# core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours
+# on an ordinary read, so a status against a wrong or planted store root runs
+# that repository's code. Both are pinned inert through git's
+# environment-config channel, which beats repo-local config. The pins are
+# additive rather than a suppression of the config files: pointing
+# GIT_CONFIG_GLOBAL at an empty file would also drop safe.directory, whose
+# absence surfaces as a dubious-ownership refusal that reads like a
+# permissions bug. fsmonitor is pinned to false, git's own disable value for
+# the key, because a Windows process environment cannot hold an empty value
+# (the setter deletes the variable instead) and a GIT_CONFIG_VALUE_<i> absent
+# while GIT_CONFIG_COUNT names it is a fatal parse error on every call.
+# hooksPath points at a fresh path under the temp directory that nothing
+# creates, so git finds no hooks to run.
+#
+# The variables are snapshotted and restored in a finally block, so the
+# session that dot-sources this file keeps its own environment whether git
+# succeeded, failed, or threw. The exit code is read before the restore,
+# since the restore is itself PowerShell work that would overwrite it.
 function Invoke-MemorySyncGit {
     param(
         [Parameter(Mandatory = $true)][string]$StoreRoot,
@@ -394,8 +436,34 @@ function Invoke-MemorySyncGit {
         [string]$GitExe = "git"
     )
     $all = @("-C", $StoreRoot) + $Arguments
-    $output = & $GitExe @all 2>&1
-    return @{ Code = $LASTEXITCODE; Output = @($output | ForEach-Object { [string]$_ }) }
+    $inertHooks = Join-Path ([System.IO.Path]::GetTempPath()) ("kit-memory-sync-no-hooks-" + [guid]::NewGuid().ToString())
+    $guard = [ordered]@{
+        "GIT_TERMINAL_PROMPT"                = "0"
+        "NoDefaultCurrentDirectoryInExePath" = "1"
+        "GIT_CONFIG_COUNT"                   = "2"
+        "GIT_CONFIG_KEY_0"                   = "core.fsmonitor"
+        "GIT_CONFIG_VALUE_0"                 = "false"
+        "GIT_CONFIG_KEY_1"                   = "core.hooksPath"
+        "GIT_CONFIG_VALUE_1"                 = $inertHooks
+    }
+    # Every name this call disturbs: the ones it strips and the ones it sets.
+    # Hashtable lookup is case-insensitive, which is what makes the guarded
+    # names match however the caller spelled them.
+    $saved = @{}
+    foreach ($item in Get-ChildItem Env:) {
+        if ($item.Name -match "^GIT_" -or $guard.Contains($item.Name)) { $saved[$item.Name] = $item.Value }
+    }
+    try {
+        foreach ($name in @($saved.Keys)) { Remove-Item -LiteralPath ("Env:\" + $name) -ErrorAction SilentlyContinue }
+        foreach ($name in @($guard.Keys)) { Set-Item -LiteralPath ("Env:\" + $name) -Value $guard[$name] }
+        $output = & $GitExe @all 2>&1
+        $code = $LASTEXITCODE
+    }
+    finally {
+        foreach ($name in @($guard.Keys)) { Remove-Item -LiteralPath ("Env:\" + $name) -ErrorAction SilentlyContinue }
+        foreach ($name in @($saved.Keys)) { Set-Item -LiteralPath ("Env:\" + $name) -Value $saved[$name] }
+    }
+    return @{ Code = $code; Output = @($output | ForEach-Object { [string]$_ }) }
 }
 
 # The store root's sync state, as data for the caller to report on: whether

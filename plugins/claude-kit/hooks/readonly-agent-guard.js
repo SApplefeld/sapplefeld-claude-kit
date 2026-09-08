@@ -4,7 +4,7 @@
 // The kit's access model, by agent class:
 //   Strict (adversarial-reviewer, blind-reviewer, security-reviewer,
 //   council-member, design-facilitator, consultant, blind-reader,
-//   prose-reviewer): the repo tree is read-only. Git and GitHub state
+//   prose-reviewer, plan-reviewer): the repo tree is read-only. Git and GitHub state
 //   changes, writes into the tree, file mutations (delete, move, copy,
 //   create, chmod), package installs, and formatters are all denied.
 //   Gate-runner (qa-verifier): it builds and runs the suites, so inside a fixed

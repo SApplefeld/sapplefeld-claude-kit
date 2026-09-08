@@ -15,6 +15,7 @@ How to amend: a row changes when ownership moves, and the move lands in the same
 | A design conversation for a new feature or non-trivial change: scope check, the questions asked, the spec written | `brainstorming` | doctrine (The execution loop), README |
 | Which model tier executes a section, and the tier bands | `brainstorming` | doctrine (Orchestrating fan-out work), `executing-work` (routing) |
 | The scout sweep that derives a section's files in scope where a design changes a contract or a shared surface | `brainstorming` | `executing-work` |
+| A spec read against its own Goal before it is armed, and the adjudication of what that read returns | `brainstorming` (step 10, plan review) | the `plan-reviewer` charter |
 | A hard-to-reverse architecture fork pressure-tested by several lenses | `design-council` | `brainstorming` (offers it) |
 | A verdict on a decision whose framing carries the operator's own preference | `cold` | doctrine (Match my precision) |
 | What a prompt, brief, spec, or handoff does not state, and how each gap is routed | doctrine (Enumerate the gaps at intake) | `executing-work`, `brainstorming` |

@@ -11,7 +11,7 @@ One read-only fresh judge, the `consultant` agent, ruling on one question a stuc
 
 Stuck sessions do not feel stuck - they feel almost done. So the triggers are a counted floor, recognizable by a re-reader rather than dependent on felt difficulty, plus a general license on top:
 
-- **(a) A second failed attempt at the same problem**, whatever its shape: an implementation round, a debugging hypothesis, a review round. Where executing-work's tier-escalation ladder already owns the moment, it governs: a second failed review round whose Criticals repeat a class is a tier problem rather than a framing one, and the consult is for the branch where no class repeats and the spec's own premise is the generator.
+- **(a) A second failed attempt at the same problem**, whatever its shape: an implementation round, a debugging hypothesis, a review round, a review seesaw (the second reversal of one passage's fix). Where executing-work's tier-escalation ladder already owns the moment, it governs: a second failed review round whose Criticals repeat a class is a tier problem rather than a framing one, and the consult is for the branch where no class repeats and the spec's own premise is the generator.
 - **(b) Any BLOCKED that turns on a decision.** Consult first; only the preference, cost, or risk-appetite fork that survives goes to the operator, with the ruling attached. An external dependency only the operator can satisfy, and a destructive action waiting on their yes, are not decisions to rule on: those go straight up.
 - **(c) A systematic-debugging dead end**, before the stop-and-report.
 - **(d) The general license:** a decision that is hard to reverse or load-bearing, not covered by the spec, where you would otherwise be guessing.
@@ -23,14 +23,14 @@ The preference-versus-facts discriminator governs (b): a spec gap is the operato
 The brief carries:
 
 - The decision, stated plainly. A consult arriving without a decision to rule on gets NEEDS_CONTEXT back, not a survey.
-- The evidence. For a review-failure consult, both rounds' surviving findings; for a debugging consult, the hypothesis history.
+- The evidence. For a review-failure consult, the rounds' surviving findings; for a debugging consult, the hypothesis history.
 - The repo paths worth reading.
 - The querent's current lean, explicitly labeled as an instinct to test - the consultant checks it, never ratifies it.
 - What an implementable answer would look like.
 
 Bulky evidence goes to the gitignored `.kit/` scratch path and rides in the brief as a path, never pasted inline.
 
-Writing the brief is itself part of the mechanism, not overhead: the briefing cost is what forces the problem outside the session's own reasoning loop. A session that cannot state its decision plainly enough to brief has learned something already.
+Writing the brief is itself part of the mechanism, not overhead: the briefing cost is what forces the problem outside the session's own reasoning loop.
 
 ## The model rule
 

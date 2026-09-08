@@ -3394,6 +3394,146 @@ test('the inbound machine-axis read names own-directory paths only, and is unpro
     }
 });
 
+// The two runtimes' machine spellings, pinned against each other. Every
+// machine-axis case above assumes os.hostname() and Get-MemorySyncMachineName
+// read the same string; this is the one case that checks that assumption
+// rather than building on it, so a platform where the two readings diverge
+// fails here instead of quietly syncing every one of its own files as
+// foreign.
+const NO_HOST_REASON = isWin ? false
+    : 'this box has no Windows PowerShell host to read Get-MemorySyncMachineName from, and the doctor itself does not run off Windows';
+
+test('the PowerShell and Node readings of this machine\'s name agree byte-exact',
+    { skip: NO_HOST_REASON }, () => {
+        const script = '. ' + q(INSTALLER) + '; Get-MemorySyncMachineName | Write-Output';
+        const res = pwsh(script);
+        assert.strictEqual(res.status, 0, res.stdout + res.stderr);
+        assert.strictEqual(res.stdout.trim(), MACHINE,
+            'Get-MemorySyncMachineName and os.hostname() must read the same string, since the machine axis '
+            + 'compares one runtime\'s reading against the other\'s directory name');
+    });
+
+// Every letter of the machine name with its case flipped. NTFS folds case, so
+// this string names the same directory on disk as MACHINE while failing an
+// ordinary string comparison against it, which is exactly the input decision
+// 3's case-insensitive comparison exists for. A hostname with no cased ASCII
+// letter has no distinct variant, and the two cases below skip rather than
+// compare a string to itself.
+function flipAsciiCase(name) {
+    let flipped = '';
+    for (const ch of name) {
+        if (ch >= 'a' && ch <= 'z') { flipped += ch.toUpperCase(); }
+        else if (ch >= 'A' && ch <= 'Z') { flipped += ch.toLowerCase(); }
+        else { flipped += ch; }
+    }
+    return flipped;
+}
+const CASE_VARIANT = flipAsciiCase(MACHINE);
+const NO_CASE_VARIANT_REASON = (CASE_VARIANT === MACHINE)
+    ? 'the running hostname (' + MACHINE + ') carries no cased ASCII letter, so no case variant of it exists to plant'
+    : false;
+
+// The case-variant path is committed straight into HEAD through the index,
+// via update-index and a plain commit, and never written to the working
+// tree: this box's filesystem folds case, so a real file at this spelling
+// would land inside the coordinator/<MACHINE>/ directory the fixture already
+// tracks on disk, corrupting both. Left unwritten, git reads the tracked path
+// as a deletion once it is committed, which is itself a staged write the
+// machine axis has to classify, exactly as a peer's deleted file is
+// elsewhere in this file.
+function plantCaseVariantCoordinatorPath(store, rel, content) {
+    const hashed = spawnSync('git', ['-C', store, 'hash-object', '-w', '--stdin'],
+        { input: content, encoding: 'utf8', env: { ...process.env } });
+    assert.strictEqual(hashed.status, 0, hashed.stderr);
+    const sha = hashed.stdout.trim();
+    assert.strictEqual(git(store, ['update-index', '--add', '--cacheinfo', '100644,' + sha + ',' + rel]).status, 0);
+    // Control: the index holds exactly the variant path this call planted,
+    // under no other spelling, before anything else runs over it.
+    const staged = git(store, ['diff', '--cached', '--name-only']);
+    assert.strictEqual(staged.status, 0, staged.stderr);
+    assert.strictEqual(staged.stdout.trim(), rel,
+        'the planted path is staged exactly as given, and nothing else is staged alongside it');
+    assert.strictEqual(git(store, ['commit', '--quiet', '-m', 'plant a case-variant coordinator path through the index']).status, 0);
+    assert.ok(!fs.existsSync(path.join(store, rel)), 'the variant path was never realized on disk');
+}
+
+test('a case variant of this machine\'s own directory is staged as its own outbound',
+    { skip: NO_HOST_REASON || NO_CASE_VARIANT_REASON }, () => {
+        assert.notStrictEqual(CASE_VARIANT, MACHINE, 'control: the variant differs from the machine name');
+        assert.strictEqual(CASE_VARIANT.toLowerCase(), MACHINE.toLowerCase(),
+            'control: the variant differs from the machine name only by case');
+
+        const fake = makeOwnStore({ coordinator: true });
+        try {
+            const foreignPaths = plantForeignCoordinator(fake);
+            const variantPath = 'coordinator/' + CASE_VARIANT + '/case-variant.md';
+            plantCaseVariantCoordinatorPath(fake.store, variantPath, '# a case variant of this machine\'s own directory\n');
+            assert.strictEqual(git(fake.store, ['status', '--porcelain']).stdout.trim(), 'D ' + variantPath,
+                'the missing variant file reads as an unstaged deletion before the installer runs');
+            const head = headOf(fake.store);
+
+            const result = installRepoResult(fake.store);
+
+            assert.strictEqual(result.Ok, true, result.Notes.join('\n'));
+            assert.strictEqual(result.Reason, '',
+                'a case variant of this machine\'s own directory reads as own, not as a foreign write');
+            assert.notStrictEqual(headOf(fake.store), head, 'the deletion under the variant path was committed');
+            assert.ok(!trackedPaths(fake.store).includes(variantPath),
+                'the variant path is no longer tracked, since its deletion committed');
+            // The peer directory is untouched throughout: the axis reached the
+            // case variant and not the genuinely foreign directory beside it.
+            for (const rel of foreignPaths) {
+                assert.ok(trackedPaths(fake.store).includes(rel), rel + ' is still tracked and untouched');
+            }
+        } finally {
+            rmDir(fake.home);
+        }
+    });
+
+test('an upstream commit under a case variant of this machine\'s own directory gates as inbound-foreign-write',
+    { skip: NO_HOST_REASON || NO_CASE_VARIANT_REASON }, () => {
+        assert.notStrictEqual(CASE_VARIANT, MACHINE, 'control: the variant differs from the machine name');
+        assert.strictEqual(CASE_VARIANT.toLowerCase(), MACHINE.toLowerCase(),
+            'control: the variant differs from the machine name only by case');
+
+        const fake = makeOwnStore({ coordinator: true });
+        try {
+            const foreignPaths = plantForeignCoordinator(fake);
+            const bare = attachBareOrigin(fake);
+            const clone = cloneOf(fake, bare);
+            const variantPath = 'coordinator/' + CASE_VARIANT + '/case-variant.md';
+            plantCaseVariantCoordinatorPath(clone, variantPath,
+                '# an upstream write under a case variant of this machine\'s directory\n');
+            assert.strictEqual(git(clone, ['push', '--quiet', 'origin', 'main']).status, 0);
+            const head = headOf(fake.store);
+
+            assertSilentSync(runSync(fake.store));
+
+            const state = readState(fake.store);
+            assert.strictEqual(state.lastResult, 'gate');
+            assert.strictEqual(state.reason, 'inbound-foreign-write',
+                'a case variant of this machine\'s own directory refuses inbound as a write to it, rather than '
+                + 'being read as some other machine\'s file');
+            assert.strictEqual(headOf(fake.store), head, 'the tree is left at the pre-sync commit');
+            // fs.existsSync on this filesystem answers a case-variant path the
+            // same as the real one, so what proves the gate stopped before
+            // checkout is that the real directory carries no new file: the
+            // rebase this refusal never runs is the only step that could have
+            // written case-variant.md, under either spelling.
+            assert.ok(!fs.existsSync(path.join(fake.store, 'coordinator', MACHINE, 'case-variant.md')),
+                'no file from the refused commit reached this machine\'s real directory on disk');
+            assert.strictEqual(git(fake.store, ['status', '--porcelain']).stdout.trim(), '',
+                'the working tree is untouched');
+            assert.strictEqual(git(fake.store, ['rev-parse', '--verify', 'refs/remotes/origin/main']).status, 0,
+                'the fetched tip is left in place');
+            for (const rel of foreignPaths) {
+                assert.ok(trackedPaths(fake.store).includes(rel), rel + ' is still tracked and untouched');
+            }
+        } finally {
+            rmDir(fake.home);
+        }
+    });
+
 // The doctor's half of the same finding. The runner's only output channel is
 // the state file, which carries the reason code alone, so the operator who has
 // to repair the remote learns which commit and which paths from the doctor's

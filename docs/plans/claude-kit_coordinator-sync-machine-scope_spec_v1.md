@@ -49,7 +49,7 @@ Acceptance: tests green, watched red first; `node --test test/memory-sync.test.j
 
 ### 2. The two runtimes' machine spellings are pinned against each other. Model: sonnet
 
-One test asserts that the PowerShell reading `Get-MemorySyncMachineName` returns and Node's `os.hostname()` return the same string byte-exact on the running box, skipping with a named reason where `pwsh` is absent, so a platform whose two readings diverge fails the suite on that platform rather than syncing every one of its own files as foreign. A second test plants a directory whose name differs from the machine's only by case and asserts it reads as this machine's own in both sync directions, refused inbound and staged as own outbound, with the variant planted through the git index (an `update-index` entry for the outbound case, an upstream fixture commit for the inbound one) rather than on disk, since a case-insensitive filesystem cannot hold both spellings beside each other.
+One test asserts that the PowerShell reading `Get-MemorySyncMachineName` returns and Node's `os.hostname()` return the same string byte-exact on the running box, skipping with a named reason where the box carries no Windows PowerShell host, which is the runtime the harness reads the installer through, so a platform whose two readings diverge fails the suite on that platform rather than syncing every one of its own files as foreign. A second test plants a directory whose name differs from the machine's only by case and asserts it reads as this machine's own in both sync directions, refused inbound and staged as own outbound, with the variant planted through the git index (an `update-index` entry for the outbound case, an upstream fixture commit for the inbound one) rather than on disk, since a case-insensitive filesystem cannot hold both spellings beside each other.
 
 Acceptance: both tests green, the first watched red against a deliberately wrong constant; delta named.
 
@@ -217,3 +217,69 @@ test lines: 115326 of cap 115286 across 59 test files
 tests: 3452
 changed paths under no measured root: 5 (5 differing from HEAD, 0 untracked), which this tool does not measure and which no row above names; named-exclusion paths in the changeset: test/size-budget.json, which a root holds and no shape measures, so no row above names them
 ```
+
+### Interim board 3 - 2026-09-08
+
+Written at the compaction gate's deferral signal, at the boundary between section 2's review round
+and its fix pass.
+
+In-flight sections: section 2 implemented, verified and reviewed, with its fix pass not yet applied.
+Section 3 not started; it rewrites documents this section does not touch, so it does not contend.
+
+Live dispatches: none. The section 2 implementer (implementer-sonnet) completed and reported DONE.
+The review round completed: three lenses, all three agents done, none errored.
+
+Gate, measured by this session on SCOTT-CLAUDE 2026-09-08T19:41Z-19:53Z while holding the
+heavy-process claim, taken after waiting for a live foreign claim (`AI-OS: Worker`, repo ai-os, aged
+by the claim file's own modification time) which cleared at 19:41:10Z:
+
+- `node --test test/memory-sync.test.js`: tests 103, pass 103, fail 0, exit 0, duration 305.8s,
+  against this session's prior baseline of 100/100/0 exit 0. Delta +3 tests, zero failures either
+  side.
+- `node --test test/memory-session.test.js`: tests 87, pass 86, fail 1, exit 1, identical to its
+  baseline. The single red is the standing box-local `a pinned directory too long to name faithfully
+  stands the session down`, permanent here because TEMP is `D:\Temp` at seven characters.
+- Whole-tree pins, one run: tests 119, pass 119, fail 0, exit 0 across doctrine-parity,
+  doctor-encoding, git-guard-parity, memory-sync-git-guard and doctor-goal-state.
+- `node --test test/size-ratchet.test.js`: tests 101, pass 100, fail 1, exit 1, on the same routed
+  collateral over-cap as section 1.
+
+Review round 1 over section 2 (base a2c4be5), reviewers one tier up from the sonnet writer tier at
+opus, effort high, through Workflow: adversarial CHANGES_REQUIRED, blind CHANGES_REQUIRED, security
+CLEAR. Both models resolved at `claude-opus-5` with no substitution, tallied from the dispatches'
+own transcripts.
+
+Rulings adopted at this boundary:
+
+5. The outbound half of the case-variant pin can only be exercised as a deletion, and the test says
+   so rather than implying wider reach. A case-folding filesystem cannot hold the variant spelling
+   beside the real directory, and `git add -A` either errors on a case alias against a tracked real
+   directory or purges a disk-less staged-new entry, so the only construction that survives the
+   installer's own add is a path committed into HEAD through `update-index` with no file on disk,
+   which git then stages as a deletion. A staged deletion is a write the axis classifies, confirmed
+   at `plugins/claude-kit/doctor/install-memory-sync.ps1:1168` where nothing filters the staged list
+   to paths that still exist. An addition or modification under a case-variant path is unreachable
+   from a real checkout and is not exercised.
+
+6. The size-ratchet red is not this section's and its cap is not moved. `test/memory-session.test.js`
+   is byte-identical to HEAD at 3280 lines with a cap of 3240 at HEAD and unchanged here, and the
+   ratchet's own failure text records that the path currently matches HEAD. The blind lens raised it
+   as a Major and proposed raising the cap; raising a cap for growth this session did not make would
+   loosen the ratchet and erase the signal it exists for, so the finding is recorded
+   justified-not-fixed and the item stays routed in `docs/backlog.md` where section 1 put it.
+
+7. The parity test's skip states the condition it actually tests. Two lenses converged on the skip
+   claiming a missing PowerShell host while testing only the platform. The repair is the sentence
+   rather than a host probe: the doctor's installer is Windows-only, so the platform check is the
+   right condition, and a probe would add a process spawn to a test file for no reach it does not
+   already have.
+
+Approval drift recorded here: section 2's own requirement sentence was rewritten in this session to
+state the skip condition the code implements, the adversarial and security lenses both naming the
+edit. The base text read that the test skips where `pwsh` is absent; the section now states the
+platform condition, which is what the harness tests and what the doctor's Windows-only installer
+makes the meaningful one. The sentence sits above `## Chapters` and so inside the approval-scoped
+region, which is why it is recorded here rather than left in the diff.
+
+Next action per section: apply section 2's fix pass, re-review the fix delta, then steps 5 through 8
+to close section 2, then section 3 (sonnet, `Locus: inline` because it writes under `docs/`).

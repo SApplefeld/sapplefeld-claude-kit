@@ -61,7 +61,8 @@ function probe(overrides) {
 
 test('parseArgs takes the documented flags and defaults the rest', async () => {
     const { parseArgs } = await loadRunner();
-    assert.deepStrictEqual(parseArgs([]), { before: null, only: null, shape: null, claude: null, home: null, dryRun: false });
+    assert.deepStrictEqual(parseArgs([]), { before: null, only: null, shape: null, touching: null, claude: null, home: null, dryRun: false });
+    assert.strictEqual(parseArgs(['--touching', '13c3a1d']).touching, '13c3a1d');
     const args = parseArgs(['--before', 'abc123', '--only', 'one, two', '--shape', 'full', '--claude', 'C:/bin/claude.exe', '--home', '/tmp/home', '--dry-run']);
     assert.strictEqual(args.before, 'abc123');
     assert.deepStrictEqual(args.only, ['one', 'two']);
@@ -104,6 +105,28 @@ test('the reader binary is resolved to a file before any pair runs, and a name t
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('parseArgs refuses --touching beside --only, a dash-leading --touching, and an empty one', async () => {
+    const { parseArgs } = await loadRunner();
+    assert.throws(() => parseArgs(['--touching', 'HEAD', '--only', 'x']), /cannot be combined with --only/);
+    assert.throws(() => parseArgs(['--touching', '--only']), /the value is missing/);
+    assert.throws(() => parseArgs(['--touching', '-x']), /starts with a dash/);
+    assert.throws(() => parseArgs(['--touching', '']), /names no ref/);
+});
+
+test('momentsTouching selects the moments whose shapes name a changed file and skips home entries', async () => {
+    const { momentsTouching } = await loadRunner();
+    const probes = [
+        { moment: 'a', shapes: [{ name: 'full', files: [{ value: 'plugins/claude-kit/skills/x/SKILL.md' }, { value: 'home/CLAUDE.md' }] }] },
+        { moment: 'b', shapes: [{ name: 'full', files: [{ value: 'plugins/claude-kit/skills/y/SKILL.md' }] }] },
+        { moment: 'c', shapes: [{ name: 'full', files: [{ value: 'home/CLAUDE.md' }] }] },
+    ];
+    assert.deepStrictEqual(momentsTouching(probes, ['plugins/claude-kit/skills/x/SKILL.md', 'docs/README.md']), ['a']);
+    // A home entry never counts as touched, even when a path of that spelling is in the changeset.
+    assert.deepStrictEqual(momentsTouching(probes, ['home/CLAUDE.md']), []);
+    assert.deepStrictEqual(momentsTouching(probes, ['plugins/claude-kit/skills/y/SKILL.md', 'plugins/claude-kit/skills/x/SKILL.md']), ['a', 'b']);
+    assert.deepStrictEqual(momentsTouching(probes, []), []);
 });
 
 test('parseArgs refuses an unknown flag and names it', async () => {

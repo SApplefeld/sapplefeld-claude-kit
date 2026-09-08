@@ -26,7 +26,12 @@
 // terminal profile) would otherwise decide what a hook reports. The strip is
 // wholesale and case-insensitive, since Windows environment keys are not the
 // casing a plain-object copy is indexed by, and GIT_TERMINAL_PROMPT is set
-// after it so no invocation can block a session on a credential prompt.
+// after it so no invocation can block a session on a credential prompt. The
+// only GIT_* names the child carries are the guard's own: the prompt refusal
+// and the environment-config pins that hold core.fsmonitor and core.hooksPath
+// inert. Those two pins close two named routes by which a repository nobody
+// has vetted runs its own code on a read; the class is wider than the two,
+// and gitChildEnv's comment names what stays open.
 //
 // The boundary is shared rather than per-caller because an unexported one is
 // the fix the next author reimplements by not implementing it: both properties
@@ -40,6 +45,9 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
+const os = require('os');
+const path = require('path');
 
 // Bound on one git call when the caller names none. Every caller here blocks
 // something a session is waiting on, so a wedged git is a bounded cost rather
@@ -53,9 +61,45 @@ const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 // The environment a git child runs under: this process's environment with every
-// GIT_* key removed case-insensitively, plus the terminal-prompt refusal. None
-// of the stripped variables is needed, since every call below passes
-// `-C <repoDir>` to name the repository it means.
+// GIT_* key removed case-insensitively, plus the terminal-prompt refusal and
+// the two config pins below. None of the stripped variables is needed, since
+// every call below passes `-C <repoDir>` to name the repository it means.
+//
+// core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours,
+// so a status against a wrong or planted repository runs its fsmonitor
+// program and a commit runs its hooks, and the hooks here ask exactly those
+// questions of whatever directory a session opened in. Both are pinned inert
+// through git's environment-config channel, which beats repo-local config. The
+// pins are additive rather than a suppression of the config files: pointing
+// GIT_CONFIG_GLOBAL at an empty file would also drop safe.directory, whose
+// absence surfaces as a dubious-ownership refusal that reads like a permissions
+// bug. fsmonitor takes git's own disable value rather than an empty string,
+// because a Windows process environment cannot hold an empty value and a
+// GIT_CONFIG_VALUE_<i> absent while GIT_CONFIG_COUNT names it is a fatal parse
+// error on every call. hooksPath names a fresh path under the temp directory
+// that nothing creates, so git finds no hooks to run. Both are set after the
+// strip, so an ambient GIT_CONFIG_COUNT cannot displace them. The channel
+// exists in git 2.31 and later; an older git ignores it silently and this
+// guard degrades to the strip alone, with nothing here to say so.
+//
+// Two keys are pinned by name, and the class they belong to is not closed:
+// any key git documents as a command or program, and any remote URL scheme or
+// helper a remote's config selects, also makes git run a command on the verbs
+// the hooks use. The one write-shaped verb here is branch-reaper-nudge's
+// fetch against whatever repository a session opened, where a repo-local
+// core.sshCommand, credential.helper or upload-pack setting runs under these
+// pins exactly as before them. So the coverage is the two named members
+// rather than the class. The hooksPath pin also reaches an operator's global
+// hooks, since the environment channel cannot tell a repo-local hooksPath
+// from a global one; on the read verbs here that costs nothing. HOME and
+// XDG_CONFIG_HOME are not stripped, since git needs HOME for its legitimate
+// config, so they still select the global config every guarded call reads;
+// docs/security-model.md carries that residual.
+//
+// The same two pins are spelled again in Invoke-MemorySyncGit
+// (doctor/install-memory-sync.ps1), which guards the sync script's own git
+// calls. Neither language can call the other's, so the protections are
+// restated there rather than shared.
 function gitChildEnv() {
     const env = { ...process.env };
     for (const k of Object.keys(env)) {
@@ -68,6 +112,11 @@ function gitChildEnv() {
     // The spawn working directory above is what closes the route for the git
     // call itself; this closes it one level down.
     env.NoDefaultCurrentDirectoryInExePath = '1';
+    env.GIT_CONFIG_COUNT = '2';
+    env.GIT_CONFIG_KEY_0 = 'core.fsmonitor';
+    env.GIT_CONFIG_VALUE_0 = 'false';
+    env.GIT_CONFIG_KEY_1 = 'core.hooksPath';
+    env.GIT_CONFIG_VALUE_1 = path.join(os.tmpdir(), 'kit-git-no-hooks-' + crypto.randomUUID());
     return env;
 }
 

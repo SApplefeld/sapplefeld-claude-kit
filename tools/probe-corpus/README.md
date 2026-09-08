@@ -23,8 +23,8 @@ another directory.
 
 ```
 node tools/probe-corpus/run.mjs [--before <git ref>] [--only <moment>[,<moment>]]
-                               [--shape <name>] [--claude <path>] [--home <dir>]
-                               [--dry-run]
+                               [--touching <git ref>] [--shape <name>]
+                               [--claude <path>] [--home <dir>] [--dry-run]
 ```
 
 - `--before <ref>` reads each shape's files out of that commit instead of the
@@ -36,6 +36,16 @@ node tools/probe-corpus/run.mjs [--before <git ref>] [--only <moment>[,<moment>]
 - `--only` and `--shape` narrow the run to the named moments and the named shape.
   A moment no probe carries is refused by name, since a run that quietly read
   the rest of the set would report on a corpus the caller never asked about.
+- `--touching <ref>` narrows the run to the moments whose shapes name a file
+  changed against that ref: the diff with renames unfolded plus every untracked
+  file the repository does not ignore, read from the repository root, which is
+  the changeset the finishing pass defines. A `home/` entry never counts as
+  touched, since it is read from the reader's home directory. It cannot be
+  combined with `--only`, which asks a different question. Where no shape
+  names a changed file the run prints one summary line saying so and exits 0
+  with no reader spawned. This is the flag a finishing pass uses, so a
+  one-sentence edit to a skill runs the pairs that read that skill rather than
+  the whole set.
 - `--dry-run` composes every prompt and writes the report skeleton without
   invoking a reader. It is what the suite and an author checking a prompt use.
 - `--claude <path>` (or the `PROBE_CLAUDE_BIN` environment variable, which the
@@ -47,6 +57,14 @@ node tools/probe-corpus/run.mjs [--before <git ref>] [--only <moment>[,<moment>]
   `home/<name>` shape entry is read from and the credentials are copied from.
   It defaults to `~/.claude`. The suite runs every end-to-end case under a
   fixture home, so no test reads the operator's.
+
+A run is not a heavy process in the sense the kit's box claim protects against:
+it spawns one headless reader at a time, and each spends most of its minutes
+waiting on the network rather than on this machine's processors or memory, so
+it takes no heavy-process claim and may run beside a suite. What it does spend
+is paid model calls, about forty cents a pair on the run recorded 2026-09-07,
+which is why the set is narrowed with `--touching` or `--only` rather than run
+whole.
 
 The one line a run prints on stdout is its summary, and it is the line the
 Chapter template quotes:

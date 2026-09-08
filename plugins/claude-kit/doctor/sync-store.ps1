@@ -3,7 +3,9 @@
 # rebase onto the fresh tracking ref, push, and record the outcome to
 # <StoreRoot>/kit-sync-state.json. The SessionStart hook (memory-session.js)
 # spawns this detached whenever the store is pending; it can also be run by
-# hand with an explicit -StoreRoot.
+# hand with an explicit -StoreRoot. Either way every git call runs through
+# Invoke-MemorySyncGit's environment guard, so a hand run's shell GIT_*
+# variables (GIT_SSH_COMMAND, GIT_ASKPASS among them) do not reach git.
 #
 # There is no default store root: the real store root holds
 # .credentials.json, settings.json, and history.jsonl, so a forgotten

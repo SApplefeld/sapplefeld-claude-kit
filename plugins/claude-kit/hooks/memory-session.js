@@ -763,8 +763,10 @@ function syncNudge(source, memq) {
     // repo at the store root. The cost is that a freshly cloned store reads
     // foreign here until its first doctor -Fix sets the key, which is the
     // per-machine setup step anyway. The read runs under gitStoreEnv, which
-    // strips every GIT_* variable, so a repo-carried GIT_COMMON_DIR cannot
-    // redirect this --local read at an attacker-supplied config that answers
+    // strips every GIT_* variable the session carried and leaves only the
+    // runner's own prompt refusal and config pins, so a repo-carried
+    // GIT_COMMON_DIR cannot redirect this --local read at an attacker-supplied
+    // config that answers
     // true, and os.homedir() following USERPROFILE (which the default-store
     // comparison below trusts) cannot help either, since the key is not on disk
     // to move. A repo without the key is one this gate does not treat as owned,
@@ -841,11 +843,13 @@ function syncNudge(source, memq) {
     if (isDefaultStore && !lockFresh) {
         try {
             // The relauncher must run its fixed one-liner and nothing else, so
-            // the detached env is gitStoreEnv (already every GIT_* variable
-            // stripped: GIT_CONFIG_* config injection, GIT_ASKPASS,
-            // GIT_SSH_COMMAND, GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF, none of
-            // which a background fetch/push should inherit from a session's
-            // environment) with NODE_OPTIONS (a preload injector) additionally
+            // the detached env is gitStoreEnv (already stripped of every GIT_*
+            // variable the session carried: GIT_CONFIG_* config injection,
+            // GIT_ASKPASS, GIT_SSH_COMMAND, GIT_PROXY_COMMAND,
+            // GIT_EXTERNAL_DIFF, none of which a background fetch/push should
+            // inherit from a session's environment, leaving the guard's own
+            // GIT_CONFIG_* pins that hold core.fsmonitor and core.hooksPath
+            // inert) with NODE_OPTIONS (a preload injector) additionally
             // dropped. The two credential variables are set AFTER the strip so
             // any authentication prompt fails at once instead of hanging a
             // console-less chain that can never answer one.

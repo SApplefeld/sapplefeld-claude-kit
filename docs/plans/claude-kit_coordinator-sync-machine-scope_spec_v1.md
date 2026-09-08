@@ -33,6 +33,10 @@ Decided 2026-09-03 by the Expert seat; reversible at arming.
 2. **The Admin request inbox is inside the scope, not exempted.** The role skill contemplates two machines appending to one `admin-requests.md` across a sync window and names that as an unresolved concurrency gap; under this plan a machine writes only its own inbox, so the cross-machine append is refused outbound and the gap closes by construction rather than by a merge rule. A request for another machine's Admin seat goes to that machine's coordinator over messaging, which the peer-sessions skill already routes. This is the one decision the operator may want to reverse at arming, since it removes a path the contract text currently entertains; the exemption, if taken, is `admin-requests.md` alone with the union merge the journals already use.
 3. **Case-folded matching on the machine segment.** Git paths are case-sensitive, but the working tree the runner writes sits on NTFS, which holds one directory for every spelling of a name, so a path whose machine segment matches this machine's name under a case fold lands in this machine's own directory on the disk the write reaches; the PowerShell reading therefore compares case-insensitively in both directions, refusing a case variant of this machine's directory inbound as a write to its own and reading such a variant as own outbound, which is the same comparison the role skill makes on a hostname for the delegation record. The pin in section 2 holds the two runtimes' readings of the current hostname equal, which is the one divergence the channel can produce on its own. A directory named by an earlier hostname, where the box was renamed after the directory was written, reads as foreign by construction; no test reads that case, and its repair is the operator's rename of the directory.
 
+## Standing Brief Amendments
+
+1. **Never pin curated operator prose by its wording; pin the token the sentence's identity actually rests on.** Added 2026-09-08 after section 1's review rounds surfaced the same class twice: round 1 found one such pin already in the tree, and the round that fixed it added five more. A test that matches a remedy sentence's words reds on any rewording of that sentence while proving nothing about behaviour, and every one of these sites already carried its own behavioural assertion beside the prose match. Pin a reason code, a sha, a path, a count, or a shape-level pattern over the block's structure. This binds every section of this plan, section 3's document rewrites included, where the temptation is strongest because the deliverable is prose.
+
 ## Sections of Work
 
 ### 1. The sync channel gains the machine axis on both sides. Model: opus
@@ -112,3 +116,80 @@ Rulings adopted since the arm:
 Next action per section: dispatch section 1's review round (adversarial-reviewer and blind-reviewer
 in parallel, plus the security-reviewer, whose trigger this section meets on configuration and
 process-execution surfaces), then steps 4 through 8 for section 1, then section 2.
+
+### Interim board 2 - 2026-09-08
+
+Written at the closure-drought trigger: two review rounds adjudicated with no section closed, with
+the compaction gate holding offers.
+
+In-flight sections: section 1 has had two full review rounds and is in its third fix pass. Sections
+2 and 3 not started; both depend on section 1's helper, so neither runs concurrently.
+
+Live dispatches: one implementer-opus, dispatched with the round 2 fix list (G1 through G9). Two
+implementer-opus rounds have already completed and reported DONE_WITH_CONCERNS.
+
+Review rounds so far, both at fable (writer tier opus, reviewers one tier up, Fable the ceiling;
+code pair at the frontmatter low, security at the frontmatter medium, all on the Agent tool):
+
+- Round 1 over the section (base 07a2e98): adversarial CHANGES_REQUIRED, blind CHANGES_REQUIRED,
+  security CONCERNS. All three converged independently on one defect.
+- Round 2 over the fix delta (base ebc8a3c): adversarial CHANGES_REQUIRED, blind CHANGES_REQUIRED,
+  security CLEAR.
+
+Gate baseline, measured by this session on SCOTT-CLAUDE at 2026-09-08T17:08Z-17:15Z, holding the
+heavy-process claim for the run. Contention at the sample: three resident dotnet processes, one
+VBCSCompiler and roughly a dozen node processes, none of them a live suite (a peer seat's claim on
+repo ai-os had been released at 17:07:58Z and this session waited for it rather than running beside
+it):
+
+- `node --test test/memory-sync.test.js`: tests 95, pass 95, fail 0, exit 0, duration 215.7s.
+  Prior baseline this session 90/90/0 exit 0. Delta +5 tests, all added by the fix round.
+- `node --test test/memory-session.test.js`: tests 87, pass 86, fail 1, exit 1, duration 29.0s.
+  Identical to the prior baseline. The single failure is the standing red `a pinned directory too
+  long to name faithfully stands the session down`, permanent on this box because TEMP is `D:\Temp`
+  at seven characters, landing the fixture at 254 against a 260-character guard.
+- Whole-tree pins whose subject these files are, all exit 0: doctrine-parity 72/72,
+  doctor-encoding 12/12, git-guard-parity 11/11, memory-sync-git-guard 2/2, doctor-goal-state 22/22.
+- The section's own acceptance run: `doctor.ps1` bare (there is no check flag; its parameters are
+  -Fix and -Yes alone, so a bare run is the check) over this box's real `~/.claude`, which carries
+  the peer NEO-CLAUDE coordinator directory tracked and unmodified, reads `[PASS] Memory sync` at
+  exit 0 with no inbound-foreign-write lines. That is the criterion section 1 wrote, met on the
+  live store rather than on a fixture.
+
+Rulings adopted since interim board 1:
+
+2. The rename channel defeated both halves of the machine axis, and it is fixed rather than
+   documented. Both machine-axis reads ran `git diff --name-only` under git's default rename
+   detection, which prints a rename's destination alone. Confirmed here against this repository's
+   own history: commit c8fea88 carries an R080, and the default reading omits the source path that
+   `--no-renames` restores. So a move of this machine's board out of its own directory was a
+   deletion neither gate could see. Both reads now carry `--no-renames`, with a test per direction.
+3. The NTFS 8.3 short-name observation is downgraded from Major to Minor and routed rather than
+   fixed. The security review held that an upstream path spelled `coordinator/SCOTT-~1/board.md`
+   would clear the ownership check and then land on this machine's real board at checkout, and
+   rated it medium because the discriminating probe is write-shaped and outside a reviewer's
+   charter. Three probes run here on the C: volume say otherwise: git resolves the alias in its own
+   working-tree reads and refuses every write that would clobber through it, aborting the merge or
+   the checkout with the own board intact, tracked and untracked alike. The residual is an
+   availability defect rather than a peer write landing on the board. Not fixed here because the
+   repair widens `Test-MemorySyncCoordinatorPathIsOwn`, whose comparison rule decision 3 defines
+   precisely, on evidence that no longer supports the severity that motivated it. Routed to
+   `docs/backlog.md` with the probe evidence.
+4. The doctor's remedy text is fixed at the report level and the inbound classifier is left alone.
+   Classifying an incoming own-directory change by committer identity would be a new trust rule
+   this spec never wrote. The report now names both repairs instead: a genuine foreign write, and
+   this machine's own history reading as foreign after a local reset or restore.
+5. A blank machine name must not report under a healthy verdict. The round 2 review found the new
+   blank-name line riding as verdict-neutral detail, so a store whose sync is wholly stopped could
+   read PASS at exit 0 with a push recipe beside it. The brief that produced it asked only for a
+   line, which was this session's error; the fix in flight makes it a failing branch.
+
+Approval drift recorded here: a `## Standing Brief Amendments` block was added to this plan above
+`## Sections of Work`, carrying one entry that bars pinning curated operator prose by its wording.
+The class surfaced twice in one section, once as a pin already in the tree and once as five more
+added by the round that removed it, which is the recurrence trigger. It binds sections 2 and 3 too,
+and section 3 most of all, since its deliverable is prose.
+
+Next action per section: adjudicate the round 3 fixes, re-run the section's close gate, then steps
+5 through 8 to close section 1, then section 2 (sonnet), then section 3 (sonnet, whose docs/ writes
+make it `Locus: inline` in the main thread).

@@ -129,6 +129,7 @@ Files in scope: `docs/backlog.md`, `docs/archive/backlog-2026-Q3.md`, `test/size
 - `docs/plans/claude-kit_subtraction-bars_spec_v1.md`: the retire classes and the ratchet this plan cuts against and re-baselines. Must be Complete first.
 - `docs/plans/claude-kit_corpus-audit_spec_v1.md`: the prose audit; runs beside this plan, and its follow-on cut waits on section 6.
 - Backlog item of 2026-08-26, plan-private referents in test comments: covered by sections 3 and 8.
+- `docs/archive/claude-kit_review-loop-exit_spec_v1.md`: the class-keyed exit for the review loop, and the parity pin over the class region's designed copy across executing-work and the two code-reviewer charters, which is the pin class this plan keeps; its section 4 made the size budget a ledger, so a cap this plan moves goes through `kit-size.js sync` rather than a hand edit.
 
 ## Open Questions
 

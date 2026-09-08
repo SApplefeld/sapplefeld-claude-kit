@@ -16,5 +16,9 @@ plugins/claude-kit.zip
 plugins/claude-kit/.claude-plugin/build-info.json
 plugins/claude-kit/claude-kit-doctrine.md
 
+# kit-size sync writes the budget by rename from a sibling temporary file; a run
+# killed between the write and the rename leaves it, and it is never a file to commit.
+test/size-budget.json.*.tmp
+
 # PowerShell writes its module analysis cache here when a test spawns it with a redirected profile.
 Microsoft/

@@ -121,7 +121,9 @@ claude-kit/                          (repo = the marketplace)
                                      moved with its cap and delta, its totals, and any untracked file sitting
                                      under a measured root; init writes a budget at current sizes; sync
                                      moves the caps of the paths named after it to their current sizes, or
-                                     every cap over a clean tree
+                                     every cap where no path is named, refusing that form where the budget
+                                     file, or any file whose cap would move, differs from HEAD or is not yet
+                                     added to git
       doctor/
         install-memq-shim.ps1        Installs the per-shell memq wrappers onto PATH and the status-line
                                      launcher (run by the doctor)

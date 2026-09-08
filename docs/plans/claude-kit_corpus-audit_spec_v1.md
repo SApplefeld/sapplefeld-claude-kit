@@ -126,5 +126,6 @@ Files in scope: the follow-on spec under `docs/plans/`, the committed brief besi
 - `docs/plans/claude-kit_recap_spec_v1.md`: the read-only-bar idiom decision 4 borrows.
 - `docs/plans/claude-kit_subtraction-bars_spec_v1.md`: the prose bar in writing-skills that Section 2 readers are briefed with, so a bloat finding names the sentence and the bar it fails rather than a feeling of length; runs first in the cycle.
 - `docs/plans/claude-kit_test-audit_spec_v1.md`: retires the wording pins over prose that is not a pinned copy, which the follow-on cut plan from Section 7 needs before it can cut a sentence without a red.
+- `docs/archive/claude-kit_review-loop-exit_spec_v1.md`: the class-keyed exit for the review loop, so a cut here that draws only claim findings closes in one fix round; its section 4 made the size budget a ledger, so a cap a cut here shrinks is lowered through `kit-size.js sync`.
 
 ## Chapters

@@ -65,9 +65,9 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
 // the two config pins below. None of the stripped variables is needed, since
 // every call below passes `-C <repoDir>` to name the repository it means.
 //
-// core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours on
-// an ordinary read, so a status or a rev-list against a wrong or planted
-// repository runs that repository's code, and the hooks here ask exactly those
+// core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours,
+// so a status against a wrong or planted repository runs its fsmonitor
+// program and a commit runs its hooks, and the hooks here ask exactly those
 // questions of whatever directory a session opened in. Both are pinned inert
 // through git's environment-config channel, which beats repo-local config. The
 // pins are additive rather than a suppression of the config files: pointing
@@ -91,7 +91,10 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
 // pins exactly as before them. So the coverage is the two named members
 // rather than the class. The hooksPath pin also reaches an operator's global
 // hooks, since the environment channel cannot tell a repo-local hooksPath
-// from a global one; on the read verbs here that costs nothing.
+// from a global one; on the read verbs here that costs nothing. HOME and
+// XDG_CONFIG_HOME are not stripped, since git needs HOME for its legitimate
+// config, so they still select the global config every guarded call reads;
+// docs/security-model.md carries that residual.
 //
 // The same two pins are spelled again in Invoke-MemorySyncGit
 // (doctor/install-memory-sync.ps1), which guards the sync script's own git

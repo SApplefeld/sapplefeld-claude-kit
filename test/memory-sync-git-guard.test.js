@@ -32,10 +32,17 @@ const isWin = process.platform === 'win32';
 // Single-quoted PowerShell literal, any embedded quote doubled.
 const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 
+// PowerShell by its SystemRoot path rather than a PATH lookup, and bounded
+// in time and output, as the parity sibling spawns it.
+const POWERSHELL_EXE = process.env.SystemRoot
+    ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    : 'powershell.exe';
+
 function pwsh(script, extraEnv) {
-    return spawnSync('powershell.exe',
+    return spawnSync(POWERSHELL_EXE,
         ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
-        { encoding: 'utf8', env: { ...process.env, ...(extraEnv || {}) } });
+        { encoding: 'utf8', env: { ...process.env, ...(extraEnv || {}) },
+          timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
 }
 
 function rmDir(dir) {
@@ -163,6 +170,9 @@ test('the funnel strips the caller\'s GIT_* variables, keeps the config files, a
                 GIT_CONFIG_GLOBAL: injected,
                 GIT_TERMINAL_PROMPT: 'caller-value',
                 Git_Config_Key_0: 'caller-cased',
+                // The one guard name the ^GIT_ clause does not reach, planted in
+                // a casing the guard table's lookup has to answer to.
+                NODEFAULTCURRENTDIRECTORYINEXEPATH: 'caller-upper',
                 HOME: home,
                 USERPROFILE: home
             };
@@ -213,6 +223,8 @@ test('the funnel strips the caller\'s GIT_* variables, keeps the config files, a
             assert.strictEqual(out.After.GIT_TERMINAL_PROMPT, 'caller-value', JSON.stringify(out));
             assert.strictEqual(out.After.GIT_CONFIG_GLOBAL, injected, JSON.stringify(out));
             assert.strictEqual(out.After.GIT_CONFIG_COUNT, null, JSON.stringify(out));
+            assert.strictEqual(out.After.NoDefaultCurrentDirectoryInExePath, 'caller-upper',
+                'the guard table did not answer to the caller casing: ' + JSON.stringify(out));
             // The differently-cased name: the caller's value is back, so the
             // guard neither left its own key behind nor lost the caller's to a
             // case-sensitive lookup. It was there before the calls too, which is

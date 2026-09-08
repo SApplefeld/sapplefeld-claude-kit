@@ -412,9 +412,9 @@ function Get-MemorySyncProbePaths {
 # variable from its own environment and then resolves a bare command name
 # against PATH alone rather than against the current directory.
 #
-# core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours
-# on an ordinary read, so a status against a wrong or planted store root runs
-# that repository's code. Both are pinned inert through git's
+# core.fsmonitor and core.hooksPath are ordinary repo-local keys git honours,
+# so a status against a wrong or planted store root runs its fsmonitor
+# program and a commit runs its hooks. Both are pinned inert through git's
 # environment-config channel, which beats repo-local config. The pins are
 # additive rather than a suppression of the config files: pointing
 # GIT_CONFIG_GLOBAL at an empty file would also drop safe.directory, whose
@@ -436,7 +436,10 @@ function Get-MemorySyncProbePaths {
 # and none of them is pinned here. So the coverage above is the two named
 # members rather than the class. The environment-config channel exists in
 # git 2.31 and later; an older git ignores it silently and this guard
-# degrades to the strip alone, with nothing here to say so.
+# degrades to the strip alone, with nothing here to say so. HOME and
+# XDG_CONFIG_HOME are not stripped, since git needs HOME for its legitimate
+# config, so they still select the global config every call here reads;
+# docs/security-model.md carries that residual.
 #
 # The hooksPath pin cannot tell a repo-local hooksPath from a global one, so
 # it also keeps an operator's global hooks (a pre-commit secret scanner, say)

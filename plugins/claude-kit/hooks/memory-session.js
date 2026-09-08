@@ -764,8 +764,9 @@ function syncNudge(source, memq) {
     // foreign here until its first doctor -Fix sets the key, which is the
     // per-machine setup step anyway. The read runs under gitStoreEnv, which
     // strips every GIT_* variable the session carried and leaves only the
-    // runner's own prompt refusal and config pins, so a repo-carried GIT_COMMON_DIR cannot
-    // redirect this --local read at an attacker-supplied config that answers
+    // runner's own prompt refusal and config pins, so a repo-carried
+    // GIT_COMMON_DIR cannot redirect this --local read at an attacker-supplied
+    // config that answers
     // true, and os.homedir() following USERPROFILE (which the default-store
     // comparison below trusts) cannot help either, since the key is not on disk
     // to move. A repo without the key is one this gate does not treat as owned,

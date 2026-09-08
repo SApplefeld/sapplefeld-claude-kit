@@ -71,7 +71,7 @@ export const READER_TIMEOUT_MS = 300000;
 export const MAX_EXIT = 100;
 export const MAX_REPLY_BYTES = 8 * 1024 * 1024;
 
-const KNOWN_FLAGS = ['--before', '--only', '--shape', '--claude', '--home', '--dry-run'];
+const KNOWN_FLAGS = ['--before', '--only', '--shape', '--touching', '--claude', '--home', '--dry-run'];
 
 // ---------------------------------------------------------- the read guard
 
@@ -139,7 +139,7 @@ export function elided(text) {
 // caller is a human at a terminal and "invalid arguments" sends them to read
 // this file.
 export function parseArgs(argv) {
-    const out = { before: null, only: null, shape: null, claude: null, home: null, dryRun: false };
+    const out = { before: null, only: null, shape: null, touching: null, claude: null, home: null, dryRun: false };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         if (arg === '--dry-run') { out.dryRun = true; continue; }
@@ -159,6 +159,7 @@ export function parseArgs(argv) {
             const why = arg === '--before' ? 'an empty --before would read the worktree while the caller believes a ref ran'
                 : arg === '--shape' ? 'an empty --shape narrows nothing'
                 : arg === '--only' ? 'an empty --only names no moment'
+                : arg === '--touching' ? 'an empty --touching names no ref to diff against'
                 : 'the flag takes a value';
             throw new Error(arg + ' was given an empty value: ' + why);
         }
@@ -172,13 +173,56 @@ export function parseArgs(argv) {
             if (out.only.length === 0) throw new Error('--only was given no moment names');
         } else if (arg === '--shape') {
             out.shape = value;
+        } else if (arg === '--touching') {
+            if (value.startsWith('-')) {
+                throw new Error('--touching value ' + JSON.stringify(value) + ' starts with a dash: a git ref is never dash-leading, and passing one on would let git read it as an option');
+            }
+            out.touching = value;
         } else if (arg === '--home') {
             out.home = value;
         } else {
             out.claude = value;
         }
     }
+    // --touching derives the moment list from the changeset, so a caller naming
+    // moments beside it has asked two different questions.
+    if (out.touching && out.only) {
+        throw new Error('--touching derives the moments from the files changed against its ref, so it cannot be combined with --only');
+    }
     return out;
+}
+
+// The paths changed against a ref, as the finishing pass defines a changeset:
+// the diff against the ref with renames unfolded, plus every untracked file the
+// repository does not ignore, both repo-relative from the repository root.
+export function changedPathsAgainst(repoDir, ref, runner) {
+    const git = runner || gitBytes;
+    const commit = verifyRef(repoDir, ref, git);
+    const out = new Set();
+    for (const args of [['diff', '--name-only', '--no-renames', commit], ['ls-files', '--others', '--exclude-standard']]) {
+        const res = git(repoDir, args);
+        if (res.status !== 0) throw new Error('git ' + args.join(' ') + ' exited ' + res.status + ' while reading the changeset for --touching');
+        for (const line of res.stdout.toString('utf8').split(/\r?\n/)) {
+            if (line.trim() !== '') out.add(line.trim());
+        }
+    }
+    return { commit, paths: out };
+}
+
+// The moments whose shapes name a changed file. A `home/` entry is read from the
+// reader's home directory rather than the repository, so a changeset never
+// touches one; every other entry is a repo-relative path a diff can name.
+export function momentsTouching(probes, changedPaths) {
+    const paths = changedPaths instanceof Set ? changedPaths : new Set(changedPaths);
+    const moments = [];
+    for (const probe of probes) {
+        const hit = (probe.shapes || []).some((shape) => (shape.files || []).some((f) => {
+            const value = typeof f === 'string' ? f : f.value;
+            return !HOME_ENTRY.test(value) && paths.has(value);
+        }));
+        if (hit && !moments.includes(probe.moment)) moments.push(probe.moment);
+    }
+    return moments;
 }
 
 // The reader CLI this run drives: the flag wins over the environment variable,
@@ -1587,11 +1631,24 @@ export async function main(argv, env) {
     const probes = listProbeFiles(PROBES_DIR).map((p) => parseProbeFile(fs.readFileSync(p, 'utf8'), { path: p }));
     if (probes.length === 0) throw new Error('no probe files under ' + PROBES_DIR);
     sweepStaleReaderScratch();
+    let only = args.only;
+    if (args.touching) {
+        resolveGitBinary(environment);
+        const changed = changedPathsAgainst(REPO_ROOT, args.touching, gitBytes);
+        only = momentsTouching(probes, changed.paths);
+        if (only.length === 0) {
+            process.stdout.write(elided('probe-corpus: no probe shape names a file changed against ' + changed.commit
+                + ', 0 pairs, exit 0') + '\n');
+            return 0;
+        }
+        process.stderr.write(elided('probe-corpus: --touching ' + changed.commit + ' selects ' + only.length
+            + ' moment' + (only.length === 1 ? '' : 's') + ': ' + only.join(', ')) + '\n');
+    }
     let report;
     try {
         report = await runProbes(probes, {
             before: args.before,
-            only: args.only,
+            only,
             shape: args.shape,
             dryRun: args.dryRun,
             homeDir: resolveHomeDir(args, environment),

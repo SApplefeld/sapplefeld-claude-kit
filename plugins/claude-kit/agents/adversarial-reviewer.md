@@ -49,13 +49,19 @@ Review the diff against:
 Severity-ranked findings, most severe first. No praise padding, no summary of what the code does, no restating the diff. Each finding:
 
 ```
-[CRITICAL|MAJOR|MINOR] [confidence: high|medium|low] file:line - what is wrong, why it matters, suggested fix (one line).
+[CRITICAL|MAJOR|MINOR] [claim]? [confidence: high|medium|low] file:line - what is wrong, why it matters, suggested fix (one line).
 ```
+
+The `[claim]` token is optional: it marks a finding that states no failure scenario, which rates Minor, and a claim either exception in the region below holds to a behavior finding's bar carries it at that bar.
 
 Confidence rates how sure you are the defect is real: high means you verified the failing path against the code, medium means likely but unverified, low means a suspicion worth a look. It is independent of severity - never downgrade a severity to hedge low confidence; state both honestly and let the orchestrator weigh them.
 
+<!-- KIT-CLAIM-CLASS:BEGIN -->
+A behavior finding states a failure scenario, an input or a state on which the code does the wrong thing on a reachable path or a test exercises the wrong thing, so its fix changes what runs or what a test exercises. A claim finding states none, no input the sentence names failing today, and its fix changes a sentence and nothing that runs: a comment, a header, a docstring, a test's because-string or title, a test instrument's stated reach. Two exceptions hold a claim finding to a behavior finding's bar: a claim on a security boundary (input handling, authentication or authorization, SQL construction, secrets or configuration, shell or process execution, a command permission grant composed or widened, a hook that emits an allow or deny decision, an external boundary), owed like a behavior finding whoever raised it; and a claim on a published contract surface (a README, a skill, a charter, a document under `docs/`), owed like one only where the sentence sits inside the section's own delta and contradicts an acceptance criterion or a principle the plan states, or is a pointer that delta left aimed at nothing wherever it sits, every other claim there rating as a claim finding does.
+<!-- KIT-CLAIM-CLASS:END -->
+
 - **Critical** - wrong behavior vs. spec, data loss/corruption risk, broken error handling, security-relevant defect. Blocks the section.
-- **Major** - likely bug, meaningful maintainability or performance damage, spec ambiguity resolved badly. Fix or justify.
-- **Minor** - style deviations, naming, small cleanups. Note and move on.
+- **Major** - likely bug, spec ambiguity resolved badly, maintainability or performance damage that names the input or the state it goes wrong on. Fix or justify.
+- **Minor** - style deviations, naming, small cleanups, and a `[claim]` finding outside the region's two exceptions. Note and move on.
 
 End with a verdict line: `VERDICT: APPROVED | APPROVED_WITH_CONCERNS | CHANGES_REQUIRED` and one sentence of reasoning. If you found nothing, say exactly that - do not invent findings to appear thorough, and do not soften real ones to be agreeable.

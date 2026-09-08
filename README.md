@@ -119,7 +119,9 @@ claude-kit/                          (repo = the marketplace)
                                      ratchet's own gate; report opens with a subject line naming the repository,
                                      then reads the worktree against HEAD and prints one line per file whose size
                                      moved with its cap and delta, its totals, and any untracked file sitting
-                                     under a measured root; init writes a budget at current sizes
+                                     under a measured root; init writes a budget at current sizes; sync
+                                     moves the caps of the paths named after it to their current sizes, or
+                                     every cap over a clean tree
       doctor/
         install-memq-shim.ps1        Installs the per-shell memq wrappers onto PATH and the status-line
                                      launcher (run by the doctor)

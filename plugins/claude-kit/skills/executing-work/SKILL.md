@@ -508,6 +508,7 @@ Append to the `## Chapters` section of the plan doc:
 Completed: <section name>
 Implemented By: <main session | implementer-haiku | implementer-sonnet | implementer-opus | implementer-fable, plus any escalation>
 Metrics: <review rounds <n>, closed <clean | claim-exit | major-closed>; NEEDS_CONTEXT count; escalations; consults <n>>
+Recap: <omitted from a section Chapter, carried on the finishing Chapter alone; the plain-language recap whose parts and order finishing-work's step 5 owns>
 Decisions / Surprises: <anything resolved or discovered; "none" is acceptable; in the kit's own repository, one line for the probe pair reading writing-skills' RED and GREEN step calls for, or the state that step names instead, or that no scenario turned on so no pair ran, or that the change named no shape file, none of which is recorded as clean, with its moment-pin where a pair ran>
 Assumptions: <the declared-assumption entries recorded during this section; "none" is acceptable>
 Review Findings: <`review: <pair or lens>[ (<n> readers)] at <model>, <route>[ (<chain>)]`, per dispatch where a pair split, or `review: <pair or lens> ungated (<chain>)`, `blind: no code diff` beside it where the blind lens was skipped; then Critical/Major addressed; Majors justified; Minors noted>

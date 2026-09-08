@@ -442,3 +442,78 @@ finding routes to.
 
 Next action per section: run review round 7 over the round 6 fix delta, then steps 5 through 8 to
 close section 2, then section 3 (sonnet, `Locus: inline` because it writes under `docs/`).
+
+### Interim board 6 - 2026-09-08
+
+Written at the closure-drought floor, two review rounds adjudicated since interim board 5 with no
+section closed, and at the compaction gate's deferral signal.
+
+In-flight sections: section 2 implemented and reviewed over eight rounds, its close gate run three
+times and green each time on its own lanes. The round 7 fix delta is committed and pushed at
+`f9b7c8b`; the round 8 fix pass is not yet written, because the instrument's design goes to a
+consult first. Section 3 not started; it rewrites documents this section does not touch, so it does
+not contend.
+
+Live dispatches: none. Two review rounds ran since interim board 5, each three lenses at opus,
+effort high, through Workflow, 3 of 3 done and 0 errored in both.
+
+Gate, measured by this session on SCOTT-CLAUDE 2026-09-08T23:04:56Z-23:06:00Z while holding the
+heavy-process claim, taken after waiting 480 seconds for a live foreign claim (`AI-OS: Worker`, repo
+ai-os, whose session the roster showed busy, aged by the claim file's own modification time) rather
+than running beside it:
+
+- `node --test test/git-guard-parity.test.js test/memq-shim.test.js test/kit-git-lib.test.js`:
+  tests 47, pass 47, fail 0, exit 0, duration 12.1s. `test/kit-git-lib.test.js` joins the lane
+  because this section's sweeps now call that module's runner, so its cwd and environment
+  properties are what the sweeps rest on.
+- Whole-tree pins, one run: tests 108, pass 108, fail 0, exit 0 across doctrine-parity,
+  doctor-encoding, memory-sync-git-guard and doctor-goal-state.
+- `node --test test/size-ratchet.test.js`: tests 101, pass 100, fail 1, exit 1, on the same routed
+  collateral ruling 6 records: `test/memory-session.test.js` at 3280 lines against a cap of 3240,
+  the run's own text naming the path as currently matching HEAD. Nothing of this section's is over
+  cap; `test/git-guard-parity.test.js` was synced by name to 1212 with 119 entries left untouched.
+
+Rulings adopted at this boundary:
+
+16. The round 7 fix put a false statement into a shipped document while repairing a false one, and
+    it is corrected here. The anchors paragraph in `docs/architecture.md` was rewritten to carve
+    `*.cmd` and `*.bat` out of the clean-filter statement on the theory that `text eol=crlf` fixes
+    their line endings. It does not: `text` sets check-in normalization explicitly where
+    `core.autocrlf` sets it by configuration, so both normalize and neither exempts a path.
+    Measured here: `git hash-object doctor.cmd` returns `62335c5c`, which is the index blob, against
+    `--no-filters` `ccb65091`. A reader computing an anchor for a wrapper from the carved sentence
+    would have recorded the wrong sha, on exactly the paths this section added. The operator record
+    `git-hash-object-applies-clean-filters` already carried the general fact.
+
+17. The reroute to the shared git runner is a real hardening and the comment crediting it overstated
+    which one. All three lenses converged: `gitRun` spawns with `cwd: __dirname`, which is
+    `plugins/claude-kit/hooks` and therefore inside the repository under audit, so the reroute moves
+    the searched directory from the repository root to a subdirectory of it rather than outside the
+    tree. What it does close is the `GIT_*` redirection, which the hand-built spawn left open, and
+    which decides what tree the answer describes. The comment now states that, and the residual is
+    stated as `kit-git-lib.js` itself states it: anyone able to write the hooks directory already
+    controls the code being run.
+
+18. Four consecutive rounds have found the same class inside this one instrument, so the framing
+    goes to a consult rather than to a fifth widening of the same pattern. Rounds 5 through 8 each
+    returned a real defect, and rounds 6, 7 and 8 were all in the check rather than in the wrappers:
+    a pin satisfied by the prose explaining it, a guard written where the platform does not read it,
+    and now two silent holes in a hand-written batch parser, `if /i "%1"=="x" set LEAK=1` and
+    `set/a LEAK=5`, both measured leaking into the caller on this box and both passing the predicate
+    as scoped. Each round widened the parser and the next round found another shape, which is the
+    signal that the approach rather than the coverage is what is wrong. The question put to the
+    consult is whether a hand-written parser judged on a class it cannot enumerate should be made
+    fail-closed on anything it cannot classify, replaced by running the wrapper under cmd.exe and
+    observing whether the assignment outlives the call, or narrowed to an honestly stated
+    enumeration. Standing Brief Amendment 4 already says the last of those is the honest floor.
+
+Approval drift recorded here: a fourth Standing Brief Amendment was added above `## Sections of
+Work`, requiring a check to be judged on the class its own comment claims and every control to be
+drawn from a shape the pattern was never handed. Section 2's requirement paragraph and acceptance
+line were rewritten to name the line-ending property, the command-position reading, the withheld
+controls, and the shared git runner, since the section's deliverable had grown past its text.
+
+Next action per section: convene the consult on the wrapper pin's design, adopt its ruling into the
+Standing Brief Amendments block, write the round 8 fix pass under it, re-review the fix delta, then
+steps 5 through 8 to close section 2, then section 3 (sonnet, `Locus: inline` because it writes
+under `docs/`).

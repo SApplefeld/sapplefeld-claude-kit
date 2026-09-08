@@ -794,3 +794,79 @@ test('changing a PS literal value turns the pin red, naming the key and both val
             'expected the comparison to throw naming GIT_CONFIG_VALUE_0 as differing');
     });
 });
+
+// Every cmd wrapper this repo ships or generates carries the same
+// working-directory guard. cmd.exe resolves a bare command name against the
+// current directory before PATH and reads
+// NoDefaultCurrentDirectoryInExePath from its own environment, so a wrapper
+// that launches a bare interpreter without setting it first lets whatever
+// directory the caller is sitting in supply that interpreter. The wrappers
+// are discovered from git rather than named, so a wrapper added later is
+// covered by this pin rather than exempt from it; the generated memq.cmd is
+// read from its generator, which is the only place its text exists in the
+// tree.
+const CMD_GUARD = 'set "NoDefaultCurrentDirectoryInExePath=1"';
+
+// A wrapper line that actually launches something, as opposed to a comment,
+// an echo directive, a set, a label or a blank. The guard has to precede the
+// first of these or it guards nothing.
+function firstLaunchIndex(lines) {
+    return lines.findIndex((raw) => {
+        const line = raw.trim();
+        if (line === '') { return false; }
+        if (/^@?echo\s+off$/i.test(line)) { return false; }
+        if (/^rem\b/i.test(line)) { return false; }
+        if (/^::/.test(line)) { return false; }
+        if (/^@?set\b/i.test(line)) { return false; }
+        if (/^exit\b/i.test(line)) { return false; }
+        if (/^:/.test(line)) { return false; }
+        return true;
+    });
+}
+
+function guardPrecedesLaunch(text) {
+    const lines = text.split(/\r?\n/);
+    const guardAt = lines.findIndex((l) => l.trim() === CMD_GUARD);
+    if (guardAt < 0) { return false; }
+    const launchAt = firstLaunchIndex(lines);
+    return launchAt < 0 || guardAt < launchAt;
+}
+
+test('every cmd wrapper the repo ships sets the working-directory guard before it launches anything', () => {
+    const listed = spawnSync('git', ['-C', REPO, 'ls-files', '--', '*.cmd'], { encoding: 'utf8' });
+    assert.strictEqual(listed.status, 0, listed.stderr);
+    const wrappers = listed.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    // The discovery itself is asserted: an empty list would pass the loop
+    // below silently and report exactly like a swept clean result.
+    assert.ok(wrappers.length > 0, 'no tracked .cmd wrapper was discovered, so this pin swept nothing');
+    for (const rel of wrappers) {
+        const text = fs.readFileSync(path.join(REPO, rel), 'utf8');
+        assert.ok(guardPrecedesLaunch(text),
+            rel + ' launches a command without setting ' + CMD_GUARD + ' first, so the caller\'s '
+            + 'working directory can supply the binary it names');
+    }
+});
+
+test('the generated memq.cmd wrapper carries the same guard', () => {
+    const shim = fs.readFileSync(
+        path.join(REPO, 'plugins', 'claude-kit', 'doctor', 'install-memq-shim.ps1'), 'utf8');
+    const fn = shim.slice(shim.indexOf('function Get-MemqCmdWrapperText'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    assert.ok(body.includes('function Get-MemqCmdWrapperText'), 'the generator function was not located');
+    assert.ok(body.includes(CMD_GUARD),
+        'Get-MemqCmdWrapperText emits a wrapper that launches bare node without ' + CMD_GUARD
+        + ', and that wrapper is installed onto PATH and invoked from arbitrary directories');
+    assert.ok(body.indexOf(CMD_GUARD) < body.indexOf('node "%~dp0memq-shim.js"'),
+        'the guard must be emitted ahead of the node launch it protects');
+});
+
+// The control: the predicate speaks on a wrapper that lacks the guard, so a
+// green above is coverage rather than a predicate that matches everything.
+test('the cmd wrapper guard predicate reds on an unguarded wrapper', () => {
+    assert.ok(!guardPrecedesLaunch('@echo off\r\nnode "%~dp0thing.js" %*\r\n'),
+        'control: an unguarded wrapper must fail the predicate');
+    assert.ok(!guardPrecedesLaunch('@echo off\r\nnode "%~dp0thing.js" %*\r\n' + CMD_GUARD + '\r\n'),
+        'control: a guard set after the launch must fail the predicate');
+    assert.ok(guardPrecedesLaunch('@echo off\r\n' + CMD_GUARD + '\r\nnode "%~dp0thing.js" %*\r\n'),
+        'control: a guarded wrapper must pass the predicate');
+});

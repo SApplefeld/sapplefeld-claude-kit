@@ -49,9 +49,9 @@ Acceptance: tests green, watched red first; `node --test test/memory-sync.test.j
 
 ### 2. The two runtimes' machine spellings are pinned against each other. Model: sonnet
 
-One test asserts that the PowerShell reading `Get-MemorySyncMachineName` returns and Node's `os.hostname()` return the same string byte-exact on the running box, skipping with a named reason where the box carries no Windows PowerShell host, which is the runtime the harness reads the installer through, so a platform whose two readings diverge fails the suite on that platform rather than syncing every one of its own files as foreign. A second test plants a directory whose name differs from the machine's only by case and asserts it reads as this machine's own in both sync directions, refused inbound and staged as own outbound, with the variant planted through the git index (an `update-index` entry for the outbound case, an upstream fixture commit for the inbound one) rather than on disk, since a case-insensitive filesystem cannot hold both spellings beside each other.
+One test asserts that the PowerShell reading `Get-MemorySyncMachineName` returns and Node's `os.hostname()` return the same string byte-exact on the running box, skipping with a named reason off Windows, which is the condition the test reads and the one that matters, since the doctor's installer runs on Windows alone, so a platform whose two readings diverge fails the suite on that platform rather than syncing every one of its own files as foreign. A second test plants a directory whose name differs from the machine's only by case and asserts it reads as this machine's own in both sync directions, refused inbound and staged as own outbound, the outbound half reachable only as a staged deletion because a case-folding filesystem cannot realize the variant spelling beside the real directory, with the variant planted through the git index (an `update-index` entry for the outbound case, an upstream fixture commit for the inbound one) rather than on disk, since a case-insensitive filesystem cannot hold both spellings beside each other. A third test guards the input the other two rest on, asserting that the running box's own name is a single directory segment rather than a traversal, since the byte-exact comparison above is satisfied by two empty readings and every fixture in the file builds a real directory from that same value.
 
-Acceptance: both tests green, the first watched red against a deliberately wrong constant; delta named.
+Acceptance: all three tests green, the parity test watched red against a deliberately wrong constant; delta named.
 
 ### 3. The documents state the control. Model: sonnet
 
@@ -283,3 +283,75 @@ region, which is why it is recorded here rather than left in the diff.
 
 Next action per section: apply section 2's fix pass, re-review the fix delta, then steps 5 through 8
 to close section 2, then section 3 (sonnet, `Locus: inline` because it writes under `docs/`).
+
+### Interim board 4 - 2026-09-08
+
+Written at the compaction gate's deferral signal (51 held offers over thirty minutes) and at the
+closure-drought floor, three review rounds adjudicated since the last boundary with no section
+closed.
+
+In-flight sections: section 2 implemented and reviewed over four rounds, with its close gate queued
+behind a live foreign heavy-process claim. Section 3 not started; it rewrites documents this section
+does not touch, so it does not contend.
+
+Live dispatches: none. Three review rounds ran since interim board 3, each three lenses at opus,
+effort high, through Workflow, all agents done and none errored.
+
+Gate: not yet measured for this delta. The runner is armed and waiting on the machine's claim file,
+which carries a live foreign claim (`AI-OS: Worker`, repo ai-os, whose session the roster shows
+busy), aged by the claim file's own modification time at 2026-09-08T20:42:42Z against a 600 second
+estimate. The last measured gate remains interim board 3's, taken 2026-09-08T19:41Z-19:53Z. Waiting
+rather than running beside it is the protocol's own direction: presence licenses waiting, absence
+never licenses starting.
+
+Rulings adopted at this boundary:
+
+8. The console-encoding fix was itself the defect, and the reading moves to a temp file. The round 1
+   fix set `[Console]::OutputEncoding` to read a non-ASCII hostname faithfully through stdout. Two
+   lenses converged independently: the setter changes the console's own code page, which outlives
+   the process and every later process attached to that console, and it can throw where no console
+   is attached. The operator record `powershell-console-encoding-leaks-past-the-process` carries the
+   measurement, and `test/doctor-encoding.test.js` already took the temp-file route for this exact
+   reason. The reading now travels through a `mkdtempSync` directory under an explicit
+   `UTF8Encoding($false)`, which also removes a BOM that a trim would have hidden from a comparison
+   the spec calls byte-exact.
+
+9. `NoDefaultCurrentDirectoryInExePath` governs a direct Node spawn and is read from the spawning
+   process. Two lenses reported that a routed backlog entry contradicted the shipped comment at
+   `plugins/claude-kit/hooks/kit-git-lib.js:5-11`, and both said they could not settle it because
+   the discriminating probe is write-shaped. It was probed here against git 2.55.0.windows.3 with a
+   decoy binary planted in the spawn's working directory: with the variable unset in the spawning
+   process the decoy ran, with it set to 1 the real binary ran, and a control with no decoy present
+   ran the real binary. The shipped comment is correct and the backlog entry was wrong; the entry is
+   corrected. Git Bash sets the variable, which is why a probe run from that shell reads clean, and
+   the same batch probe could not resolve a wrapper from the current directory until the inherited
+   variable was cleared.
+
+10. The bare-name interpreter class in the tree's cmd wrappers is closed here rather than routed. A
+    security lens rated it Major; this session first downgraded it on the reasoning that an attacker
+    able to plant an interpreter beside a wrapper could equally edit the script that wrapper runs,
+    and the next round correctly rejected that, since `%~dp0` names the wrapper's own directory and
+    never the working directory, so the plugin-payload wrapper invoked from a foreign directory is a
+    real hijack the argument never covered. A security Major is fixed or raised and never routed, so
+    both `doctor.cmd` wrappers and the generated `memq.cmd` now set the variable before they launch,
+    which the probe above shows closes the search, and which is preferred over an absolute
+    `%SystemRoot%` path because that would trade one caller-influenced value for another. A
+    structural pin over every tracked cmd wrapper and over the generator, with controls both ways,
+    lands in `test/git-guard-parity.test.js` so a wrapper added later is covered rather than exempt.
+
+11. A routed class is stated by its predicate rather than by the names it happens to contain. The
+    harness spawn item was sized twice from literal binary names and under-counted both times, at
+    two sites and then at 54. Measured structurally over the shape of a bare-name first argument, it
+    is 81 call sites across 24 files, and the entry now carries that predicate, its scope and its
+    count so a repair cannot close a named list and leave the class open.
+
+Approval drift recorded here: section 2's requirement sentence took two further edits inside the
+approval-scoped region beyond the one interim board 3 records. It now carries ruling 5's
+deletion-only narrowing of the outbound half, and it names the third test the section grew, a guard
+on the hostname the other two rest on. The acceptance line is updated to match. The third test is a
+deliberate addition rather than drift in the section's intent: the byte-exact comparison the section
+asks for is satisfied by two empty readings, so without it the section's own pin can pass vacuously.
+
+Next action per section: run section 2's close gate when the box frees, redo the parity test's red
+watch against the temp-file mechanism it now uses, then steps 5 through 8 to close section 2, then
+section 3 (sonnet, `Locus: inline` because it writes under `docs/`).

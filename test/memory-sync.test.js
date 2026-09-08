@@ -3400,25 +3400,90 @@ test('the inbound machine-axis read names own-directory paths only, and is unpro
 // rather than building on it, so a platform where the two readings diverge
 // fails here instead of quietly syncing every one of its own files as
 // foreign.
-const NO_HOST_REASON = isWin ? false
-    : 'this box has no Windows PowerShell host to read Get-MemorySyncMachineName from, and the doctor itself does not run off Windows';
+// The condition is the platform and nothing else. The doctor's installer runs
+// on Windows alone, so off Windows there is no reading to compare rather than
+// a host that might be installed elsewhere; this reads process.platform and
+// never probes for a binary.
+const OFF_WINDOWS_REASON = isWin ? false
+    : 'the doctor\'s installer is Windows-only, so off Windows there is no PowerShell reading of Get-MemorySyncMachineName to compare against';
+
+// Every fixture in this file builds a real directory from MACHINE, and the
+// machine axis compares that same segment, so a hostname that does not name one
+// directory would be exercising something other than the axis. The property
+// checked is exactly that, a non-empty name that traverses nowhere, rather than
+// a character class: the axis compares with -ieq and the filesystem stores the
+// name whatever alphabet it is written in, so a non-ASCII hostname works and a
+// class-shaped assertion would red a healthy box for no defect. Both runtimes
+// read this value from the environment (`_CLUSTER_NETWORK_NAME_` redirects it
+// on Windows, probed in both runtimes and recorded in this plan's Chapter 1),
+// so it is steerable rather than fixed. Gated with the siblings: off Windows
+// every case it guards is skipped, and an ungated check there would be the only
+// one running, reporting on the host rather than on the kit. Its skip carries
+// its own reason rather than the parity test's, since this case takes no
+// PowerShell reading and so is not skipped for want of one.
+const OFF_WINDOWS_GUARD_REASON = isWin ? false
+    : 'the machine axis and every fixture this guard protects run on Windows alone, so off Windows this would report on the host rather than on the kit';
+
+test('this machine\'s name names one directory rather than a traversal',
+    { skip: OFF_WINDOWS_GUARD_REASON }, () => {
+        assert.ok(MACHINE.length > 0,
+            'os.hostname() returned an empty string, so every coordinator path this file builds collapses a segment');
+        assert.ok(!/[\\/:]/.test(MACHINE),
+            'os.hostname() returned ' + JSON.stringify(MACHINE) + ', which carries a separator or a drive colon, '
+            + 'so it spans more than the single machine segment the axis compares');
+        assert.notStrictEqual(MACHINE, '.',
+            'a hostname of "." would resolve to the coordinator tier root rather than to a machine directory');
+        assert.notStrictEqual(MACHINE, '..',
+            'a hostname of ".." would resolve to the store root above the coordinator tier, escaping the tier the axis governs');
+    });
 
 test('the PowerShell and Node readings of this machine\'s name agree byte-exact',
-    { skip: NO_HOST_REASON }, () => {
-        const script = '. ' + q(INSTALLER) + '; Get-MemorySyncMachineName | Write-Output';
-        const res = pwsh(script);
-        assert.strictEqual(res.status, 0, res.stdout + res.stderr);
-        assert.strictEqual(res.stdout.trim(), MACHINE,
-            'Get-MemorySyncMachineName and os.hostname() must read the same string, since the machine axis '
-            + 'compares one runtime\'s reading against the other\'s directory name');
+    { skip: OFF_WINDOWS_REASON }, () => {
+        // The reading travels through a temp file rather than stdout, the same
+        // route test/doctor-encoding.test.js takes. Windows PowerShell 5.1
+        // writes a redirected stdout in the OEM code page while this harness
+        // decodes UTF-8, so a non-ASCII hostname would differ here through the
+        // pipe rather than through any disagreement between the two runtimes.
+        // Setting [Console]::OutputEncoding is the tempting fix and is worse:
+        // it changes the console's own code page, which outlives this process
+        // and every later one attached to that console, and it can throw where
+        // no console is attached. UTF8Encoding($false) writes no BOM, so the
+        // comparison below stays byte-exact rather than passing on a preamble
+        // a trim would have hidden.
+        // mkdtempSync rather than a composed name in the shared temp root:
+        // WriteAllText follows an existing file or link instead of creating
+        // exclusively, so a predictable name is one a same-box actor can win.
+        const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memory-sync-machine-'));
+        try {
+            const outFile = path.join(outDir, 'machine.txt');
+            const script = '. ' + q(INSTALLER) + '; '
+                + '[System.IO.File]::WriteAllText(' + q(outFile) + ', (Get-MemorySyncMachineName), '
+                + '(New-Object System.Text.UTF8Encoding($false)))';
+            const res = pwsh(script);
+            assert.strictEqual(res.status, 0, res.stdout + res.stderr);
+            // Checked before the read so a run that exited 0 without writing
+            // reports what PowerShell said, rather than dying on a bare ENOENT
+            // that discards the only diagnostic there is.
+            assert.ok(fs.existsSync(outFile),
+                'the reading was never written despite a zero exit: ' + res.stdout + res.stderr);
+            const reading = fs.readFileSync(outFile, 'utf8');
+            assert.ok(reading.length > 0,
+                'Get-MemorySyncMachineName wrote nothing, which is a dead reading rather than a disagreement between the two runtimes');
+            assert.strictEqual(reading, MACHINE,
+                'Get-MemorySyncMachineName and os.hostname() must read the same string, since the machine axis '
+                + 'compares one runtime\'s reading against the other\'s directory name');
+        } finally {
+            try { fs.rmSync(outDir, { recursive: true, force: true }); } catch { /* best effort */ }
+        }
     });
 
 // Every letter of the machine name with its case flipped. NTFS folds case, so
 // this string names the same directory on disk as MACHINE while failing an
-// ordinary string comparison against it, which is exactly the input decision
-// 3's case-insensitive comparison exists for. A hostname with no cased ASCII
-// letter has no distinct variant, and the two cases below skip rather than
-// compare a string to itself.
+// ordinary string comparison against it: a write to the variant spelling lands
+// in this machine's own directory, which is why the axis compares the machine
+// segment case-insensitively rather than byte-exact. A hostname with no cased
+// ASCII letter has no distinct variant, and the two cases below skip rather
+// than compare a string to itself.
 function flipAsciiCase(name) {
     let flipped = '';
     for (const ch of name) {
@@ -3449,7 +3514,11 @@ function plantCaseVariantCoordinatorPath(store, rel, content) {
     assert.strictEqual(git(store, ['update-index', '--add', '--cacheinfo', '100644,' + sha + ',' + rel]).status, 0);
     // Control: the index holds exactly the variant path this call planted,
     // under no other spelling, before anything else runs over it.
-    const staged = git(store, ['diff', '--cached', '--name-only']);
+    // core.quotePath=false because this read C-quotes a non-ASCII path exactly
+    // as ls-files does, and --no-renames because the default collapses a
+    // rename into its destination alone, which would hide a second staged path
+    // from a control whose whole assertion is that there is only one.
+    const staged = git(store, ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-renames', '--name-only']);
     assert.strictEqual(staged.status, 0, staged.stderr);
     assert.strictEqual(staged.stdout.trim(), rel,
         'the planted path is staged exactly as given, and nothing else is staged alongside it');
@@ -3457,8 +3526,15 @@ function plantCaseVariantCoordinatorPath(store, rel, content) {
     assert.ok(!fs.existsSync(path.join(store, rel)), 'the variant path was never realized on disk');
 }
 
-test('a case variant of this machine\'s own directory is staged as its own outbound',
-    { skip: NO_HOST_REASON || NO_CASE_VARIANT_REASON }, () => {
+// Only a deletion is reachable here, and the title says so rather than
+// implying the axis was exercised over an addition too: a case-folding
+// filesystem cannot hold the variant spelling beside the real directory, so
+// the only construction that survives the installer's own add is a path
+// committed through the index with no file on disk, which git then stages as a
+// deletion. A staged deletion is a write the axis classifies, and nothing in
+// the installer filters the staged list to paths that still exist.
+test('a staged deletion under a case variant of this machine\'s own directory is staged as its own outbound',
+    { skip: OFF_WINDOWS_REASON || NO_CASE_VARIANT_REASON }, () => {
         assert.notStrictEqual(CASE_VARIANT, MACHINE, 'control: the variant differs from the machine name');
         assert.strictEqual(CASE_VARIANT.toLowerCase(), MACHINE.toLowerCase(),
             'control: the variant differs from the machine name only by case');
@@ -3476,8 +3552,15 @@ test('a case variant of this machine\'s own directory is staged as its own outbo
 
             assert.strictEqual(result.Ok, true, result.Notes.join('\n'));
             assert.strictEqual(result.Reason, '',
-                'a case variant of this machine\'s own directory reads as own, not as a foreign write');
+                'the run carries no refusal code, where a machine segment read as foreign would carry outbound-foreign-write');
             assert.notStrictEqual(headOf(fake.store), head, 'the deletion under the variant path was committed');
+            // The spelling the axis actually read. Without this, a commit that
+            // somehow carried the real directory's path would satisfy every
+            // assertion around it, and the case fold would go unexercised.
+            const committed = git(fake.store, ['-c', 'core.quotePath=false', 'show', '--no-renames', '--name-only', '--format=', 'HEAD']);
+            assert.strictEqual(committed.status, 0, committed.stderr);
+            assert.strictEqual(committed.stdout.trim(), variantPath,
+                'exactly the case-variant path rode the commit, under the variant spelling rather than the real directory\'s');
             assert.ok(!trackedPaths(fake.store).includes(variantPath),
                 'the variant path is no longer tracked, since its deletion committed');
             // The peer directory is untouched throughout: the axis reached the
@@ -3491,7 +3574,7 @@ test('a case variant of this machine\'s own directory is staged as its own outbo
     });
 
 test('an upstream commit under a case variant of this machine\'s own directory gates as inbound-foreign-write',
-    { skip: NO_HOST_REASON || NO_CASE_VARIANT_REASON }, () => {
+    { skip: OFF_WINDOWS_REASON || NO_CASE_VARIANT_REASON }, () => {
         assert.notStrictEqual(CASE_VARIANT, MACHINE, 'control: the variant differs from the machine name');
         assert.strictEqual(CASE_VARIANT.toLowerCase(), MACHINE.toLowerCase(),
             'control: the variant differs from the machine name only by case');
@@ -3515,6 +3598,16 @@ test('an upstream commit under a case variant of this machine\'s own directory g
                 'a case variant of this machine\'s own directory refuses inbound as a write to it, rather than '
                 + 'being read as some other machine\'s file');
             assert.strictEqual(headOf(fake.store), head, 'the tree is left at the pre-sync commit');
+            // No rebase is left in progress. This says nothing about whether
+            // one ran, since the runner aborts a conflicted rebase and an abort
+            // removes both directories too (sync-store.ps1, the rebase failure
+            // branch); what carries the refused-before-the-rebase claim is the
+            // reason code asserted above, which a conflict would have recorded
+            // as pull-conflict instead.
+            assert.ok(!fs.existsSync(path.join(fake.store, '.git', 'rebase-merge')),
+                'no rebase is left in progress, so the repository is not parked mid-operation');
+            assert.ok(!fs.existsSync(path.join(fake.store, '.git', 'rebase-apply')),
+                'no rebase is left in progress under the apply backend either');
             // fs.existsSync on this filesystem answers a case-variant path the
             // same as the real one, so what proves the gate stopped before
             // checkout is that the real directory carries no new file: the

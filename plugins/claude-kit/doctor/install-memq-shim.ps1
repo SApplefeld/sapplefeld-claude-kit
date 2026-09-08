@@ -71,7 +71,14 @@ function Get-MemqPs1WrapperText {
 # what covers it. PowerShell callers do not come through here, because
 # memq.ps1 wins name resolution for them.
 function Get-MemqCmdWrapperText {
-    return (@('@echo off', 'node "%~dp0memq-shim.js" %*', '') -join "`r`n")
+    # cmd.exe resolves a bare command name against the current directory before
+    # PATH, and reads NoDefaultCurrentDirectoryInExePath from its own
+    # environment, so the set below closes that search for the node launch that
+    # follows it. This wrapper sits on PATH and is invoked as `memq` from
+    # whatever directory a session happens to be in, which for this kit is
+    # routinely an unread clone, so the current directory is exactly the one
+    # that must not be allowed to supply the interpreter.
+    return (@('@echo off', 'set "NoDefaultCurrentDirectoryInExePath=1"', 'node "%~dp0memq-shim.js" %*', '') -join "`r`n")
 }
 
 # LF only: a CR after '#!/bin/sh' breaks the shebang. Every expansion is

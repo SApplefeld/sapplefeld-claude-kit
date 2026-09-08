@@ -58,7 +58,13 @@
 # a blob HEAD already has (a rename, or duplicate content), which is exactly how
 # settings.json or a credential file would slip in. A tree that cannot be listed
 # or parsed is unproven and retries silently rather than being accused of a
-# leak. The upstream is resolved to a fixed commit once, and that commit is what
+# leak. A second, diff-shaped read follows it and carries the machine axis: the
+# entries that differ between the merge base and the incoming commit, filtered
+# to this machine's own coordinator directory, whose contract is single-writer.
+# Any entry there refuses the intake as inbound-foreign-write, since the whole-
+# tree screen cannot see which admitted paths a commit rewrites. Outbound the
+# same axis runs inside the installer, over the paths its add staged, and its
+# refusal is recorded here as outbound-foreign-write. The upstream is resolved to a fixed commit once, and that commit is what
 # the screen reads and the rebase replays onto, so a concurrent fetch cannot
 # advance the ref between the two. Only when every incoming entry is admitted
 # does the rebase run, and after it the whole bar is re-derived before the push,
@@ -450,7 +456,17 @@ try {
     if ($status.Dirty) {
         $repair = Install-MemorySyncRepo -StoreRoot $StoreRoot
         if (-not $repair.Ok) {
-            Write-SyncState -StoreRoot $StoreRoot -Result 'transient' -Reason 'commit-failed'
+            # One installer refusal carries its own fixed reason: a staged write
+            # under another machine's coordinator directory, which is a standing
+            # condition the operator repairs rather than a transient the next
+            # run might clear, so it is recorded as a gate under its own code
+            # and every other refusal keeps the commit-failed transient.
+            if ($repair.Reason -eq 'outbound-foreign-write') {
+                Write-SyncGateState -StoreRoot $StoreRoot -Reason 'outbound-foreign-write'
+            }
+            else {
+                Write-SyncState -StoreRoot $StoreRoot -Result 'transient' -Reason 'commit-failed'
+            }
             exit 0
         }
     }
@@ -502,6 +518,31 @@ try {
             }
             if ($incoming -ne 'ok') {
                 Write-SyncState -StoreRoot $StoreRoot -Result 'transient' -Reason 'unproven'
+                exit 0
+            }
+            # The machine axis on the inbound side, after the allowlist screen
+            # and before the rebase. The screen above reads the whole incoming
+            # tree, which holds every machine's coordinator directory on every
+            # sync, so it cannot see that a commit rewrites THIS machine's
+            # board, registry entry or request inbox: only the difference
+            # between the merge base and the incoming commit says that. The
+            # coordinator directory's contract is single-writer, and a cold
+            # successor seat resumes this whole machine from a board it must be
+            # able to trust, so a replayed foreign write into it stands the
+            # intake down exactly as a leak does: no rebase, no push, and the
+            # fetched tip left in place so the gate stays visible and the doctor
+            # can name the commit and the paths. A read that could not answer is
+            # unproven and retries silently, never a refusal the operator cannot
+            # clear.
+            $machineName = ''
+            try { $machineName = [string](Get-MemorySyncMachineName) } catch { $machineName = '' }
+            $inboundOwn = Get-MemorySyncInboundForeignPaths -StoreRoot $StoreRoot -Ref $upstreamSha -Machine $machineName
+            if (-not $inboundOwn.Ok) {
+                Write-SyncState -StoreRoot $StoreRoot -Result 'transient' -Reason 'unproven'
+                exit 0
+            }
+            if (@($inboundOwn.Paths).Count -gt 0) {
+                Write-SyncGateState -StoreRoot $StoreRoot -Reason 'inbound-foreign-write'
                 exit 0
             }
             # No --autostash: the commit step above already committed pending

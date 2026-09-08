@@ -1,6 +1,6 @@
 # The store sync writes only this machine's coordinator directory and refuses an upstream write into it
 
-Status: Ready
+Status: In Progress
 Commit Model: Branch-and-PR
 Created: 2026-09-03
 
@@ -68,3 +68,47 @@ Acceptance: doctrine-parity lane green with delta named; a whole-file read of ea
 - `claude-kit_store-git-channel-guard_spec_v1.md`: the same sync path, a different axis.
 - `plugins/claude-kit/skills/role/SKILL.md`, the coordinator directory contract.
 - `docs/security-model.md`, the memory store's sync section.
+
+## Chapters
+
+### Interim board 1 - 2026-09-08
+
+Written at the compaction gate's signal (nine held offers over thirty minutes), at the boundary
+between section 1's verified implementation and its review round.
+
+In-flight sections: section 1 implemented and verified, review round not yet dispatched. Sections 2
+and 3 not started, and both depend on section 1's helper, so neither runs concurrently.
+
+Live dispatches: none. The section 1 implementer (implementer-opus) has completed and reported
+DONE_WITH_CONCERNS twice: once on the original brief, once on a resumed brief carrying the tier-root
+ruling below.
+
+Gate baseline, measured by this session on this box 2026-09-08T16:0x-16:2xZ, uncontended (the
+claims directory was empty at the spawn and this session held the claim for the run):
+
+- `node --test test/memory-sync.test.js`: tests 90, pass 90, fail 0, exit 0. Recorded baseline
+  before this section, measured 2026-09-08T15:38Z under light contention: tests 79, pass 79,
+  fail 0, exit 0. Delta +11 tests, all added by this section, zero failures either side.
+- `node --test test/memory-session.test.js`: tests 87, pass 86, fail 1, exit 1. Recorded baseline
+  2026-09-08T15:45Z: tests 85, pass 84, fail 1, exit 1. Delta +2 tests, both added here and both
+  passing. The single failure is the standing red `a pinned directory too long to name faithfully
+  stands the session down`, which project memory `suite-baseline-is-not-zero-fail` records as
+  permanent on this box: TEMP is `D:\Temp`, seven characters, landing the fixture at 254 against a
+  260-character guard, so the guard is never exercised. Not a regression and not this plan's to fix.
+
+Rulings adopted since the arm:
+
+1. A coordinator path at the tier root carries no machine segment, so the outbound axis does not
+   reach it and the allowlist governs it alone. The implementer's first cut read any path under
+   `coordinator/` that the ownership predicate rejected as foreign, which made a two-segment
+   `coordinator/<file>.md` refuse the whole commit and restore the whole index, so one stray file
+   would stop this machine syncing anything. The Goal's own words settle it: the channel stages
+   nothing under another machine's directory, and a tier-root path is under no machine's directory.
+   The narrowing is outbound-only; `Test-MemorySyncCoordinatorPathIsOwn` is unchanged, because
+   inbound refuses only paths that predicate calls own and a tier-root path must stay unrefused
+   there. Confirmed latent rather than live: `git ls-files "coordinator/*"` over the live store
+   returns 55 paths and no two-segment one, under a control that spoke on the three-segment branch.
+
+Next action per section: dispatch section 1's review round (adversarial-reviewer and blind-reviewer
+in parallel, plus the security-reviewer, whose trigger this section meets on configuration and
+process-execution surfaces), then steps 4 through 8 for section 1, then section 2.

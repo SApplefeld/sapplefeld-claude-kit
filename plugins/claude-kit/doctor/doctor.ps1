@@ -909,6 +909,40 @@ function Get-MemorySyncDestinationLines {
     return @{ Blocking = $blocking; Advisory = $advisory }
 }
 
+# The paths a fetched upstream commit writes into this machine's own
+# coordinator directory, as report lines. The sync runner refuses such an
+# intake and records the reason code alone, its only output channel being the
+# state file, so this is where the operator who has to repair the remote learns
+# WHICH commit and WHICH paths: the runner leaves the fetched tip in place for
+# exactly that reason. The read is the runner's own
+# (Get-MemorySyncInboundForeignPaths), so the report cannot name a different
+# set than the refusal acted on.
+#
+# No ahead/behind count is read first: the diff runs from the merge base of
+# HEAD and the fetched tip, which is the tip itself when the upstream is not
+# ahead, so an in-sync or ahead-only store produces an empty diff by
+# construction and no lines here. Every string comes out of the store, so each
+# is sanitized like the installer's notes are.
+function Get-MemorySyncInboundOwnLines {
+    param([Parameter(Mandatory = $true)][hashtable]$Status)
+    if (-not $Status.IsRepo -or -not $Status.IsOwnRepo -or $Status.Upstream -eq "") { return @() }
+    $revUp = Invoke-MemorySyncGit -StoreRoot $Status.StoreRoot -Arguments @("rev-parse", "--verify", "@{upstream}")
+    $upstreamSha = if ($revUp.Output.Count -gt 0) { ([string]$revUp.Output[-1]).Trim() } else { "" }
+    if ($revUp.Code -ne 0 -or $upstreamSha -notmatch '^[0-9a-f]{40,64}$') { return @() }
+    $machine = ""
+    try { $machine = [string](Get-MemorySyncMachineName) } catch { $machine = "" }
+    $found = Get-MemorySyncInboundForeignPaths -StoreRoot $Status.StoreRoot -Ref $upstreamSha -Machine $machine
+    if (-not $found.Ok -or @($found.Paths).Count -eq 0) { return @() }
+    $paths = @($found.Paths)
+    $named = (($paths | Select-Object -First 5 | ForEach-Object { Get-SanitizedLine $_ 200 }) -join ", ")
+    if ($paths.Count -gt 5) { $named += " (and " + ($paths.Count - 5) + " more)" }
+    return @(
+        ("The fetched commit " + (Get-SanitizedLine $upstreamSha 200) + " on " + (Get-SanitizedLine $Status.Upstream 200) +
+            " writes " + $paths.Count + " path(s) inside this machine's own coordinator directory, which only this machine writes: " + $named),
+        "The sync refuses that intake rather than rebasing it, so the store stays gated until the remote is repaired: undo those paths on the machine that pushed them and push the correction."
+    )
+}
+
 $syncStatus = Get-MemorySyncStatus -StoreRoot $claudeDir
 $syncFixNotes = @()
 $syncReported = $false
@@ -1006,7 +1040,15 @@ else {
         # The leak fixes ride wherever the leaks do, and the unproven lines
         # ride everywhere, because an empty leak list means nothing when a
         # probe could not answer.
-        $syncTail = $(if ($syncLeaks.Count -gt 0) { $syncReport.Fixes } else { @() }) + $syncReport.Unproven
+        # An upstream commit writing this machine's own coordinator directory is
+        # a finding about the remote rather than about this store's allowlist,
+        # so it rides every branch below as a named path and changes no
+        # verdict: the store's own state is exactly what the branch says it is,
+        # and what the operator gains here is the commit and the paths the
+        # runner's reason code alone cannot carry. An in-sync store produces no
+        # lines, so nothing changes for a healthy report.
+        $syncInboundOwn = Get-MemorySyncInboundOwnLines $syncStatus
+        $syncTail = $(if ($syncLeaks.Count -gt 0) { $syncReport.Fixes } else { @() }) + $syncReport.Unproven + $syncInboundOwn
         # Notes from the installer quote paths and git output, so they carry
         # the same sanitization every other store-derived string does.
         $syncFixLines = @($syncFixNotes | ForEach-Object { Get-SanitizedLine $_ 200 })
@@ -1072,6 +1114,10 @@ else {
                 ("Allowlist canonical; " + $syncStatus.Probed.Count + " sensitive path(s) proven ignored, an add would stage memory paths only, and no non-memory blob is reachable in committed history.")
             )
             if ($syncStatus.Remote -ne "") { $syncDetail += ("origin: " + (Get-SanitizedLine $syncStatus.Remote 200)) }
+            # The branches below carry $syncDetail rather than $syncTail, so the
+            # inbound lines join it here to reach them; an in-sync store adds
+            # nothing.
+            $syncDetail += $syncInboundOwn
             # Reached either from a plain check (no -Fix) or from a -Fix run
             # whose commit succeeded and cleared the worktree: $syncStatus was
             # re-read after that commit, so Dirty is already false there and

@@ -1843,6 +1843,46 @@ test('a clean store with a recorded gate still surfaces the loud line', { skip: 
     }
 });
 
+// The two machine-axis gates the coordinator tier's single-writer contract
+// produces, one per direction. Each has its own fixed sentence rather than the
+// fallback, because the repair differs by direction: an outbound gate is a
+// local write into a peer machine's directory, an inbound one is a remote
+// commit rewriting this machine's own, which the operator repairs on the
+// machine that pushed it.
+test('an outbound foreign-write gate names the direction rather than falling back', { skip: !isWin }, () => {
+    const store = makeStore();
+    try {
+        initSyncRepo(store.root);
+        wireUpstream(store.root);
+        plantSyncState(store.root, {
+            lastAttempt: isoAgo(0), lastResult: 'gate', reason: 'outbound-foreign-write',
+            lastOk: '', firstFailSince: isoAgo(0)
+        });
+        const nudge = blockStarting(syncContext(store), 'Kit memory sync:');
+        assert.strictEqual(nudge,
+            loudLine('this store staged a write into another machine\'s coordinator directory'));
+    } finally {
+        rmStore(store);
+    }
+});
+
+test('an inbound foreign-write gate names the direction rather than falling back', { skip: !isWin }, () => {
+    const store = makeStore();
+    try {
+        initSyncRepo(store.root);
+        wireUpstream(store.root);
+        plantSyncState(store.root, {
+            lastAttempt: isoAgo(0), lastResult: 'gate', reason: 'inbound-foreign-write',
+            lastOk: '', firstFailSince: isoAgo(0)
+        });
+        const nudge = blockStarting(syncContext(store), 'Kit memory sync:');
+        assert.strictEqual(nudge,
+            loudLine('incoming content rewrites this machine\'s own coordinator directory'));
+    } finally {
+        rmStore(store);
+    }
+});
+
 test('the sync lines carry no store-controlled text: no branch, no URL, no path, no state-file string', { skip: !isWin }, () => {
     const store = makeStore();
     try {

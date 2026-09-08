@@ -299,6 +299,12 @@ const SYNC_REASON_TEXT = {
     'git-missing': 'git is not available',
     'commit-failed': 'the gated commit failed',
     'inbound-leak': 'incoming content the allowlist does not admit',
+    // The two machine-axis codes name their direction, because the repair
+    // differs by direction: an outbound refusal is a local write to another
+    // machine's coordinator directory, an inbound one is a remote commit
+    // rewriting this machine's own.
+    'outbound-foreign-write': 'this store staged a write into another machine\'s coordinator directory',
+    'inbound-foreign-write': 'incoming content rewrites this machine\'s own coordinator directory',
     'fetch-failed': 'the fetch from the remote failed',
     'pull-conflict': 'a pull hit a rebase conflict',
     'push-failed': 'the push failed'

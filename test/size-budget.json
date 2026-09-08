@@ -103,6 +103,7 @@
     "test/probes/review-only-at-section-close.md": 129,
     "test/probes/review-round-returning-only-claim-majors.md": 345,
     "test/probes/seat-asked-to-push-the-memory-store.md": 182,
+    "test/probes/spec-self-review-finished-before-arming.md": 243,
     "test/probes/stale-anchor-in-a-resumed-plan.md": 161,
     "test/readonly-agent-guard.test.js": 1816,
     "test/registry-stamp.test.js": 685,

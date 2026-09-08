@@ -49,6 +49,7 @@
     "plugins/claude-kit/skills/writing-skills/SKILL.md": 3459,
     "test/branch-reaper-nudge.test.js": 119,
     "test/chapter-boundary-nudge.test.js": 600,
+    "test/claim-class-parity.test.js": 228,
     "test/compact-deferral-nudge.test.js": 2121,
     "test/compact-window-install.test.js": 183,
     "test/docs-write-guard.test.js": 212,

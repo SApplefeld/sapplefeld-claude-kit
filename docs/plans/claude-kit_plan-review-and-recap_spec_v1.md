@@ -180,3 +180,6 @@ tests: 3429
 changed paths under no measured root: none; named-exclusion paths in the changeset: test/size-budget.json, which a root holds and no shape measures, so no row above names them
 excluded from those totals, untracked under a measured root: test/probes/spec-self-review-finished-before-arming.md
 ```
+
+### Interim board 1 - 2026-09-08
+Stage: all three sections closed and pushed (5cfa68c, ead49db, f4fa25f); finishing-work opened, base ref derived as a8d46ef by the Chapter walk, changeset cross-check clean (every entry inside the scope union or the bookkeeping set). Live dispatches: none yet; the qa-verifier dispatch is next, under this session's heavy-process claim. Gate baseline: whole gate at Chapter 3, 3510/3497/1 (12 skipped) exit 1, the one red the standing TEMP-path failure, measured 2026-09-08 on SCOTT-CLAUDE at the main checkout, HEAD f4fa25f, under this session's claim. Rulings adopted since Chapter 3: none. Next: finishing steps 1 through 8 in order, the security and adversarial reviews at fable and high through Workflow, the curator, the final Chapter with the recap per the committed finishing-work paragraph, archive, memory banking. This entry's commit is pushed with the finishing commit rather than alone, since a push to main earns the whole gate and the handoff gate at step 5 is that run.

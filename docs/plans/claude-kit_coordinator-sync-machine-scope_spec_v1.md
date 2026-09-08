@@ -359,3 +359,84 @@ asks for is satisfied by two empty readings, so without it the section's own pin
 Next action per section: run section 2's close gate when the box frees, redo the parity test's red
 watch against the temp-file mechanism it now uses, then steps 5 through 8 to close section 2, then
 section 3 (sonnet, `Locus: inline` because it writes under `docs/`).
+
+### Interim board 5 - 2026-09-08
+
+Written at the closure-drought floor, two review rounds adjudicated since interim board 4 with no
+section closed, and at the compaction gate's deferral signal.
+
+In-flight sections: section 2 implemented and reviewed over six rounds, its close gate run twice and
+green both times, with the round 6 fix delta green and uncommitted at the time this entry opens.
+Section 3 not started; it rewrites documents this section does not touch, so it does not contend.
+
+Live dispatches: none. Two review rounds ran since interim board 4, each three lenses at opus,
+effort high, through Workflow, 3 of 3 done and 0 errored in both.
+
+Both owed gates that interim board 4 recorded as outstanding are now discharged. The parity test's
+red watch was redone against the temp-file mechanism: with `Get-MemorySyncMachineName` shadowed to a
+wrong constant the test reds, and the assertion's own diff shows the wrong value travelling from
+PowerShell through the temp file into the byte-exact comparison, so the mechanism ruling 8 installed
+is proven to carry a disagreement rather than to smooth one. The file was restored from a pre-probe
+copy and verified byte-identical against it.
+
+Gate, measured by this session on SCOTT-CLAUDE 2026-09-08T22:20Z-22:33Z while holding the
+heavy-process claim, taken after waiting for a live foreign claim (`AI-OS: Worker`, repo ai-os, aged
+by the claim file's own modification time) rather than running beside it:
+
+- `node --test test/git-guard-parity.test.js test/memq-shim.test.js`: tests 37, pass 37, fail 0,
+  exit 0. `test/memq-shim.test.js` is in the lane because this section changed the wrapper generator
+  it exercises end to end, which is the only durable evidence for the exit-code claim the generator's
+  comment makes.
+- `node --test test/memory-sync.test.js`: tests 104, pass 104, fail 0, exit 0, against this session's
+  prior baseline of 104/104/0. Delta 0, zero failures either side.
+- Whole-tree pins, one run: tests 108, pass 108, fail 0, exit 0 across doctrine-parity,
+  doctor-encoding, memory-sync-git-guard and doctor-goal-state.
+- `node --test test/size-ratchet.test.js`: tests 101, pass 100, fail 1, exit 1, on the same routed
+  collateral over-cap ruling 6 records. Nothing of this section's is over cap.
+
+Rulings adopted at this boundary:
+
+12. A fix delta that closes a security finding owes its own review round, and the two this section
+    ran each returned a real defect. Round 5 found that the wrapper guard was set with no `setlocal`,
+    so it outlived the call in the caller's own cmd.exe and changed how that shell resolved every
+    later command. That is ruling 8's class through a different mechanism, a write whose blast radius
+    is the caller rather than the callee, which is why amendment 3 was added rather than the instance
+    merely fixed. Measured here: calling the unscoped wrapper leaves the variable readable in the
+    caller, calling the scoped one leaves it empty, and a wrapper whose child exits 42 still reports
+    42 either way, so the implicit endlocal costs the generated memq.cmd nothing despite its having
+    no explicit exit.
+
+13. The pin guarding the wrappers forbade its own repair, and then passed on prose. Round 5 found
+    that the launch predicate's skip test `/^@?set\b/i` does not match `setlocal`, there being no word
+    boundary between the `t` and the `l`, so the pin classified the correct repair as a launch. Round
+    6 found the replacement's own defect and it is the sharper one: the generated wrapper's pin read
+    the generator function's whole body, comments included, and the comment written to explain why
+    `setlocal` matters contains the word, so removing `setlocal` from the emitted array left the pin
+    green. Confirmed here by evaluating the predicate with that element removed. The pin now
+    reconstructs the wrapper text the generator emits and runs it through the same two predicates the
+    tracked wrappers face, with a control that strips each line and requires a red.
+
+14. The wrappers ship LF to any clone that does not fold line endings, and an attribute now fixes
+    what they receive. `git ls-files --eol` reports both tracked wrappers as `i/lf w/crlf` with no
+    attribute, so CRLF on this box is this machine's `core.autocrlf` rather than the repository's
+    doing, while the tree states elsewhere that cmd.exe parses batch files by CRLF lines. A
+    `.gitattributes` pins `*.cmd` and `*.bat` to `eol=crlf`, the index bytes are unchanged, and the
+    sweep now pins the attribute, controlled against the real pre-attribute output.
+
+15. The routed `Get-MemqShimStatus` bare-interpreter item stands as routed rather than being fixed
+    under ruling 10's bar. Ruling 10 holds that a security Major is fixed or raised and never routed;
+    this item is rated Minor by the lens that raised it and is not reachable from either production
+    call site, both of which pass an absolute interpreter path, so the bar ruling 10 states does not
+    reach it. It is recorded here because the tension is worth adjudicating rather than leaving to be
+    re-litigated from the backlog entry alone.
+
+Approval drift recorded here: four edits landed inside the approval-scoped region above
+`## Chapters`. A third Standing Brief Amendment was added, on scoping a write whose blast radius is
+the caller. Section 2's requirement text gained a paragraph naming the cmd-wrapper hardening its own
+review surfaced, since the section's deliverable had grown past its text, and its acceptance line was
+updated to match. Section 3 gained a sentence requiring the new control to be recorded in
+`docs/security-model.md`, which is the document section 3 owns and the destination the security lens's
+finding routes to.
+
+Next action per section: run review round 7 over the round 6 fix delta, then steps 5 through 8 to
+close section 2, then section 3 (sonnet, `Locus: inline` because it writes under `docs/`).

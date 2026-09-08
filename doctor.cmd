@@ -17,9 +17,10 @@ rem What this closes is the interpreter hop and nothing before it: cmd.exe
 rem resolves this wrapper's own name against the current directory ahead of
 rem PATH and ahead of any line here, so a file of this name in the caller's
 rem directory is reached first, and only the caller's environment closes that.
-rem PATH order stays open either way, which is why naming an absolute path
-rem under %SystemRoot% is an alternative rather than a weaker form: it closes
-rem the PATH leg and leaves this one, and depends on %SystemRoot% in turn.
+rem PATH order stays open here. An absolute interpreter path under %SystemRoot%
+rem would close both that leg and this one, so it is the stronger guard on this
+rem hop; it is not taken because it depends on %SystemRoot%, which is itself a
+rem caller-supplied value, and it closes nothing on the wrapper's own hop above.
 setlocal
 set "NoDefaultCurrentDirectoryInExePath=1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*

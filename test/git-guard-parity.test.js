@@ -825,13 +825,17 @@ const CMD_BUILTIN_RE =
     /^@?(echo|rem|set|setlocal|endlocal|pushd|popd|cd|chdir|title|color|verify|exit|goto|shift)\b/i;
 
 // A wrapper line that actually launches something. The guard has to precede
-// the first of these or it guards nothing.
+// the first of these or it guards nothing. A builtin only excuses a line it
+// is the whole of: cmd.exe runs `echo starting & node payload.js` as two
+// commands, so classifying that line by its first token alone would let a
+// launch sit above the guard and still read as guarded.
 function firstLaunchIndex(lines) {
     return lines.findIndex((raw) => {
         const line = raw.trim();
         if (line === '') { return false; }
         if (/^@?::/.test(line)) { return false; }
         if (/^:/.test(line)) { return false; }
+        if (/[&|]/.test(line)) { return true; }
         if (CMD_BUILTIN_RE.test(line)) { return false; }
         return true;
     });
@@ -851,29 +855,57 @@ function guardPrecedesLaunch(text) {
 // than the one variable: any wrapper that assigns anything scopes it with
 // setlocal first, so a guard added later cannot reintroduce the leak that the
 // working-directory guard itself introduced when it was first written.
+// The mutations are the ones cmd.exe applies to the process the wrapper runs
+// in, which for an interactive caller is that caller's own shell: an
+// assignment, and a directory change, which setlocal also saves and its
+// endlocal restores. setx is the member setlocal cannot scope at all, since it
+// writes the registry rather than the process, so it fails outright rather
+// than being asked for a preceding setlocal it would not benefit from.
 function scopesEnvironment(text) {
     const lines = text.split(/\r?\n/).map((l) => l.trim());
-    const firstSet = lines.findIndex((l) => /^@?set\s+\S/i.test(l));
-    if (firstSet < 0) { return true; }
+    if (lines.some((l) => /^@?setx\b/i.test(l))) { return false; }
+    const firstMutation = lines.findIndex((l) => /^@?(set\s+\S|cd\s+\S|chdir\s+\S|pushd\s+\S)/i.test(l));
+    if (firstMutation < 0) { return true; }
     const setlocalAt = lines.findIndex((l) => /^@?setlocal\b/i.test(l));
-    return setlocalAt >= 0 && setlocalAt < firstSet;
+    if (setlocalAt < 0 || setlocalAt >= firstMutation) { return false; }
+    // An endlocal between the two ends the scope before the mutation happens,
+    // which leaves the mutation in the caller exactly as no setlocal would.
+    const endlocalAt = lines.findIndex((l, i) => i > setlocalAt && i < firstMutation && /^@?endlocal\b/i.test(l));
+    return endlocalAt < 0;
+}
+
+// The wrapper text Get-MemqCmdWrapperText emits, reconstructed from the array
+// literal it returns. The generated memq.cmd exists nowhere on disk in this
+// tree, so the sweep above cannot reach it and this is its only coverage;
+// reading the function's whole body instead would match the prose of the
+// comments that explain the wrapper, which is how a pin on this file goes
+// quiet while the emitted wrapper loses the very line the pin names.
+function emittedMemqWrapperText(shimSource) {
+    const fn = shimSource.slice(shimSource.indexOf('function Get-MemqCmdWrapperText'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    const open = body.indexOf('return (@(');
+    assert.ok(open >= 0, 'the generator no longer returns an array literal, so this pin cannot read what it emits');
+    const arr = body.slice(open, body.indexOf('-join', open));
+    const elements = [...arr.matchAll(/'((?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'"));
+    assert.ok(elements.length > 0, 'no emitted wrapper lines were recovered from the generator');
+    return elements.join('\r\n');
 }
 
 test('every cmd wrapper the repo ships sets the working-directory guard before it launches anything', () => {
     // cmd.exe treats .bat and .cmd identically, so the sweep is over both:
     // discovering only .cmd would leave a .bat wrapper added later exempt
     // while this pin still reported a clean result.
-    // The spawn pins its own working directory to this test file's directory
-    // rather than inheriting the process's, which is the same guard
-    // kit-git-lib.js applies for the same reason: a bare `git` resolves
-    // against the spawn's working directory before PATH, and the repository
-    // under test is exactly the directory that must not supply it. -C keeps
-    // the question aimed at the repository regardless. quotePath=false stops
-    // git C-quoting a non-ASCII wrapper name, which would reach readFileSync
-    // as a path that does not exist.
+    // A bare `git` resolves against the spawn's working directory before PATH,
+    // so the guard is the environment key, which is the half kit-git-lib.js
+    // relies on for the same reason (its own cwd pin points at a directory
+    // outside the repository being asked about, which this spawn's cannot: the
+    // suite's own directory is inside the tree under test). -C keeps the
+    // question aimed at the repository. quotePath=false stops git C-quoting a
+    // non-ASCII wrapper name, which would reach readFileSync as a path that
+    // does not exist.
     const listed = spawnSync(
         'git', ['-C', REPO, '-c', 'core.quotePath=false', 'ls-files', '--', '*.cmd', '*.bat'],
-        { encoding: 'utf8', cwd: __dirname });
+        { encoding: 'utf8', env: { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' } });
     assert.strictEqual(listed.status, 0, listed.stderr);
     const wrappers = listed.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
     // The discovery itself is asserted: an empty list would pass the loop
@@ -897,16 +929,39 @@ test('the generated memq.cmd wrapper carries the same guard', () => {
     const fn = shim.slice(shim.indexOf('function Get-MemqCmdWrapperText'));
     const body = fn.slice(0, fn.indexOf('\n}'));
     assert.ok(body.includes('function Get-MemqCmdWrapperText'), 'the generator function was not located');
-    assert.ok(/set\s+"?NoDefaultCurrentDirectoryInExePath=1"?/i.test(body),
+    // Judged on the wrapper it emits, through the same two predicates the
+    // tracked wrappers face, so the generated wrapper cannot pass on the
+    // strength of the prose that surrounds it.
+    const emitted = emittedMemqWrapperText(shim);
+    assert.ok(emitted.includes('node "%~dp0memq-shim.js"'),
+        'the emitted wrapper no longer launches the shim, so this pin is reading the wrong text: ' + emitted);
+    assert.ok(guardPrecedesLaunch(emitted),
         'Get-MemqCmdWrapperText emits a wrapper that launches bare node without ' + CMD_GUARD_CANONICAL
-        + ', and that wrapper is installed onto PATH and invoked from arbitrary directories');
-    assert.ok(body.indexOf(CMD_GUARD_CANONICAL) < body.indexOf('node "%~dp0memq-shim.js"'),
-        'the guard must be emitted ahead of the node launch it protects');
+        + ' ahead of it, and that wrapper is installed onto PATH and invoked from arbitrary directories: '
+        + emitted);
     // memq.cmd sits on PATH and is invoked constantly, so an unscoped set here
     // is the one that would be blamed on the shell rather than on memq.
-    assert.ok(body.indexOf('setlocal') >= 0 && body.indexOf('setlocal') < body.indexOf(CMD_GUARD_CANONICAL),
+    assert.ok(scopesEnvironment(emitted),
         'Get-MemqCmdWrapperText must emit setlocal ahead of its set, or the guard it writes outlives '
-        + 'every memq call in the caller\'s shell');
+        + 'every memq call in the caller\'s shell: ' + emitted);
+});
+
+// The control for the pin above, on the defect it exists to catch: the same
+// predicates run over the emitted text with the scoping line removed must red.
+// A pin that reads the generator's body rather than its output passes this
+// removal, because the comments explaining the wrapper name setlocal too.
+test('the generated memq.cmd pin reds when the emitted wrapper loses its scoping', () => {
+    const shim = fs.readFileSync(
+        path.join(REPO, 'plugins', 'claude-kit', 'doctor', 'install-memq-shim.ps1'), 'utf8');
+    const emitted = emittedMemqWrapperText(shim);
+    const withoutScope = emitted.split(/\r?\n/).filter((l) => !/^@?setlocal\b/i.test(l)).join('\r\n');
+    assert.notStrictEqual(withoutScope, emitted, 'control: the emitted wrapper carries no setlocal line to remove');
+    assert.ok(!scopesEnvironment(withoutScope),
+        'control: the emitted wrapper stripped of its setlocal must fail the scoping predicate');
+    const withoutGuard = emitted.split(/\r?\n/).filter((l) => !CMD_GUARD_RE.test(l.trim())).join('\r\n');
+    assert.notStrictEqual(withoutGuard, emitted, 'control: the emitted wrapper carries no guard line to remove');
+    assert.ok(!guardPrecedesLaunch(withoutGuard),
+        'control: the emitted wrapper stripped of its guard must fail the guard predicate');
 });
 
 // The control: the predicate speaks on a wrapper that lacks the guard, so a
@@ -942,4 +997,40 @@ test('the environment-scoping predicate reds on a wrapper whose set outlives it'
         'control: a setlocal after the set scopes nothing and must fail');
     assert.ok(scopesEnvironment('@echo off\r\nnode "x.js"\r\n'),
         'control: a wrapper that assigns nothing has nothing to scope and must pass');
+    // Class controls, each on a member withheld from the predicate's own
+    // subject: the guard variable is never named in any of them, so a green
+    // here is coverage of the mutation class rather than an echo of the one
+    // variable this section happened to add.
+    assert.ok(!scopesEnvironment('@echo off\r\nset OTHER_THING=2\r\nnode "x.js"\r\n'),
+        'control: any unscoped assignment must fail, not only the guard\'s own variable');
+    assert.ok(!scopesEnvironment('@echo off\r\nsetlocal\r\nsetx PERSISTED 1\r\nnode "x.js"\r\n'),
+        'control: setx writes the registry, which setlocal does not scope, so it must fail even scoped');
+    assert.ok(!scopesEnvironment('@echo off\r\nsetlocal\r\nendlocal\r\nset LEAKED=1\r\nnode "x.js"\r\n'),
+        'control: an endlocal before the assignment ends the scope, so the assignment still leaks');
+    assert.ok(!scopesEnvironment('@echo off\r\ncd "%~dp0"\r\nnode "x.js"\r\n'),
+        'control: an unscoped cd changes the caller\'s own working directory and must fail');
+    assert.ok(scopesEnvironment('@echo off\r\nsetlocal\r\ncd "%~dp0"\r\nnode "x.js"\r\n'),
+        'control: setlocal saves and restores the working directory, so a scoped cd must pass');
+});
+
+// cmd.exe parses a batch file by CRLF lines, which is why the generated
+// wrapper is built CRLF-terminated. A tracked wrapper carries whatever the
+// cloner's core.autocrlf produces unless an attribute fixes it, so without one
+// a clone made with autocrlf=false, or a source archive, delivers LF-only
+// batch files and the guard lines above are parsed by a parser that is not
+// reliable on them. The attribute is what makes the delivered bytes the same
+// everywhere, so it is pinned rather than assumed.
+test('every tracked cmd wrapper is delivered CRLF by attribute rather than by the cloner\'s config', () => {
+    const listed = spawnSync(
+        'git', ['-C', REPO, '-c', 'core.quotePath=false', 'ls-files', '--eol', '--', '*.cmd', '*.bat'],
+        { encoding: 'utf8', env: { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' } });
+    assert.strictEqual(listed.status, 0, listed.stderr);
+    const rows = listed.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    assert.ok(rows.length > 0, 'no tracked wrapper was discovered, so this pin swept nothing');
+    for (const row of rows) {
+        assert.match(row, /attr\/[^\t]*eol=crlf/,
+            'this wrapper carries no eol=crlf attribute, so what a clone receives is decided by that '
+            + 'machine\'s core.autocrlf rather than by the repository, and cmd.exe is not reliable '
+            + 'parsing an LF-only batch file: ' + row);
+    }
 });

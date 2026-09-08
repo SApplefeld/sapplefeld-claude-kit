@@ -1,0 +1,4 @@
+# cmd.exe parses a batch file by CRLF lines, so what a clone receives must be
+# decided here rather than by that machine core.autocrlf setting.
+*.cmd text eol=crlf
+*.bat text eol=crlf

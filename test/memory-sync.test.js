@@ -3413,9 +3413,11 @@ const OFF_WINDOWS_REASON = isWin ? false
 // checked is exactly that, a non-empty name that traverses nowhere, rather than
 // a character class: the axis compares with -ieq and the filesystem stores the
 // name whatever alphabet it is written in, so a non-ASCII hostname works and a
-// class-shaped assertion would red a healthy box for no defect. Both runtimes
-// read this value from the environment, and `_CLUSTER_NETWORK_NAME_` redirects
-// it on Windows in both runtimes, so it is steerable rather than fixed. Gated with the siblings: off Windows
+// class-shaped assertion would red a healthy box for no defect. The value is
+// steerable rather than fixed: on Windows, setting `_CLUSTER_NETWORK_NAME_`
+// changes what both runtimes report here, which is a property of the platform
+// call each of them makes rather than of either runtime reading that variable
+// itself. Gated with the siblings: off Windows
 // every case it guards is skipped, and an ungated check there would be the only
 // one running, reporting on the host rather than on the kit. Its skip carries
 // its own reason rather than the parity test's, since this case takes no

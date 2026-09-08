@@ -30,7 +30,7 @@ Decided 2026-08-29 by the operator in the design dialog.
 1. **Hybrid tiering, not end-to-end Fable.** Generators run at the corpus's production tiers: Opus cold readers per cluster, scenario probes at Opus and Sonnet, plus exactly one Fable adversarial pass over the doctrine alone as the deepest surface. Orchestration, adjudication, the upstream verdict, and the operator brief are Fable, because the failure mode there is deference to a plausible finding, and because an orchestrator below its adjudicators inverts the review hierarchy. Rationale: end-to-end Fable loses the representative-reader property and re-buys depth the adjudication pass already provides; the generators are expected to over-report, and the Fable pass is sized for that.
 2. **Scope is the behavior-shaping prose: doctrine, skills, agent charters.** Hook code is excluded; the test suite and the code reviewers already police it, and prose is the unpoliced surface. Hook-emitted message text rides only where a finding from the prose sweep leads into it.
 3. **A dedicated seat, never the implementation queue's worker.** Review and adjudication stay isolated from the seat doing implementation, on the operator's word.
-4. **The audit is read-only and its findings are hypotheses.** Nothing ships from the audit itself: the act-on-found-work rule is suspended for its duration exactly as /recap suspends it, every cold finding is a hypothesis until the provenance trace runs, and the only outward products are the ruled brief, the banked verdicts and memories, the inventory, and the follow-on plan.
+4. **The audit is read-only and its findings are hypotheses.** Nothing ships from the audit itself: found work is handed off through the Section 7 follow-on plan, per the act-on-found-work rule's own handoff clause, every cold finding is a hypothesis until the provenance trace runs, and the only outward products are the ruled brief, the banked verdicts and memories, the inventory, and the follow-on plan.
 
 ## Execution surface
 
@@ -44,9 +44,9 @@ Reaffirmed 2026-09-07 by the operator at the keyboard of the KIT: Expert session
 
 ### 1. The blind conflict sweep
 
-Model: opus readers and sonnet probes, dispatched; one fable doctrine pass; orchestration is the session per decision 1.
+Model: opus readers, opus and sonnet probes, dispatched; one fable doctrine pass; orchestration is the session per decision 1.
 
-Cluster the corpus into review sets that pair documents governing the same moments (the doctrine with each skill it delegates to; executing-work with finishing-work; peer-sessions with coordinator and role; the reviewer charters with the skills that dispatch them; the implementer of the clustering names the full set and records it). Per cluster, one cold reader dispatched with the files alone, no intent story, charter: find where these documents give incompatible instructions for the same moment. Beside the readers, scenario probes at opus and sonnet: each probe is handed a concrete situation the kit governs (mid-section peer message, failed gate at a boundary, a stale anchor, a park request mid-fan-out; the implementer authors the scenario set from the corpus's own decision points) and asked what the corpus instructs, with any fork or contradiction it hits reported as a finding. One fable-tier cold pass runs over the doctrine alone. All reports land in `.kit/` scratch, never `docs/`.
+Cluster the corpus into review sets that pair documents governing the same moments (the doctrine with each skill it delegates to; executing-work with finishing-work; peer-sessions with coordinator and role; the reviewer charters with the skills that dispatch them; the implementer of the clustering names the full set and records it in the Section 1 Chapter, which Sections 2 and 3 read their clusters from). Per cluster, one cold reader dispatched with the files alone, no intent story, charter: find where these documents give incompatible instructions for the same moment. Beside the readers, scenario probes at opus and sonnet: each probe is handed a concrete situation the kit governs (mid-section peer message, failed gate at a boundary, a stale anchor, a park request mid-fan-out; the implementer authors the scenario set from the corpus's own decision points; these probes are authored fresh for the audit and are distinct from the ruled set under `test/probes/`, which `tools/probe-corpus/run.mjs` runs) and asked what the corpus instructs, with any fork or contradiction it hits reported as a finding. One fable-tier cold pass runs over the doctrine alone. All reports land in `.kit/` scratch, never `docs/`.
 
 Tests: none mechanical; the gate is the dispatch discipline itself, every reader brief carrying files-only with the no-intent-story bar stated, checked before dispatch.
 
@@ -76,7 +76,7 @@ Files in scope: none written outside `.kit/` scratch.
 
 Model: fable.
 
-Every finding from Sections 1 through 3 is traced before it survives: for a bloat candidate, whether the passage is incident-born (git history, the memory store, the kaizen archive), whether the incident class is still possible, and whether machinery now supersedes the prose, with retire-as-superseded the only honest simplification and taste never a verdict; for a conflict, whether it is real at execution time or two intentionally different semantics, and if real, which side the history says is right; for an operator-gate entry, whether the proposed class survives the gate's own history, meaning what incident installed it and what blast radius it actually guards. Verdicts are keep, rewrite, or retire, each with its reason and its evidence pointer, recorded in a scratch adjudication log the brief is built from. Any surviving rewrite of behavior-shaping wording is flagged for baseline-testing per the writing-skills discipline, to be performed in the follow-on plan, never here.
+Every finding from Sections 1 through 3 is traced before it survives: for a bloat candidate, whether the passage is incident-born (git history, the memory store, the kaizen archive), whether the incident class is still possible, and whether machinery now supersedes the prose, with retire-as-superseded the only honest simplification and taste never a verdict; for a conflict, whether it is real at execution time or two intentionally different semantics, and if real, which side the history says is right; for an operator-gate entry, whether the proposed class survives the gate's own history, meaning what incident installed it and what blast radius it actually guards. The twelve sections of `claude-kit_kaizen-prose-batch_spec_v1.md` enter this pass as findings and are ruled the same way, each section traced against the corpus at rest and the plans that closed since it was authored; Section 7's follow-on plan carries the upheld ones. Verdicts are keep, rewrite, or retire, each with its reason and its evidence pointer, recorded in a scratch adjudication log the brief is built from. Any surviving rewrite of behavior-shaping wording is flagged for baseline-testing per the writing-skills discipline, to be performed in the follow-on plan, never here.
 
 Tests: none mechanical; the gate is that no finding reaches the brief without a recorded trace, checked by re-reading the adjudication log against the finding lists.
 
@@ -86,9 +86,9 @@ Files in scope: `.kit/` scratch only.
 
 Model: opus.
 
-One curated document collecting what the kit believes about the harness it runs on: leash and compaction mechanics, tool contracts, dispatch and messaging behavior, cache resolution, drawn from the doctrine's environment section, the skills' contract-facts sections, and the project memories that record harness behavior. Each assumption carries its source pointer and what observation would falsify it, so the upstream watch's release-notes diff has a fixed surface to run against. Section 6 consumes it. Curated state only, no journey narration, per the doctrine's document rules.
+One curated document collecting what the kit believes about the harness it runs on: leash and compaction mechanics, tool contracts, dispatch and messaging behavior, cache resolution, drawn from the doctrine's environment section, the skills' contract-facts sections, and the project memories that record harness behavior. Each assumption carries its source pointer and what observation would falsify it, so the upstream watch's release-notes diff has a fixed surface to run against, and the document carries one line recording the Claude Code version it was last diffed against, which Section 6 sets at the proving run and each later diff advances. Section 6 consumes it. Curated state only, no journey narration, per the doctrine's document rules.
 
-Tests: none mechanical; acceptance is the blind-reader dispatch over the finished document.
+Tests: none mechanical; acceptance is a blind-reader dispatch over the finished document whose findings are fixed or recorded before the section closes.
 
 Files in scope: `docs/harness-assumptions.md` (or the name `curating-docs` prefers at implementation), its index line where docs/ carries one.
 
@@ -96,21 +96,21 @@ Files in scope: `docs/harness-assumptions.md` (or the name `curating-docs` prefe
 
 Model: fable.
 
-The lane's proving run: fetch the current Claude Code sub-agents documentation live (never from training memory, per the doctrine's external-specifics rule), evaluate the persistent Subagent Memory feature against the kit's own memory system on the properties the kit actually leans on (cross-session recall, the applied-stamp evidence loop, the shared tiers, decay, recognition once the memory-recognition plan ships), and bank the verdict as a project memory in the Warden idiom: adopted, declined-with-reasons, or watch-with-named-trigger, so it is never re-evaluated from a headline. The standing cadence ships beside it: the kaizen skill gains one line adding the upstream diff (current release notes against the Section 5 inventory) to the weekly pass, findings entering the inbox as ordinary kaizen notes.
+The lane's proving run: fetch the current Claude Code sub-agents documentation live (never from training memory, per the doctrine's external-specifics rule), evaluate the persistent Subagent Memory feature against the kit's own memory system on the properties the kit actually leans on (cross-session recall, the applied-stamp evidence loop, the shared tiers, decay, recognition), and bank the verdict as a project memory in the Warden idiom: adopted, declined-with-reasons, or watch-with-named-trigger, so it is never re-evaluated from a headline. The standing watch ships beside it, and its trigger is a version change rather than a calendar: the kaizen skill has no weekly pass (its pass is gated on pending items), so the skill gains one line under the pass stating that the upstream diff (current release notes against the Section 5 inventory) runs at a kaizen pass whenever the installed Claude Code version (`claude --version`) differs from the version the inventory records as last diffed against, the diff advancing that recorded version and its findings entering the inbox as ordinary kaizen notes. The proving run sets the inventory's recorded version to the version it ran under.
 
-Tests: none mechanical for the verdict; the kaizen amendment is reviewed whole-file per the recorded skill-amendment defect mode.
+Tests: none mechanical for the verdict; the kaizen amendment is reviewed whole-file per the project memory `skill-amendments-collide-with-neighbours`, and `test/size-ratchet.test.js` is green after the kaizen skill's cap is moved.
 
-Files in scope: `plugins/claude-kit/skills/kaizen/SKILL.md`, one new project memory file and its index line.
+Files in scope: `plugins/claude-kit/skills/kaizen/SKILL.md`; `test/size-budget.json`, whose cap on the kaizen skill sits at the file's current word count and is moved through `node plugins/claude-kit/scripts/kit-size.js sync plugins/claude-kit/skills/kaizen/SKILL.md` on that named path alone; `docs/harness-assumptions.md` (or the Section 5 name) for its recorded-version line; one new project memory file and its index line.
 
 ### 7. The ruling brief and the follow-on plan
 
 Model: fable.
 
-The surviving findings, batched for the operator in the client-briefing register: each with the passage, the adjudicated verdict and its evidence, the recommendation marked, and the cost of leaving it. On the operator's rulings, the approved changes are authored as an ordinary implementation plan for the normal queue, carrying the baseline-test requirement for every wording change Section 4 flagged; declined findings are recorded with their reasons in the brief's committed form so they are not re-found by the next audit. The brief and the follow-on spec are the audit's only committed deliverables beyond Sections 5 and 6.
+The surviving findings, batched for the operator in the client-briefing register: each with the passage, the adjudicated verdict and its evidence, the recommendation marked, and the cost of leaving it. On the operator's rulings, the approved changes are authored as an ordinary implementation plan for the normal queue, carrying the baseline-test requirement for every wording change Section 4 flagged and the upheld sections of `claude-kit_kaizen-prose-batch_spec_v1.md` with their RED and GREEN discipline; that batch plan closes Complete and archives in the follow-on's close-out, which the follow-on spec states as its own close-out step. Declined findings are recorded with their reasons in the brief's committed form so they are not re-found by the next audit. The brief and the follow-on spec are the audit's only committed deliverables beyond Sections 5 and 6.
 
-Tests: none mechanical; acceptance is the operator's rulings received and recorded.
+Tests: none mechanical; acceptance is the operator's rulings received and recorded and, where any finding was approved, the follow-on spec written Ready under `docs/plans/`.
 
-Files in scope: the follow-on spec under `docs/plans/`, the committed brief beside it or in the plan's own Decisions, per what the ruling round produces.
+Files in scope: the follow-on spec under `docs/plans/` where any finding is approved, with the committed brief beside it or in that plan's own Decisions, per what the ruling round produces; where nothing is approved, the brief's home is this plan's own closing Chapter; `docs/README.md` and `docs/plans/README.md`, whose plan lists take the follow-on's entry.
 
 ## Out of Scope
 
@@ -118,12 +118,16 @@ Files in scope: the follow-on spec under `docs/plans/`, the committed brief besi
 - Hook and CLI code review: policed by the suite and the code reviewers.
 - Re-running the audit on a cadence: one audit, then the standing upstream watch; whether the sweep lanes recur is a call for after this one's yield is known.
 
+## Assumptions
+
+- plan review 2026-09-08 (plan-reviewer at fable, effort high): 13 findings, 13 fixed, 0 assumed, 0 asked, 0 discarded.
+
 ## Related
 
-- `docs/plans/claude-kit_memory-recognition_spec_v1.md` and the memory system generally: the surface the Section 5 verdict compares against.
-- Project memory `warden-ai-evaluated-and-declined`: the banked-verdict idiom Section 5 adopts.
+- `docs/archive/claude-kit_memory-recognition_spec_v1.md` and the memory system generally: the surface the Section 6 verdict compares against.
+- Project memory `warden-ai-evaluated-and-declined`: the banked-verdict idiom Section 6 adopts.
 - The blind-reader and blind-reviewer charters under `plugins/claude-kit/agents/`: the no-intent-story dispatch discipline Sections 1 and 2 inherit.
-- `docs/plans/claude-kit_recap_spec_v1.md`: the read-only-bar idiom decision 4 borrows.
+- `docs/plans/claude-kit_kaizen-prose-batch_spec_v1.md`: the input set Section 4 rules and Section 7's follow-on carries; never armed on its own, per its Dispatch Authorization.
 - `docs/plans/claude-kit_subtraction-bars_spec_v1.md`: the prose bar in writing-skills that Section 2 readers are briefed with, so a bloat finding names the sentence and the bar it fails rather than a feeling of length; runs first in the cycle.
 - `docs/plans/claude-kit_test-audit_spec_v1.md`: retires the wording pins over prose that is not a pinned copy, which the follow-on cut plan from Section 7 needs before it can cut a sentence without a red.
 - `docs/archive/claude-kit_review-loop-exit_spec_v1.md`: the class-keyed exit for the review loop, so a cut here that draws only claim findings closes in one fix round; its section 4 made the size budget a ledger, so a cap a cut here shrinks is lowered through `kit-size.js sync`.

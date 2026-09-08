@@ -6,11 +6,23 @@ rem cmd.exe resolves a bare command name against the current directory before
 rem PATH, and it reads NoDefaultCurrentDirectoryInExePath from its own
 rem environment, so setting it here closes that search for the launch below.
 rem This copy is invoked by absolute path from whatever directory the caller is
-rem in, so the exposed directory is that one rather than this wrapper's: the
-rem script beside this wrapper stays out of the caller's reach while the
-rem interpreter would not have. Setting the variable is preferred over naming an
-rem absolute path, which would depend on %SystemRoot% and so trade one
-rem caller-influenced value for another.
+rem in, so the exposed directory is that one rather than this wrapper's. The
+rem script this launches is named through %~dp0, which is this wrapper's own
+rem directory and is therefore fixed; the bare interpreter name is not, which
+rem is the gap the setting closes.
+rem setlocal scopes the setting to this wrapper. A batch file started from an
+rem interactive prompt runs inside the caller's own cmd.exe, so an unscoped set
+rem would change how every later command that caller types resolves, for the
+rem life of that shell. The implicit endlocal preserves the exit code, so the
+rem propagation below is unaffected.
+rem What this closes is the interpreter hop and nothing before it: cmd.exe
+rem resolves this wrapper's own name against the current directory ahead of
+rem PATH and ahead of any line here, so a file of this name in the caller's
+rem directory is reached first, and only the caller's environment closes that.
+rem PATH order stays open either way, which is why naming an absolute path
+rem under %SystemRoot% is an alternative rather than a weaker form: it closes
+rem the PATH leg and leaves this one, and depends on %SystemRoot% in turn.
+setlocal
 set "NoDefaultCurrentDirectoryInExePath=1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*
 exit /b %ERRORLEVEL%

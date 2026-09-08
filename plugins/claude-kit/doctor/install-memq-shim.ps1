@@ -76,9 +76,20 @@ function Get-MemqCmdWrapperText {
     # environment, so the set below closes that search for the node launch that
     # follows it. This wrapper sits on PATH and is invoked as `memq` from
     # whatever directory a session happens to be in, which for this kit is
-    # routinely an unread clone, so the current directory is exactly the one
-    # that must not be allowed to supply the interpreter.
-    return (@('@echo off', 'set "NoDefaultCurrentDirectoryInExePath=1"', 'node "%~dp0memq-shim.js" %*', '') -join "`r`n")
+    # routinely an unread clone, so the node hop must not resolve from there.
+    # The reach is that hop alone. cmd.exe resolves the name `memq` itself
+    # against the current directory ahead of PATH and ahead of any line of this
+    # wrapper, so a memq.cmd sitting in that directory is reached first and this
+    # text never runs; closing that hop is the caller's environment to do.
+    # setlocal is what keeps the setting from outliving the call. A batch file
+    # started from an interactive prompt runs inside the caller's own cmd.exe,
+    # so an unscoped set would change how every later command that caller types
+    # resolves, for the life of that shell, and this wrapper is invoked often
+    # enough that the change would look like the shell rather than like memq.
+    # The implicit endlocal at the end of the script preserves the exit code,
+    # which this wrapper reports by falling off its own end rather than through
+    # an explicit exit.
+    return (@('@echo off', 'setlocal', 'set "NoDefaultCurrentDirectoryInExePath=1"', 'node "%~dp0memq-shim.js" %*', '') -join "`r`n")
 }
 
 # LF only: a CR after '#!/bin/sh' breaks the shebang. Every expansion is

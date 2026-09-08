@@ -6,8 +6,13 @@
 // restated rather than shared, and nothing today would notice if one gained
 // a key, lost an ordering guarantee, or dropped a value the other did not.
 //
-// Both sides are run for real against the real code rather than the guards'
-// source text being pattern-matched. The JS side calls gitChildEnv()
+// Both sides of that pair are run for real against the real code rather than
+// the guards' source text being pattern-matched. That claim is about the git
+// guards alone. The cmd-wrapper pins at the end of this file are source-text
+// pins on purpose: what they assert is a property of the wrapper text itself,
+// which is the artifact cmd.exe reads, and one of the two wrappers exists in
+// the tree only as a string its generator returns.
+// The JS side calls gitChildEnv()
 // directly with node's own require and reads the object it returns;
 // gitRun's own use of that same object as its spawn's env
 // (kit-git-lib.js:147) is not independently pinned here or elsewhere as a
@@ -805,45 +810,84 @@ test('changing a PS literal value turns the pin red, naming the key and both val
 // covered by this pin rather than exempt from it; the generated memq.cmd is
 // read from its generator, which is the only place its text exists in the
 // tree.
-const CMD_GUARD = 'set "NoDefaultCurrentDirectoryInExePath=1"';
+// The guard is the assignment, not the spelling of the line that makes it:
+// `@set X=1` and `set "X=1"` set the same variable, and a wrapper that chose
+// the other form is guarded. Pinning one literal would red it while proving
+// nothing about what the wrapper does.
+const CMD_GUARD_RE = /^@?set\s+"?NoDefaultCurrentDirectoryInExePath=1"?\s*$/i;
+const CMD_GUARD_CANONICAL = 'set "NoDefaultCurrentDirectoryInExePath=1"';
 
-// A wrapper line that actually launches something, as opposed to a comment,
-// an echo directive, a set, a label or a blank. The guard has to precede the
-// first of these or it guards nothing.
+// cmd.exe builtins, which change the shell's own state and launch nothing. The
+// list is what a wrapper may do before its guard is in place; anything else is
+// a launch, so an unlisted builtin fails loud as a false launch rather than
+// quietly admitting an unguarded one.
+const CMD_BUILTIN_RE =
+    /^@?(echo|rem|set|setlocal|endlocal|pushd|popd|cd|chdir|title|color|verify|exit|goto|shift)\b/i;
+
+// A wrapper line that actually launches something. The guard has to precede
+// the first of these or it guards nothing.
 function firstLaunchIndex(lines) {
     return lines.findIndex((raw) => {
         const line = raw.trim();
         if (line === '') { return false; }
-        if (/^@?echo\s+off$/i.test(line)) { return false; }
-        if (/^rem\b/i.test(line)) { return false; }
-        if (/^::/.test(line)) { return false; }
-        if (/^@?set\b/i.test(line)) { return false; }
-        if (/^exit\b/i.test(line)) { return false; }
+        if (/^@?::/.test(line)) { return false; }
         if (/^:/.test(line)) { return false; }
+        if (CMD_BUILTIN_RE.test(line)) { return false; }
         return true;
     });
 }
 
 function guardPrecedesLaunch(text) {
     const lines = text.split(/\r?\n/);
-    const guardAt = lines.findIndex((l) => l.trim() === CMD_GUARD);
+    const guardAt = lines.findIndex((l) => CMD_GUARD_RE.test(l.trim()));
     if (guardAt < 0) { return false; }
     const launchAt = firstLaunchIndex(lines);
     return launchAt < 0 || guardAt < launchAt;
 }
 
+// A batch file started from an interactive prompt runs inside the caller's own
+// cmd.exe, so a `set` the wrapper never scopes outlives the call and changes
+// how that shell resolves every later command. This is the property rather
+// than the one variable: any wrapper that assigns anything scopes it with
+// setlocal first, so a guard added later cannot reintroduce the leak that the
+// working-directory guard itself introduced when it was first written.
+function scopesEnvironment(text) {
+    const lines = text.split(/\r?\n/).map((l) => l.trim());
+    const firstSet = lines.findIndex((l) => /^@?set\s+\S/i.test(l));
+    if (firstSet < 0) { return true; }
+    const setlocalAt = lines.findIndex((l) => /^@?setlocal\b/i.test(l));
+    return setlocalAt >= 0 && setlocalAt < firstSet;
+}
+
 test('every cmd wrapper the repo ships sets the working-directory guard before it launches anything', () => {
-    const listed = spawnSync('git', ['-C', REPO, 'ls-files', '--', '*.cmd'], { encoding: 'utf8' });
+    // cmd.exe treats .bat and .cmd identically, so the sweep is over both:
+    // discovering only .cmd would leave a .bat wrapper added later exempt
+    // while this pin still reported a clean result.
+    // The spawn pins its own working directory to this test file's directory
+    // rather than inheriting the process's, which is the same guard
+    // kit-git-lib.js applies for the same reason: a bare `git` resolves
+    // against the spawn's working directory before PATH, and the repository
+    // under test is exactly the directory that must not supply it. -C keeps
+    // the question aimed at the repository regardless. quotePath=false stops
+    // git C-quoting a non-ASCII wrapper name, which would reach readFileSync
+    // as a path that does not exist.
+    const listed = spawnSync(
+        'git', ['-C', REPO, '-c', 'core.quotePath=false', 'ls-files', '--', '*.cmd', '*.bat'],
+        { encoding: 'utf8', cwd: __dirname });
     assert.strictEqual(listed.status, 0, listed.stderr);
     const wrappers = listed.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
     // The discovery itself is asserted: an empty list would pass the loop
     // below silently and report exactly like a swept clean result.
-    assert.ok(wrappers.length > 0, 'no tracked .cmd wrapper was discovered, so this pin swept nothing');
+    assert.ok(wrappers.length > 0, 'no tracked .cmd or .bat wrapper was discovered, so this pin swept nothing');
     for (const rel of wrappers) {
         const text = fs.readFileSync(path.join(REPO, rel), 'utf8');
         assert.ok(guardPrecedesLaunch(text),
-            rel + ' launches a command without setting ' + CMD_GUARD + ' first, so the caller\'s '
+            rel + ' launches a command without setting ' + CMD_GUARD_CANONICAL + ' first, so the caller\'s '
             + 'working directory can supply the binary it names');
+        assert.ok(scopesEnvironment(text),
+            rel + ' assigns an environment variable without a preceding setlocal, so the assignment '
+            + 'outlives the wrapper in the caller\'s own cmd.exe and changes how that shell resolves '
+            + 'every later command');
     }
 });
 
@@ -853,11 +897,16 @@ test('the generated memq.cmd wrapper carries the same guard', () => {
     const fn = shim.slice(shim.indexOf('function Get-MemqCmdWrapperText'));
     const body = fn.slice(0, fn.indexOf('\n}'));
     assert.ok(body.includes('function Get-MemqCmdWrapperText'), 'the generator function was not located');
-    assert.ok(body.includes(CMD_GUARD),
-        'Get-MemqCmdWrapperText emits a wrapper that launches bare node without ' + CMD_GUARD
+    assert.ok(/set\s+"?NoDefaultCurrentDirectoryInExePath=1"?/i.test(body),
+        'Get-MemqCmdWrapperText emits a wrapper that launches bare node without ' + CMD_GUARD_CANONICAL
         + ', and that wrapper is installed onto PATH and invoked from arbitrary directories');
-    assert.ok(body.indexOf(CMD_GUARD) < body.indexOf('node "%~dp0memq-shim.js"'),
+    assert.ok(body.indexOf(CMD_GUARD_CANONICAL) < body.indexOf('node "%~dp0memq-shim.js"'),
         'the guard must be emitted ahead of the node launch it protects');
+    // memq.cmd sits on PATH and is invoked constantly, so an unscoped set here
+    // is the one that would be blamed on the shell rather than on memq.
+    assert.ok(body.indexOf('setlocal') >= 0 && body.indexOf('setlocal') < body.indexOf(CMD_GUARD_CANONICAL),
+        'Get-MemqCmdWrapperText must emit setlocal ahead of its set, or the guard it writes outlives '
+        + 'every memq call in the caller\'s shell');
 });
 
 // The control: the predicate speaks on a wrapper that lacks the guard, so a
@@ -865,8 +914,32 @@ test('the generated memq.cmd wrapper carries the same guard', () => {
 test('the cmd wrapper guard predicate reds on an unguarded wrapper', () => {
     assert.ok(!guardPrecedesLaunch('@echo off\r\nnode "%~dp0thing.js" %*\r\n'),
         'control: an unguarded wrapper must fail the predicate');
-    assert.ok(!guardPrecedesLaunch('@echo off\r\nnode "%~dp0thing.js" %*\r\n' + CMD_GUARD + '\r\n'),
+    assert.ok(!guardPrecedesLaunch('@echo off\r\nnode "%~dp0thing.js" %*\r\n' + CMD_GUARD_CANONICAL + '\r\n'),
         'control: a guard set after the launch must fail the predicate');
-    assert.ok(guardPrecedesLaunch('@echo off\r\n' + CMD_GUARD + '\r\nnode "%~dp0thing.js" %*\r\n'),
+    assert.ok(guardPrecedesLaunch('@echo off\r\n' + CMD_GUARD_CANONICAL + '\r\nnode "%~dp0thing.js" %*\r\n'),
         'control: a guarded wrapper must pass the predicate');
+    // The shape control, on a spelling withheld from the pattern's literals:
+    // this form is matched on the assignment rather than on any string the
+    // predicate was handed, so a green here is coverage rather than an echo.
+    assert.ok(guardPrecedesLaunch('@echo off\r\n@set NoDefaultCurrentDirectoryInExePath=1\r\nnode "x.js"\r\n'),
+        'control: the unquoted, @-prefixed spelling sets the same variable and must pass');
+    // The wrappers are written setlocal-first, so a predicate that read
+    // setlocal as a launch would red every correctly written wrapper while
+    // reporting them as unguarded.
+    assert.ok(guardPrecedesLaunch(
+        '@echo off\r\nsetlocal\r\n' + CMD_GUARD_CANONICAL + '\r\nnode "%~dp0thing.js" %*\r\n'),
+        'control: setlocal is a builtin rather than a launch, so a setlocal-scoped wrapper must pass');
+    assert.ok(!guardPrecedesLaunch('@echo off\r\nsetlocal\r\nnode "%~dp0thing.js" %*\r\n'),
+        'control: setlocal alone is not the guard, so the predicate must still red');
+});
+
+test('the environment-scoping predicate reds on a wrapper whose set outlives it', () => {
+    assert.ok(!scopesEnvironment('@echo off\r\n' + CMD_GUARD_CANONICAL + '\r\nnode "x.js"\r\n'),
+        'control: an unscoped set must fail, since it outlives the wrapper in the caller\'s shell');
+    assert.ok(scopesEnvironment('@echo off\r\nsetlocal\r\n' + CMD_GUARD_CANONICAL + '\r\nnode "x.js"\r\n'),
+        'control: a set preceded by setlocal must pass');
+    assert.ok(!scopesEnvironment('@echo off\r\n' + CMD_GUARD_CANONICAL + '\r\nsetlocal\r\nnode "x.js"\r\n'),
+        'control: a setlocal after the set scopes nothing and must fail');
+    assert.ok(scopesEnvironment('@echo off\r\nnode "x.js"\r\n'),
+        'control: a wrapper that assigns nothing has nothing to scope and must pass');
 });

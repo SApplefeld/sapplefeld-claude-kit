@@ -135,6 +135,7 @@ None.
 
 ## Related
 
+- `docs/plans/claude-kit_review-loop-provenance_spec_v1.md` (Ready, 2026-09-08): extends this plan on the provenance axis, reading every Major for whether anything asked for it, and reverses Decision 3 with a five-round backstop on the operator's ruling of 2026-09-08.
 - Operator-tier memory `claims-sections-need-more-review-rounds-than-code-sections`, the structural argument this plan encodes.
 - `kaizen/notes-SCOTT-CLAUDE.md`, 2026-09-03 and the two 2026-09-07 review-loop notes; `kaizen/notes-NEO-CLAUDE.md`, the 2026-09-07 review-loop note. This plan dispositions all four.
 - `docs/plans/claude-kit_test-audit_spec_v1.md`: retires wording pins over prose that is not a pinned copy; section 3's pin is over a designed copy and stays.

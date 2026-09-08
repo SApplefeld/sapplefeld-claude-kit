@@ -105,9 +105,10 @@
 // decide every verdict this tool reaches, so a budget the reviewed checkout does
 // not hold is a gate greening against caps that appeared in no diff. Containment
 // is required of the default path, which is inside the repository under
-// measurement; a path named on --budget is an operator's own subject and is
-// allowed to sit anywhere, since naming a budget elsewhere is a legitimate
-// reading. Every path this tool prints, to stdout or to stderr, is rendered
+// measurement; under the reading verbs a path named on --budget is an operator's
+// own subject and is allowed to sit anywhere, since naming a budget elsewhere is
+// a legitimate reading, while the two write verbs bind it to the repository, as
+// their own comments say. Every path this tool prints, to stdout or to stderr, is rendered
 // through the goal library's printable-ASCII screen first: a budget key and a
 // tracked path are repository-supplied text, and the `report` output is quoted
 // into plan-doc Chapters, where a newline inside a path would forge a row. One
@@ -128,6 +129,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // The four shared libraries every hostile boundary here runs through: the git
 // runner, the bounded file reader with its containment helper, the
@@ -191,6 +193,7 @@ try {
         readFileBounded: read.readFileBounded,
         containedRealPath: read.containedRealPath,
         safeForAuthorization: goal.safeForAuthorization,
+        normalizePlanArg: goal.normalizePlanArg,
         scrub: channel.scrub
     };
 } catch (err) {
@@ -1035,6 +1038,8 @@ function check(repoDir, budgetFile, containRoot) {
         failures,
         pending,
         pendingMeasured,
+        budget,
+        untracked,
         measured: collected.measured,
         unclassified: collected.unclassified,
         excluded: collected.excluded,
@@ -1538,16 +1543,22 @@ function budgetFrom(measured) {
     return out;
 }
 
-// Every other file in this checkout is CRLF and no .gitattributes normalizes
-// anything, so the budget is written CRLF too. JSON.parse is indifferent to the
-// ending; a lone-LF file among CRLF siblings is not.
-function serializeBudget(budget) {
-    return JSON.stringify(budget, null, 4).split('\n').join('\r\n') + '\r\n';
+// The budget's bytes. init writes CRLF with a four-space indent, since every
+// other file in this checkout is CRLF and no .gitattributes normalizes anything:
+// JSON.parse is indifferent to the ending, and a lone-LF file among CRLF siblings
+// is not. sync passes the ending and indent it read from the file it replaces.
+// The map is flat, so it is written line by line rather than through
+// JSON.stringify's space argument, which cuts an indent to ten characters.
+function serializeBudget(budget, eol, indent) {
+    const ending = eol || '\r\n';
+    const pad = indent === undefined ? '    ' : typeof indent === 'number' ? ' '.repeat(indent) : indent;
+    const keys = Object.keys(budget);
+    if (keys.length === 0) return '{}' + ending;
+    return '{' + ending + keys.map((k) => pad + JSON.stringify(k) + ': ' + JSON.stringify(budget[k])).join(',' + ending) + ending + '}' + ending;
 }
 
-// Write the budget from current sizes, refusing an existing file. Lowering a
-// cap after an audit is a deliberate one-line edit, so nothing here overwrites
-// a committed budget: a re-init would silently raise every cap to whatever the
+// Write the budget from current sizes, refusing an existing file. Moving a cap
+// is the sync verb's, so nothing here overwrites a committed budget: a re-init would silently raise every cap to whatever the
 // tree happens to hold. The write itself carries the refusal through the
 // exclusive-create flag, since the check below and the write are two moments and
 // a budget appearing between them is exactly what the refusal exists to protect.
@@ -1598,7 +1609,7 @@ function initBudget(repoDir, budgetFile, containRoot) {
         target = path.join(realDir, path.basename(budgetFile));
     }
     if (fs.existsSync(target)) {
-        return { status: 'refused', detail: 'a budget already exists at ' + safePath(budgetFile) + '; lowering a cap is an edit to that file' };
+        return { status: 'refused', detail: 'a budget already exists at ' + safePath(budgetFile) + '; a cap moves through the sync verb' };
     }
     const collected = collect(repoDir);
     if (collected.status !== 'ok') return collected;
@@ -1636,23 +1647,281 @@ function initBudget(repoDir, budgetFile, containRoot) {
         fs.writeFileSync(target, serializeBudget(budget), { encoding: 'utf8', flag: 'wx' });
     } catch (err) {
         if (err && err.code === 'EEXIST') {
-            return { status: 'refused', detail: 'a budget already exists at ' + safePath(budgetFile) + '; lowering a cap is an edit to that file' };
+            return { status: 'refused', detail: 'a budget already exists at ' + safePath(budgetFile) + '; a cap moves through the sync verb' };
         }
         throw err;
     }
     return { status: 'ok', budget, count: Object.keys(budget).length };
 }
 
+// Moves the caps the budget already holds to their files' current sizes, in
+// both directions. With no path named after the verb it moves every cap and is
+// an audit's form over a clean tree: where a cap it would move belongs to a file
+// differing from HEAD or not yet added to git, or where the budget file it would
+// overwrite itself differs from HEAD, it refuses before writing, since on a shared
+// checkout a peer's uncommitted growth would otherwise land as a raised cap in
+// this session's change, or a peer's uncommitted cap edit would be written over,
+// and neither would ride in a diff as what it is. With
+// paths named it moves those alone, leaves every other entry as it stands and
+// says how many it left, and adds a first cap for a named path the budget lacks,
+// tracked or not yet added, since init refuses an existing budget and a new
+// curated file would otherwise have no command that caps it. A named path is
+// resolved against the repository before it is matched, so any spelling the
+// shell hands over names the key, and one resolving outside the repository is
+// refused as outside, through the same normalizer the goal CLI screens a plan
+// path with. An unnamed path the budget lacks is named and never added, and an
+// unnamed entry still over its cap is named and left where it is; in either case
+// the run exits 1 after the write, because check still reds on it.
+//
+// The refusal path is check's own, called rather than copied: this reuses
+// check() itself for the no-corpus refusals and the budget load, so a
+// tightened refusal there tightens here with no second copy to miss. Where
+// check() comes back with a refusal status, that result is returned as-is,
+// unread past its status. A throw out of loadBudget (a missing, unreadable, or
+// malformed budget, or one outside the checkout) is not caught here either: it
+// reaches main's own catch exactly as it does when check() throws it, and gets
+// the same exit code.
+//
+// Every failure check() reports other than an over-cap file (the state a move
+// answers) and a file with no cap (the state `unlisted` names) refuses the
+// write: a stale entry, an unreadable file, an invalid cap, an unclassified
+// file or a pathspec-blind path is a reading the ratchet reds on and a cap
+// move cannot answer, and a rewrite that proceeded past one would print a
+// clean move list over a budget the next check still refuses. That refusal is
+// also what makes the loop below total: every key left in the budget then has
+// a measurement, tracked or pending, so an entry is moved, unchanged, or
+// outside the named set, and the three counts sum to the budget.
+//
+// Containment binds this write whatever --budget says, which is initBudget's
+// rule and its reasoning: a write is not a reading. main passes the repository
+// as the root for both write verbs, and the write goes to the path containment
+// resolved rather than to the raw one, so the bytes land where the check ran.
+// The file is read once here, for its bytes and its shape together, and that
+// reading is compared with the budget check() validated, under the same
+// duplicate-key scan the loader runs: a difference means the file changed
+// between the check and this read, and the write is refused rather than written
+// over that edit. Two runs racing between this read and the rename are not
+// refused: the second rename wins. A discarded raise or add is loud, since the
+// next check reds on the file; a discarded lowering is silent to the gate,
+// leaving headroom the next report shows and the next bare sync retakes; every
+// move either run made is on its own stdout. The rewrite keeps the file's own
+// line endings, indent and key order (a file with no newline at all takes the
+// CRLF init writes; one whose keys sit at column 0 or on a single line keeps its
+// endings and takes init's four-space indent, since there is no indent to keep), places an added key before the first existing key that
+// sorts after it, which on the sorted budget init writes is sorted order, and
+// lands by rename from a sibling temporary file, so an interrupted run leaves
+// the committed budget whole. A refused exclusive create is a refusal, that
+// file being another run's and not this one's to delete; a failed rename unlinks
+// the file this run wrote.
+function sync(repoDir, budgetFile, containRoot, onlyPaths) {
+    mustHaveLibs();
+    const checked = check(repoDir, budgetFile, containRoot);
+    if (checked.status === 'git-failed' || checked.status === 'unmeasured') {
+        return checked;
+    }
+    const blocking = checked.failures.filter((f) => f.reason !== REASONS.OVER_CAP && f.reason !== REASONS.MISSING_ENTRY);
+    if (blocking.length > 0) {
+        const shown = boundList(blocking.map((f) => f.reason + ' ' + safePath(f.path)));
+        return { status: 'refused', detail: 'check reports failures a cap move cannot answer, so the budget is left as it stands: '
+            + shown.shown.join(', ') + (shown.omitted ? '; ' + boundNotice('blocking failure', shown.omitted) : '') };
+    }
+    const target = containRoot ? libs.containedRealPath(containRoot, budgetFile) : budgetFile;
+    if (target === null) {
+        // check() loaded this budget through the same containment a moment ago, so
+        // only a filesystem change between the two calls reaches this.
+        throw new Error('the size budget at ' + safePath(budgetFile) + ' stopped resolving inside ' + safePath(containRoot) + ' between the check and the write, so nothing was written');
+    }
+    const res = libs.readFileBounded(target, MAX_BUDGET_BYTES);
+    if (res === null || res.bounded) {
+        throw new Error('the size budget at ' + safePath(budgetFile) + ' could not be re-read whole, so nothing was written');
+    }
+    let budget;
+    try {
+        budget = JSON.parse(res.text);
+    } catch {
+        return { status: 'refused', detail: 'the size budget at ' + safePath(budgetFile) + ' stopped parsing between the check and the write, so it is left as it stands' };
+    }
+    const seenKeys = new Set();
+    for (const key of budgetKeysInText(res.text)) {
+        if (seenKeys.has(key)) {
+            return { status: 'refused', detail: 'the size budget at ' + safePath(budgetFile) + ' came to list a path more than once between the check and the write, so it is left as it stands' };
+        }
+        seenKeys.add(key);
+    }
+    if (!sameBudget(budget, checked.budget)) {
+        return { status: 'refused', detail: 'the size budget at ' + safePath(budgetFile) + ' changed between the check and the write, so it is left as it stands' };
+    }
+    const measuredByPath = new Map(checked.measured.concat(checked.pendingMeasured)
+        .filter((m) => m.size !== null).map((m) => [m.path, m]));
+    let named = null;
+    if (onlyPaths && onlyPaths.length > 0) {
+        const untrackedMeasured = new Set(untrackedMeasuredPaths(checked.untracked));
+        named = new Set();
+        for (const raw of onlyPaths) {
+            if (raw === '') {
+                return { status: 'refused', detail: 'an empty path names nothing to cap' };
+            }
+            if (/[\x00-\x1F]/.test(raw)) {
+                return { status: 'refused', detail: safePath(raw) + ' carries a control character, so it names no file here' };
+            }
+            // The given spelling first, then the canonical one.
+            let rel = libs.normalizePlanArg(repoDir, raw);
+            if (rel === null) rel = libs.normalizePlanArg(realPathOr(repoDir), raw);
+            if (rel === null) {
+                return { status: 'refused', detail: safePath(raw) + ' resolves outside the repository under measurement, so it has no cap here to move' };
+            }
+            if (!measuredByPath.has(rel)) {
+                if (EXCLUSIONS.includes(rel)) {
+                    return { status: 'refused', detail: safePath(rel) + ' is on the exclusion list, which no shape measures, so it has no cap of its own' };
+                }
+                if (!untrackedMeasured.has(rel)) {
+                    return { status: 'refused', detail: safePath(rel) + ' is not a measured file under a root in this checkout, so there is no size to move a cap to' };
+                }
+                const m = measure(classify([rel]).entries[0], readWorktree(repoDir, rel));
+                if (m.size === null) {
+                    return { status: 'refused', detail: safePath(rel) + ' is under a measured root and its worktree content is unreadable, so there is no size to cap it at' };
+                }
+                measuredByPath.set(rel, m);
+            }
+            named.add(rel);
+        }
+    }
+    const next = Object.create(null);
+    const moved = [];
+    const added = [];
+    let unchanged = 0;
+    let outside = 0;
+    for (const key of Object.keys(budget)) {
+        const cap = budget[key];
+        if (named !== null && !named.has(key)) {
+            next[key] = cap;
+            outside += 1;
+            continue;
+        }
+        const m = measuredByPath.get(key);
+        if (!m) {
+            return { status: 'refused', detail: safePath(key) + ' holds a cap and no measurement reached the move, a check outcome this verb does not classify, so nothing is written' };
+        }
+        if (m.size === cap) {
+            next[key] = cap;
+            unchanged += 1;
+            continue;
+        }
+        next[key] = m.size;
+        moved.push({ path: key, from: cap, to: m.size, direction: m.size > cap ? 'raised' : 'lowered' });
+    }
+    if (named === null && moved.length > 0) {
+        const changed = changedPaths(repoDir);
+        if (changed === null) return { status: 'git-failed', detail: 'git diff --name-only returned nothing usable for ' + safePath(repoDir) };
+        // The budget file is asked about on its own, through git status rather than
+        // the root-scoped diff listing: that listing never names an untracked path
+        // and never reaches a --budget outside the measured roots; --ignored so a
+        // budget git ignores refuses as one not yet added, since git status is
+        // silent on an ignored path without it; and the repository is
+        // canonicalized first because target is a real path while repoDir may be
+        // the spelling the flag arrived in.
+        const budgetRel = path.relative(realPathOr(repoDir), target).split(path.sep).join('/');
+        const budgetState = libs.gitOutput(repoDir, ['status', '--porcelain', '--untracked-files=all', '--ignored', '-z', '--', budgetRel], { timeoutMs: GIT_TIMEOUT_MS });
+        if (budgetState === null) return { status: 'git-failed', detail: 'git status returned nothing usable for ' + safePath(budgetRel) + ' (a wide ignored tree under a --budget near the repository root is one cause, since the ignored listing walks it)' };
+        if (budgetState.length > 0) {
+            return { status: 'refused', detail: 'the bare form moves every cap and takes a clean tree, and the budget file itself differs from HEAD or is not yet added to git, so a rewrite now would write over an uncommitted edit; commit or revert ' + safePath(budgetRel) + ' first, or name the files this change touched after the verb' };
+        }
+        const dirty = new Set(changed.concat(checked.pending));
+        const uncommitted = moved.filter((m) => dirty.has(m.path)).map((m) => safePath(m.path));
+        if (uncommitted.length > 0) {
+            const shown = boundList(uncommitted);
+            return { status: 'refused', detail: 'the bare form moves every cap and takes a clean tree, and files whose caps would move differ from HEAD or are not yet added to git, so a cap taken now would bake uncommitted content in; name the files this change touched after the verb instead: '
+                + shown.shown.join(', ') + (shown.omitted ? '; ' + boundNotice('uncommitted file', shown.omitted) : '') };
+        }
+    }
+    if (named !== null) {
+        for (const rel of Array.from(named).sort()) {
+            if (!Object.prototype.hasOwnProperty.call(budget, rel)) {
+                next[rel] = measuredByPath.get(rel).size;
+                added.push({ path: rel, to: next[rel] });
+            }
+        }
+    }
+    const unlisted = checked.measured
+        .filter((m) => m.size !== null && !Object.prototype.hasOwnProperty.call(budget, m.path) && (named === null || !named.has(m.path)))
+        .map((m) => m.path)
+        .sort();
+    const stillOver = checked.failures
+        .filter((f) => f.reason === REASONS.OVER_CAP && named !== null && !named.has(f.path))
+        .map((f) => ({ path: f.path, size: f.size, cap: f.cap }));
+    if (moved.length > 0 || added.length > 0) {
+        let ordered = next;
+        if (added.length > 0) {
+            // The existing keys keep the file's order; each added key goes before the
+            // first existing key that sorts after it, so a sorted file stays sorted
+            // and any other order is left as its author kept it.
+            const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+            const pending = added.map((a) => a.path).sort(cmp);
+            const addedSet = new Set(pending);
+            ordered = Object.create(null);
+            for (const key of Object.keys(next)) {
+                if (addedSet.has(key)) continue;
+                while (pending.length > 0 && cmp(pending[0], key) < 0) {
+                    const k = pending.shift();
+                    ordered[k] = next[k];
+                }
+                ordered[key] = next[key];
+            }
+            for (const k of pending) ordered[k] = next[k];
+        }
+        const eol = res.text.includes('\r\n') ? '\r\n' : res.text.includes('\n') ? '\n' : '\r\n';
+        const indentMatch = res.text.match(/\n([ \t]+)"/);
+        const data = serializeBudget(ordered, eol, indentMatch ? indentMatch[1] : 4);
+        const tmp = target + '.' + process.pid + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
+        try {
+            fs.writeFileSync(tmp, data, { encoding: 'utf8', flag: 'wx' });
+        } catch (err) {
+            if (err && err.code === 'EEXIST') {
+                return { status: 'refused', detail: 'a temporary file already sits at ' + safePath(tmp) + ', left by another run or a dead one and not this run\'s to delete; remove it and run again' };
+            }
+            throw err;
+        }
+        try {
+            fs.renameSync(tmp, target);
+        } catch (err) {
+            try { fs.unlinkSync(tmp); } catch { /* the rename may already have consumed it */ }
+            throw err;
+        }
+    }
+    return { status: 'ok', moved, added, unchanged, outside, named: named !== null, unlisted, stillOver };
+}
+
+// A directory's real path, or the spelling given where the filesystem will not
+// resolve it, for a relative spelling taken against a path that is already real.
+function realPathOr(dir) {
+    try {
+        return fs.realpathSync(dir);
+    } catch {
+        return dir;
+    }
+}
+
+// The budget as check() validated it against the budget as this run read it:
+// the same keys carrying the same caps, in any order.
+function sameBudget(a, b) {
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    return keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && b[key] === a[key]);
+}
+
 const USAGE = [
-    'usage: node kit-size.js <check|report|init> [--repo <dir>] [--budget <file>]',
+    'usage: node kit-size.js <check|report|init|sync> [--repo <dir>] [--budget <file>] [<path>...]',
     '  check   every classified file against its cap, plus the coverage control (exit 1 on any failure)',
     '  report  one line per file whose size moved since HEAD, plus every untracked file under a measured root and every tracked path the pathspec listing missed, then totals',
-    '  init    write the budget from current sizes, refusing an existing one'
+    '  init    write the budget from current sizes, refusing an existing one',
+    '  sync    move every existing cap to its file\'s current size, in both directions, over a clean tree, or only the caps of the paths named after it, adding a first cap for a named path the budget lacks, tracked or not yet added; an unnamed measured path the budget lacks is named, never added, and the run exits 1'
 ].join('\n');
 
 // Nothing past the verb is ignored. A flag whose value is missing or is itself
 // another flag, a token that looks like a flag and is not one of the two, and a
-// second bare argument are all refusals rather than a fall-back to the default
+// second bare argument under any verb but sync, which takes paths after it, are
+// all refusals rather than a fall-back to the default
 // subject: a reading silently taken against this checkout while the operator
 // believes they named another repository is a wrong-subject figure with no signal,
 // and this output gets quoted into durable records. The unknown-flag refusal is
@@ -1669,7 +1938,7 @@ const USAGE = [
 // `invalid` names the offending token and `invalidReason` says which refusal
 // fired, so the message a reader gets is about their actual mistake.
 function parseArgs(argv) {
-    const args = { verb: null, repo: null, budget: null, invalid: null, invalidReason: null };
+    const args = { verb: null, repo: null, budget: null, paths: [], invalid: null, invalidReason: null };
     const refuse = (token, reason) => {
         args.invalid = token;
         args.invalidReason = reason;
@@ -1692,6 +1961,7 @@ function parseArgs(argv) {
         }
         if (a.startsWith('-')) return refuse(a, 'unknown-flag');
         if (args.verb === null) args.verb = a;
+        else if (args.verb === 'sync') args.paths.push(a);
         else return refuse(a, 'extra-argument');
     }
     return args;
@@ -1706,7 +1976,7 @@ function invalidMessage(args) {
         return safePath(args.invalid) + ' is not a flag this tool takes; only --repo and --budget are, each with a separate value';
     }
     if (args.invalidReason === 'extra-argument') {
-        return safePath(args.invalid) + ' is a second bare argument, and this tool takes one verb';
+        return safePath(args.invalid) + ' is a second bare argument, and this tool takes one verb; only sync takes paths after it';
     }
     return safePath(args.invalid) + ' needs a value';
 }
@@ -1715,11 +1985,15 @@ function invalidMessage(args) {
 // and 2 for a run that could not produce a reading at all (the hooks library the
 // require did not return, git silent, the budget missing or outside the checkout or
 // listing a path twice or holding no cap at all, a corpus with nothing in it under
-// either reading verb or under init, no verb, an unknown verb, a flag with no value, a flag
+// either reading verb or under init or sync, no verb, an unknown verb, a flag with no value, a flag
 // given twice, an unknown flag, a second bare argument, a --repo that is not a
 // repository top level, a reading that measured nothing, an init that refused). A
 // git failure never becomes a zero-size reading, because a zero passes every cap,
-// and neither does an empty corpus, under either reading verb.
+// and neither does an empty corpus, under either reading verb. Exit 1 is the
+// ratchet's own, and sync returns it where the budget it leaves still fails
+// check: a measured tracked path with no cap, or an entry outside the named set
+// still over its cap, so the code never says a red budget is green; any other
+// failure check reports under sync is a refusal at exit 2 rather than a rewrite.
 function main() {
     if (libs === null) {
         process.stderr.write('kit-size: ' + libsDetail + '\n');
@@ -1744,12 +2018,12 @@ function main() {
     // usage block tells a reader what the tool takes and not which of their tokens
     // it would not take, and a typo and a forgotten verb are different mistakes.
     if (args.verb === null) {
-        refuseArg('no verb was given, and this tool takes one of check, report or init\n' + USAGE);
+        refuseArg('no verb was given, and this tool takes one of check, report, init or sync\n' + USAGE);
         process.exitCode = 2;
         return;
     }
-    if (args.verb !== 'check' && args.verb !== 'report' && args.verb !== 'init') {
-        refuseArg(safePath(args.verb) + ' is not a verb this tool takes; only check, report and init are\n' + USAGE);
+    if (args.verb !== 'check' && args.verb !== 'report' && args.verb !== 'init' && args.verb !== 'sync') {
+        refuseArg(safePath(args.verb) + ' is not a verb this tool takes; only check, report, init and sync are\n' + USAGE);
         process.exitCode = 2;
         return;
     }
@@ -1791,15 +2065,18 @@ function main() {
     // Containment binds the default budget path, which sits inside the repository
     // under measurement, and not one the operator named for a reading: a budget
     // elsewhere is a subject they chose, while a symlink at the default path would
-    // silently source every cap from outside the reviewed checkout. The write takes
-    // containment against the repository whatever --budget says, because a write is
-    // not a reading: initBudget's own comment carries that reasoning.
-    const containRoot = args.budget ? null : repoDir;
+    // silently source every cap from outside the reviewed checkout. The two write
+    // verbs take containment against the repository whatever --budget says, because
+    // a write is not a reading: initBudget's own comment carries that reasoning, and
+    // sync follows it.
+    const writes = args.verb === 'init' || args.verb === 'sync';
+    const containRoot = args.budget && !writes ? null : repoDir;
     let result;
     try {
         if (args.verb === 'check') result = check(repoDir, budgetFile, containRoot);
         else if (args.verb === 'report') result = report(repoDir, budgetFile, containRoot);
-        else result = initBudget(repoDir, budgetFile, repoDir);
+        else if (args.verb === 'sync') result = sync(repoDir, budgetFile, containRoot, args.paths);
+        else result = initBudget(repoDir, budgetFile, containRoot);
     } catch (err) {
         // Screened like every other path this tool prints, and this channel needs it:
         // a write error's own text embeds the absolute target path the OS reported,
@@ -1821,7 +2098,7 @@ function main() {
         out('wrote ' + result.count + ' caps to ' + safePath(budgetFile));
         return;
     }
-    // The subject line, which both reading verbs print first. Without it a reading
+    // The subject line, which the reading verbs and sync print first. Without it a reading
     // says what it measured and never which repository it measured, and the default
     // subject is derived from where this script sits: under a marketplace install
     // that is the marketplace's own clone of this repository, so a call with no
@@ -1841,6 +2118,43 @@ function main() {
     out('repository: ' + safePath(path.basename(repoDir) || repoDir));
     if (args.verb === 'report') {
         out(result.lines.join('\n'));
+        return;
+    }
+    if (args.verb === 'sync') {
+        const movedShown = boundList(result.moved);
+        for (const m of movedShown.shown) {
+            out(m.direction + ': ' + safePath(m.path) + ': ' + safePath(String(m.from)) + ' to ' + m.to);
+        }
+        if (movedShown.omitted) out(boundNotice('moved cap', movedShown.omitted));
+        const addedShown = boundList(result.added);
+        for (const a of addedShown.shown) {
+            out('added: ' + safePath(a.path) + ': a first cap of ' + a.to + ', for a path named on the command line that the budget lacked');
+        }
+        if (addedShown.omitted) out(boundNotice('added cap', addedShown.omitted));
+        out('unchanged: ' + result.unchanged + ' entries left at their current size');
+        if (result.named) {
+            out('outside the named paths: ' + result.outside + ' entries left as they stand');
+        }
+        const unlistedShown = boundList(result.unlisted);
+        for (const p of unlistedShown.shown) {
+            out('unlisted: ' + safePath(p) + ': tracked and measured, and the budget holds no cap for it');
+        }
+        if (unlistedShown.omitted) out(boundNotice('unlisted path', unlistedShown.omitted));
+        const overShown = boundList(result.stillOver);
+        for (const o of overShown.shown) {
+            out('still over cap: ' + safePath(o.path) + ': ' + o.size + ' against a cap of ' + o.cap);
+        }
+        if (overShown.omitted) out(boundNotice('still-over-cap entry', overShown.omitted));
+        // Where the ratchet still reds on the budget as left, the code says so: a
+        // caller reading the exit code as the verdict must not take it for green.
+        if (result.unlisted.length > 0) {
+            out(result.unlisted.length + ' measured path' + (result.unlisted.length === 1 ? ' has' : 's have') + ' no cap, so the budget as written still fails check');
+            process.exitCode = 1;
+        }
+        if (result.stillOver.length > 0) {
+            out(result.stillOver.length + (result.stillOver.length === 1 ? ' entry is' : ' entries are') + ' still over ' + (result.stillOver.length === 1 ? 'its' : 'their') + ' cap, so the budget as written still fails check');
+            process.exitCode = 1;
+        }
         return;
     }
     for (const f of result.failures) {
@@ -1906,7 +2220,9 @@ module.exports = {
     invalidMessage,
     budgetFrom,
     serializeBudget,
-    initBudget
+    sameBudget,
+    initBudget,
+    sync
 };
 
 if (require.main === module) main();

@@ -1279,13 +1279,13 @@ test('a --repo or --budget with no value refuses rather than falling back to the
     // the refusals above are the bad arguments speaking rather than the parser
     // refusing everything.
     assert.deepStrictEqual(kit.parseArgs(['check', '--repo', 'D:/x', '--budget', 'b.json']),
-        { verb: 'check', repo: 'D:/x', budget: 'b.json', invalid: null, invalidReason: null });
+        { verb: 'check', repo: 'D:/x', budget: 'b.json', paths: [], invalid: null, invalidReason: null });
     assert.deepStrictEqual(kit.parseArgs(['check', '--repo=D:/x']),
-        { verb: 'check', repo: null, budget: null, invalid: '--repo=D:/x', invalidReason: 'unknown-flag' });
+        { verb: 'check', repo: null, budget: null, paths: [], invalid: '--repo=D:/x', invalidReason: 'unknown-flag' });
     assert.deepStrictEqual(kit.parseArgs(['check', 'report']),
-        { verb: 'check', repo: null, budget: null, invalid: 'report', invalidReason: 'extra-argument' });
+        { verb: 'check', repo: null, budget: null, paths: [], invalid: 'report', invalidReason: 'extra-argument' });
     assert.deepStrictEqual(kit.parseArgs(['check', '--repo', 'D:/x', '--repo', 'D:/y']),
-        { verb: 'check', repo: 'D:/x', budget: null, invalid: '--repo', invalidReason: 'repeated-flag' });
+        { verb: 'check', repo: 'D:/x', budget: null, paths: [], invalid: '--repo', invalidReason: 'repeated-flag' });
 });
 
 // The worktree read is a repository-supplied file read, so it runs through the
@@ -1808,11 +1808,11 @@ test('a spawned script reads its git configuration from the home the environment
 test('an unknown verb and a missing verb each name what was wrong', () => {
     const unknown = runScript(['chekc', '--repo', REPO]);
     assert.strictEqual(unknown.status, 2);
-    assert.match(unknown.stderr, /chekc is not a verb this tool takes; only check, report and init are/);
+    assert.match(unknown.stderr, /chekc is not a verb this tool takes; only check, report, init and sync are/);
     assert.match(unknown.stderr, /usage: node kit-size\.js/);
     const none = runScript([]);
     assert.strictEqual(none.status, 2);
-    assert.match(none.stderr, /no verb was given, and this tool takes one of check, report or init/);
+    assert.match(none.stderr, /no verb was given, and this tool takes one of check, report, init or sync/);
     assert.match(none.stderr, /usage: node kit-size\.js/);
     // The control, withheld from both refusals by naming a verb: a real verb against a
     // real repository produces a reading, so the refusals above are the verb check
@@ -1978,13 +1978,13 @@ test('a payload missing the hooks library refuses with a reading it could not ta
             assert.throws(() => lonely[name](), /did not return one/,
                 'a library-less entry point refuses rather than dereferencing null: ' + name);
         }
-        // The three verbs are not in that class, since none dereferences the library
-        // itself, and they are the entry points the gate calls: each reaches the class
-        // one call down and carries the refusal out.
+        // Each verb carries the refusal out, whether it reaches the class one call
+        // down or guards itself.
         for (const call of [
             () => lonely.check(REPO, BUDGET, REPO),
             () => lonely.report(REPO, BUDGET, REPO),
-            () => lonely.initBudget(REPO, BUDGET, REPO)
+            () => lonely.initBudget(REPO, BUDGET, REPO),
+            () => lonely.sync(REPO, BUDGET, REPO, [])
         ]) {
             assert.throws(call, /did not return one/, 'a library-less verb refuses rather than dereferencing null');
         }
@@ -2986,4 +2986,464 @@ test('an argument this tool will not take is refused with the account name out o
     } finally {
         rmDir(parent);
     }
+});
+
+// The sync verb: with no path named it moves every existing cap to its file's
+// current size, in both directions, over a clean tree. A cap raised or lowered
+// is printed with its direction, an untouched entry is counted rather than
+// named, and an unlisted measured path is named without being added.
+test('sync raises a cap below its file and lowers one above it, and counts what did not move', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        // One word over the cap init wrote (4), so this entry needs a raise.
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        // Two words under the cap init wrote (3), so this entry needs a lowering.
+        write(dir, 'home/claude-kit-doctrine.md', 'doctrine.\n');
+        // Committed, because the bare form is an audit's over a clean tree.
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'grow and shrink']);
+        const synced = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, synced.stdout);
+        assert.match(synced.stdout, /^lowered: home\/claude-kit-doctrine\.md: 3 to 1$/m, synced.stdout);
+        // Four entries never moved: the three other curated files and the test file.
+        assert.match(synced.stdout, /^unchanged: 4 entries left at their current size$/m, synced.stdout);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        const budget = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+        assert.strictEqual(budget['plugins/claude-kit/skills/alpha/SKILL.md'], 5);
+        assert.strictEqual(budget['home/claude-kit-doctrine.md'], 1);
+        assert.ok(fs.readFileSync(budgetPath, 'utf8').includes('\r\n'), 'the CRLF budget init wrote stays CRLF');
+        // The moved caps hold: a clean check over the rewritten budget is green.
+        assert.strictEqual(runScript(['check', '--repo', dir]).status, 0);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// A sync that moves nothing leaves the file's bytes exactly as they were.
+test('a sync that moves nothing leaves the budget file byte-identical', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        const before = fs.readFileSync(budgetPath);
+        const synced = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^unchanged: 6 entries left at their current size$/m, synced.stdout);
+        const after = fs.readFileSync(budgetPath);
+        assert.strictEqual(Buffer.compare(before, after), 0, 'a no-op sync must not rewrite the file');
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// A measured tracked path the budget lacks is named, never added, unless the
+// command line names it (the named-paths case below), and the run exits 1 after
+// its write, since check still reds on the missing cap and a caller reading the
+// exit code as the verdict would otherwise commit a red budget. A cap moves in
+// the same run so the rewrite actually happens: with nothing moved the write is
+// skipped, and the assertion would pass over a file sync never touched.
+test('sync names a measured tracked path the budget lacks, without adding it, and exits 1 after its write', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        write(dir, 'test/two.test.js', "test('c', () => {});\n");
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'a new test file and a grown skill']);
+        const synced = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(synced.status, 1, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, 'test setup: the rewrite ran: ' + synced.stdout);
+        assert.match(synced.stdout, /^unlisted: test\/two\.test\.js: tracked and measured, and the budget holds no cap for it$/m, synced.stdout);
+        assert.match(synced.stdout, /^1 measured path has no cap, so the budget as written still fails check$/m, synced.stdout);
+        const budget = JSON.parse(fs.readFileSync(path.join(dir, 'test', 'size-budget.json'), 'utf8'));
+        assert.strictEqual(budget['plugins/claude-kit/skills/alpha/SKILL.md'], 5, 'the write landed before the exit code was set');
+        assert.strictEqual(Object.prototype.hasOwnProperty.call(budget, 'test/two.test.js'), false,
+            'sync names an unlisted path rather than adding a cap for it');
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The write is bound to the repository whatever --budget says, the rule init
+// states: a budget named outside the checkout is refused before a byte moves,
+// where the reading verbs read it as a subject the operator chose.
+test('sync refuses a budget outside the repository and leaves it untouched', () => {
+    const { parent, dir } = makeNestedFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        const outside = path.join(parent, 'elsewhere.json');
+        fs.writeFileSync(outside, kit.serializeBudget({ 'test/one.test.js': 1 }), 'utf8');
+        const before = fs.readFileSync(outside);
+        const res = runScript(['sync', '--repo', dir, '--budget', outside]);
+        assert.strictEqual(res.status, 2, res.stdout + res.stderr);
+        assert.match(res.stderr, /does not resolve inside/, res.stderr);
+        assert.strictEqual(Buffer.compare(before, fs.readFileSync(outside)), 0, 'the outside file must not be rewritten');
+        // The control: the same path handed to check is a reading, taken rather than refused.
+        const read = runScript(['check', '--repo', dir, '--budget', outside]);
+        assert.notStrictEqual(read.status, 2, 'test setup: check reads the outside budget rather than refusing it: ' + read.stderr);
+    } finally {
+        rmDir(parent);
+    }
+});
+
+// A failure check reports that a cap move cannot answer refuses the rewrite,
+// here a cap over a file the classifier no longer reaches: proceeding would
+// print a clean move list over a budget the next check still reds on.
+test('sync refuses to rewrite over a failure that is neither an over-cap nor a missing cap', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        const budget = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+        budget['plugins/claude-kit/skills/gone/SKILL.md'] = 3;
+        fs.writeFileSync(budgetPath, kit.serializeBudget(budget), 'utf8');
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        const before = fs.readFileSync(budgetPath);
+        const res = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(res.status, 2, res.stdout + res.stderr);
+        assert.match(res.stderr, /stale-entry plugins\/claude-kit\/skills\/gone\/SKILL\.md/, res.stderr);
+        assert.strictEqual(Buffer.compare(before, fs.readFileSync(budgetPath)), 0, 'a refused sync must not rewrite the budget');
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The rewrite keeps the file's own shape: a budget kept with LF endings, a
+// two-space indent and keys in an order of its author's choosing comes back
+// with the moved cap and nothing else about it changed. The CRLF control sits
+// in the first sync case, over the file init wrote.
+test('a moving sync preserves the budget file\'s line endings, indent and key order', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        const initial = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+        const reversed = {};
+        for (const key of Object.keys(initial).reverse()) reversed[key] = initial[key];
+        fs.writeFileSync(budgetPath, JSON.stringify(reversed, null, 2) + '\n', 'utf8');
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'an LF budget and a grown skill']);
+        const synced = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        const text = fs.readFileSync(budgetPath, 'utf8');
+        assert.ok(!text.includes('\r'), 'an LF budget stays LF');
+        assert.match(text, /^\{\n  "/, 'a two-space indent stays two spaces');
+        assert.deepStrictEqual(Object.keys(JSON.parse(text)), Object.keys(reversed), 'key order is the file\'s own');
+        assert.strictEqual(JSON.parse(text)['plugins/claude-kit/skills/alpha/SKILL.md'], 5);
+        // An indent past ten columns, which a serializer leaning on JSON.stringify's
+        // space argument would silently cut to ten.
+        fs.writeFileSync(budgetPath, text.replace(/\n  "/g, '\n            "'), 'utf8');
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'a twelve-space budget']);
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more still.\n');
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'the skill grown again']);
+        assert.strictEqual(runScript(['sync', '--repo', dir]).status, 0);
+        const wide = fs.readFileSync(budgetPath, 'utf8');
+        assert.match(wide, /^\{\n {12}"/, 'a twelve-space indent stays twelve spaces');
+        assert.strictEqual(JSON.parse(wide)['plugins/claude-kit/skills/alpha/SKILL.md'], 6);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The writing-skills bullet ships a runnable invocation of this script, and a
+// shipped command that throws is the failure a path-only check leaves open: the
+// verb is resolved against the module's own exports and each hyphen-led token
+// is put through the parser the script runs, as the Delta field's pin in
+// test/doctrine-parity.test.js does for the Chapter template.
+test('the writing-skills ledger bullet names a sync verb the script exports and flags its parser takes', () => {
+    const skill = fs.readFileSync(path.join(REPO, 'plugins', 'claude-kit', 'skills', 'writing-skills', 'SKILL.md'), 'utf8');
+    const bullet = skill.split(/\r?\n/).filter((l) => l.includes('ledger rather than a ceiling'));
+    assert.strictEqual(bullet.length, 1, 'expected exactly one ledger bullet in writing-skills');
+    const invocation = /`([^`]*kit-size\.js[^`]*)`/.exec(bullet[0]);
+    assert.ok(invocation, 'the ledger bullet carries a backticked kit-size.js invocation');
+    const verb = /kit-size\.js\s+([a-z-]+)/.exec(invocation[1]);
+    assert.ok(verb, 'the invocation names a verb beside the script path');
+    assert.ok(Object.prototype.hasOwnProperty.call(kit, verb[1]) && typeof kit[verb[1]] === 'function',
+        'the size reader exports no ' + verb[1] + ' verb, so the bullet ships an invocation that fails for whoever follows it');
+    const hyphenTokens = invocation[1].split(/\s+/).filter((token) => /^-[A-Za-z-]/.test(token));
+    assert.ok(hyphenTokens.length > 0, 'the invocation carries at least one flag, so the parser leg reads something');
+    for (const flag of hyphenTokens) {
+        const parsed = kit.parseArgs([verb[1], flag, 'x']);
+        assert.strictEqual(parsed.invalid, null, 'the parser refuses ' + flag + ' (' + parsed.invalidReason + '), which the bullet\'s own invocation passes');
+    }
+});
+
+// Paths named after the verb scope the move: the named files' caps move, every
+// other entry is left as it stands and counted, and a named path the budget
+// lacks gets its first cap, since init refuses an existing budget and a new
+// curated file has no other command that caps it.
+test('sync with paths named moves those caps alone and adds a first cap for a named path the budget lacks', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        write(dir, 'home/claude-kit-doctrine.md', 'doctrine.\n');
+        write(dir, 'test/two.test.js', "test('c', () => {});\n");
+        git(dir, ['add', 'test/two.test.js']);
+        const synced = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/alpha/SKILL.md', 'test/two.test.js']);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, synced.stdout);
+        assert.match(synced.stdout, /^added: test\/two\.test\.js: a first cap of 1, /m, synced.stdout);
+        assert.doesNotMatch(synced.stdout, /^lowered: /m, 'the unnamed doctrine file\'s cap does not move: ' + synced.stdout);
+        assert.match(synced.stdout, /^unchanged: 0 entries left at their current size$/m, synced.stdout);
+        assert.match(synced.stdout, /^outside the named paths: 5 entries left as they stand$/m, synced.stdout);
+        const budget = JSON.parse(fs.readFileSync(path.join(dir, 'test', 'size-budget.json'), 'utf8'));
+        assert.strictEqual(budget['plugins/claude-kit/skills/alpha/SKILL.md'], 5);
+        assert.strictEqual(budget['home/claude-kit-doctrine.md'], 3, 'the unnamed entry keeps its cap');
+        assert.strictEqual(budget['test/two.test.js'], 1);
+        // A named path nothing measures is refused rather than capped at nothing.
+        const refused = runScript(['sync', '--repo', dir, 'README.md']);
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /README\.md is not a measured file under a root/, refused.stderr);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// A cap whose file git reports as untracked is pending, held to its cap from
+// worktree content by check, and it moves here like any other when named: the
+// file the ratchet reds on is not one sync skips in silence.
+test('sync moves the cap of a pending, untracked file when the file is named', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        write(dir, 'plugins/claude-kit/skills/beta/SKILL.md', '---\nname: beta\n---\n\nbeta body words here.\n');
+        const budget = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+        budget['plugins/claude-kit/skills/beta/SKILL.md'] = 1;
+        fs.writeFileSync(budgetPath, kit.serializeBudget(budget), 'utf8');
+        const synced = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/beta/SKILL.md']);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^raised: plugins\/claude-kit\/skills\/beta\/SKILL\.md: 1 to 4$/m, synced.stdout);
+        assert.match(synced.stdout, /^outside the named paths: 6 entries left as they stand$/m, synced.stdout);
+        assert.strictEqual(JSON.parse(fs.readFileSync(budgetPath, 'utf8'))['plugins/claude-kit/skills/beta/SKILL.md'], 4);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The bare form is an audit's over a clean tree: where a cap it would move
+// belongs to a file differing from HEAD, it refuses before writing, because on
+// a shared checkout a peer's uncommitted growth would otherwise land as a raised
+// cap in this session's change and never ride in a diff as the raise it is. The
+// named form over the same tree is the one the ledger bullet prescribes, and it
+// proceeds.
+test('the bare sync form refuses over a moved file that differs from HEAD, and the named form proceeds', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        git(dir, ['add', 'test/size-budget.json']);
+        git(dir, ['commit', '-q', '-m', 'the budget, so the file guard is the one that fires']);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        const before = fs.readFileSync(budgetPath);
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        const refused = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /differ from HEAD/, refused.stderr);
+        assert.match(refused.stderr, /plugins\/claude-kit\/skills\/alpha\/SKILL\.md/, refused.stderr);
+        assert.strictEqual(Buffer.compare(before, fs.readFileSync(budgetPath)), 0, 'a refused sync must not rewrite the budget');
+        const named = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/alpha/SKILL.md']);
+        assert.strictEqual(named.status, 0, named.stdout + named.stderr);
+        assert.match(named.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, named.stdout);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// A named path is resolved against the repository before it is matched, so the
+// spellings a shell hands over (absolute, backslashed, ./-prefixed) all name the
+// file the budget keys, and one that resolves outside the repository is refused
+// as outside rather than as unmeasured.
+test('sync resolves a named path in any spelling inside the repository and refuses one outside it', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        const absolute = runScript(['sync', '--repo', dir, path.join(dir, 'plugins', 'claude-kit', 'skills', 'alpha', 'SKILL.md')]);
+        assert.strictEqual(absolute.status, 0, absolute.stdout + absolute.stderr);
+        assert.match(absolute.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, absolute.stdout);
+        if (process.platform === 'win32') {
+            // A backslashed spelling is the shell's own on Windows; on POSIX a backslash is a filename character and names a different file.
+            write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more still.\n');
+            const backslashed = runScript(['sync', '--repo', dir, 'plugins\\claude-kit\\skills\\alpha\\SKILL.md']);
+            assert.strictEqual(backslashed.status, 0, backslashed.stdout + backslashed.stderr);
+            assert.match(backslashed.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 5 to 6$/m, backslashed.stdout);
+        }
+        const outside = runScript(['sync', '--repo', dir, '../outside.md']);
+        assert.strictEqual(outside.status, 2, outside.stdout + outside.stderr);
+        assert.match(outside.stderr, /outside the repository/, outside.stderr);
+        assert.doesNotMatch(outside.stderr, /not a measured file/, 'an outside path is refused as outside, not as unmeasured: ' + outside.stderr);
+        const excluded = runScript(['sync', '--repo', dir, 'test/size-budget.json']);
+        assert.strictEqual(excluded.status, 2, excluded.stdout + excluded.stderr);
+        assert.match(excluded.stderr, /is on the exclusion list/, 'the budget file is refused as excluded, not as unmeasured: ' + excluded.stderr);
+        const control = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/alpha/SKILL.md\n']);
+        assert.strictEqual(control.status, 2, control.stdout + control.stderr);
+        assert.match(control.stderr, /control character/, control.stderr);
+        const empty = runScript(['sync', '--repo', dir, '']);
+        assert.strictEqual(empty.status, 2, empty.stdout + empty.stderr);
+        assert.match(empty.stderr, /an empty path names nothing to cap/, empty.stderr);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The commonest shape of a new curated file is one not yet added to git, and it
+// gets its first cap when named exactly as a tracked one does: the untracked
+// listing a measured shape reaches is admitted to the lookup. The added key is
+// placed in sorted order, so the budget keeps the key order init wrote.
+test('sync adds a first cap for a named file not yet added to git, in sorted key order', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        write(dir, 'plugins/claude-kit/skills/beta/SKILL.md', '---\nname: beta\n---\n\nbeta body words here.\n');
+        const synced = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/beta/SKILL.md']);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^added: plugins\/claude-kit\/skills\/beta\/SKILL\.md: a first cap of 4, /m, synced.stdout);
+        const keys = Object.keys(JSON.parse(fs.readFileSync(budgetPath, 'utf8')));
+        assert.deepStrictEqual(keys, keys.slice().sort(), 'the added key lands in sorted order: ' + keys.join(', '));
+        assert.ok(keys.includes('plugins/claude-kit/skills/beta/SKILL.md'));
+        // The new cap is pending until the file is added, and check holds the file to it.
+        assert.strictEqual(runScript(['check', '--repo', dir]).status, 0);
+        // A budget kept in another order keeps it: the added key goes before the first
+        // existing key that sorts after it, and nothing else moves.
+        const reversed = keys.slice().reverse();
+        const held = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+        const reorderedText = '{\n' + reversed.map((k, i) => '    ' + JSON.stringify(k) + ': ' + held[k] + (i < reversed.length - 1 ? ',' : '')).join('\n') + '\n}\n';
+        fs.writeFileSync(budgetPath, reorderedText, 'utf8');
+        const gamma = 'plugins/claude-kit/skills/gamma/SKILL.md';
+        write(dir, gamma, '---\nname: gamma\n---\n\ngamma body words.\n');
+        const again = runScript(['sync', '--repo', dir, gamma]);
+        assert.strictEqual(again.status, 0, again.stdout + again.stderr);
+        const after = Object.keys(JSON.parse(fs.readFileSync(budgetPath, 'utf8')));
+        assert.deepStrictEqual(after.filter((k) => k !== gamma), reversed, 'an add keeps the file\'s own key order: ' + after.join(', '));
+        const firstAfter = reversed.findIndex((k) => k > gamma);
+        assert.strictEqual(after.indexOf(gamma), firstAfter === -1 ? after.length - 1 : firstAfter, 'the added key sits before the first key sorting after it: ' + after.join(', '));
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The named form moves only what it is told to, so an entry outside the named set
+// can stay over its cap; the run then exits 1 and names it, since a caller reading
+// the exit code as the verdict must not take the rewritten budget for a green one.
+test('the named sync form exits 1 and names an entry still over its cap outside the named set', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        write(dir, 'home/claude-kit-doctrine.md', 'doctrine words here more.\n');
+        const synced = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/alpha/SKILL.md']);
+        assert.strictEqual(synced.status, 1, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, synced.stdout);
+        assert.match(synced.stdout, /^still over cap: home\/claude-kit-doctrine\.md: 4 against a cap of 3$/m, synced.stdout);
+        assert.match(synced.stdout, /^1 entry is still over its cap, so the budget as written still fails check$/m, synced.stdout);
+        const budget = JSON.parse(fs.readFileSync(path.join(dir, 'test', 'size-budget.json'), 'utf8'));
+        assert.strictEqual(budget['plugins/claude-kit/skills/alpha/SKILL.md'], 5, 'the named cap moved');
+        assert.strictEqual(budget['home/claude-kit-doctrine.md'], 3, 'the unnamed cap did not');
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The bare form overwrites the budget file, so that file is inside its own
+// clean-tree precondition: a tracked budget differing from HEAD is a peer's
+// uncommitted edit, and the bare form refuses rather than writing over it, while
+// the named form, which copies every unnamed entry through as read, proceeds.
+test('the bare sync form refuses over a budget file that itself differs from HEAD, and the named form proceeds', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'the budget']);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        const edited = fs.readFileSync(budgetPath, 'utf8').replace('"plugins/claude-kit/skills/alpha/SKILL.md": 4', '"plugins/claude-kit/skills/alpha/SKILL.md": 3');
+        assert.notStrictEqual(edited, fs.readFileSync(budgetPath, 'utf8'), 'test setup: the hand edit landed');
+        fs.writeFileSync(budgetPath, edited, 'utf8');
+        const refused = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /the budget file itself differs from HEAD/, refused.stderr);
+        assert.strictEqual(fs.readFileSync(budgetPath, 'utf8'), edited, 'a refused sync must not rewrite the budget');
+        const named = runScript(['sync', '--repo', dir, 'plugins/claude-kit/skills/alpha/SKILL.md']);
+        assert.strictEqual(named.status, 0, named.stdout + named.stderr);
+        assert.match(named.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 3 to 4$/m, named.stdout);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The budget file is inside the bare form's precondition in every state git can
+// report for it: untracked (the state init leaves), and at a --budget outside
+// the measured roots, which the root-scoped diff listing never reaches.
+test('the bare sync form refuses over an untracked budget file, at the default path, at a --budget outside the roots and at one git ignores', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        write(dir, 'plugins/claude-kit/skills/alpha/SKILL.md', '---\nname: alpha\n---\n\nalpha body words here more.\n');
+        git(dir, ['add', 'plugins/claude-kit/skills/alpha/SKILL.md']);
+        git(dir, ['commit', '-q', '-m', 'the grown file, the budget still untracked']);
+        const refused = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /not yet added to git/, refused.stderr);
+        assert.match(refused.stderr, /test\/size-budget\.json/, refused.stderr);
+        const budgetPath = path.join(dir, 'test', 'size-budget.json');
+        fs.copyFileSync(budgetPath, path.join(dir, 'caps.json'));
+        const elsewhere = runScript(['sync', '--repo', dir, '--budget', path.join(dir, 'caps.json')]);
+        assert.strictEqual(elsewhere.status, 2, elsewhere.stdout + elsewhere.stderr);
+        assert.match(elsewhere.stderr, /caps\.json/, elsewhere.stderr);
+        assert.match(elsewhere.stderr, /not yet added to git/, elsewhere.stderr);
+        write(dir, '.gitignore', 'scratch/\n');
+        git(dir, ['add', '.gitignore']);
+        git(dir, ['commit', '-q', '-m', 'an ignored directory']);
+        write(dir, 'scratch/caps.json', fs.readFileSync(budgetPath, 'utf8'));
+        const ignored = runScript(['sync', '--repo', dir, '--budget', path.join(dir, 'scratch', 'caps.json')]);
+        assert.strictEqual(ignored.status, 2, 'a budget git ignores is not yet added either: ' + ignored.stdout + ignored.stderr);
+        assert.match(ignored.stderr, /scratch\/caps\.json/, ignored.stderr);
+        assert.match(ignored.stderr, /not yet added to git/, ignored.stderr);
+        git(dir, ['add', 'test/size-budget.json']);
+        git(dir, ['commit', '-q', '-m', 'the budget']);
+        const synced = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(synced.status, 0, synced.stdout + synced.stderr);
+        assert.match(synced.stdout, /^raised: plugins\/claude-kit\/skills\/alpha\/SKILL\.md: 4 to 5$/m, synced.stdout);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The other half of the bare form's guard: a cap whose file git reports as
+// untracked is pending, and the bare form refuses over it exactly as over a
+// tracked file differing from HEAD, since its content is uncommitted either way.
+test('the bare sync form refuses over a pending file whose cap would move', () => {
+    const dir = makeFixtureRepo();
+    try {
+        assert.strictEqual(runScript(['init', '--repo', dir]).status, 0);
+        git(dir, ['add', '-A']);
+        git(dir, ['commit', '-q', '-m', 'the budget']);
+        const beta = 'plugins/claude-kit/skills/beta/SKILL.md';
+        write(dir, beta, '---\nname: beta\n---\n\nbeta body words here.\n');
+        assert.strictEqual(runScript(['sync', '--repo', dir, beta]).status, 0, 'test setup: the pending cap was added');
+        git(dir, ['add', 'test/size-budget.json']);
+        git(dir, ['commit', '-q', '-m', 'a pending cap, its file still untracked']);
+        write(dir, beta, '---\nname: beta\n---\n\nbeta body words here more.\n');
+        const refused = runScript(['sync', '--repo', dir]);
+        assert.strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+        assert.match(refused.stderr, /not yet added to git/, refused.stderr);
+        assert.match(refused.stderr, /plugins\/claude-kit\/skills\/beta\/SKILL\.md/, refused.stderr);
+    } finally {
+        rmDir(dir);
+    }
+});
+
+// The comparison that refuses a budget changed under the run: same keys, same
+// caps, in any order, and a difference in either direction is seen.
+test('sameBudget sees a missing key, an extra key and a moved cap, and ignores key order', () => {
+    assert.strictEqual(kit.sameBudget({ a: 1, b: 2 }, { b: 2, a: 1 }), true);
+    assert.strictEqual(kit.sameBudget({ a: 1, b: 2 }, { a: 1 }), false);
+    assert.strictEqual(kit.sameBudget({ a: 1 }, { a: 1, b: 2 }), false);
+    assert.strictEqual(kit.sameBudget({ a: 1, b: 2 }, { a: 1, b: 3 }), false);
 });

@@ -33,7 +33,7 @@
     "plugins/claude-kit/skills/kit-goal/SKILL.md": 4897,
     "plugins/claude-kit/skills/memory-system/SKILL.md": 29055,
     "plugins/claude-kit/skills/operating-instructions/SKILL.md": 10733,
-    "plugins/claude-kit/skills/operating-instructions/references/ownership-map.md": 2177,
+    "plugins/claude-kit/skills/operating-instructions/references/ownership-map.md": 2221,
     "plugins/claude-kit/skills/park/SKILL.md": 6513,
     "plugins/claude-kit/skills/peer-sessions/SKILL.md": 11976,
     "plugins/claude-kit/skills/recap/SKILL.md": 3865,
@@ -46,7 +46,7 @@
     "plugins/claude-kit/skills/standing-watch/SKILL.md": 4011,
     "plugins/claude-kit/skills/systematic-debugging/SKILL.md": 647,
     "plugins/claude-kit/skills/testing-discipline/SKILL.md": 2868,
-    "plugins/claude-kit/skills/writing-skills/SKILL.md": 3278,
+    "plugins/claude-kit/skills/writing-skills/SKILL.md": 3459,
     "test/branch-reaper-nudge.test.js": 119,
     "test/chapter-boundary-nudge.test.js": 600,
     "test/compact-deferral-nudge.test.js": 2121,
@@ -114,6 +114,6 @@
     "test/session-start-plans.test.js": 489,
     "test/session-start-plugin-view.test.js": 594,
     "test/session-start-shared-checkout.test.js": 307,
-    "test/size-ratchet.test.js": 2989,
+    "test/size-ratchet.test.js": 3449,
     "test/stop-docs-hygiene.test.js": 275
 }

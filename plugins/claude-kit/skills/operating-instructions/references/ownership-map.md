@@ -4,7 +4,7 @@ Each moment the kit governs has one owning document. The owner states the rule w
 
 The doctrine's "Which text governs" section states the ranking this map serves: the harness, then the operator's live word, then a positional grant for its assigned scope, then the doctrine for principles and authorization scope, then the owning skill for mechanics, then every other surface as a pointer or a whole copy. The map answers the one question the ranking leaves open: which skill owns the moment.
 
-How to read a row: the moment is the situation a session is in; the owner is the document whose text is the rule there; the third column names the surfaces that point at the owner or carry a pinned copy, so a reader who met the rule somewhere else knows where the whole of it lives. "Doctrine" means the operating-instructions skill body and its mirror, which are one text. A hook named in the owner column is the mechanical enforcement of a rule the named prose owns.
+How to read a row: the moment is the situation a session is in; the owner is the document whose text is the rule there; the third column names the surfaces that point at the owner or carry a pinned copy, so a reader who met the rule somewhere else knows where the whole of it lives. "Doctrine" means the operating-instructions skill body and its mirror, which are one text. A hook, script or test named in the owner column is the mechanical enforcement of a rule the named prose owns.
 
 How to amend: a row changes when ownership moves, and the move lands in the same change as the prose that moves. A new skill adds its rows. A moment found governed by two documents with no stated precedence goes under Unowned or contested below, never silently into one owner's column, because assigning an owner is the operator's ruling.
 
@@ -91,6 +91,7 @@ How to amend: a row changes when ownership moves, and the move lands in the same
 | Capturing kit friction, the capture bar, the weekly pass, briefs | `kaizen` | doctrine (When the kit itself creates friction, capture it), `coordinator`, `role` |
 | Validating and repairing the machine's kit install | `kit-doctor` | `memory-system`, README |
 | Writing or amending a skill, a charter, the output style, or any curated prose the kit ships, and proving a wording change moves behavior | `writing-skills` | doctrine (Match a document's length to its job), `kaizen`, `docs/architecture.md` |
+| A file growing, and who moves its cap | `writing-skills` (The size budget is a ledger rather than a ceiling), enforced by `scripts/kit-size.js` and, at the repository root rather than the plugin root, `test/size-ratchet.test.js` | `docs/architecture.md` (the size-ratchet paragraph) |
 | The communication register: decision asks, the close-out status, the board recap | doctrine (Craft and communication; Write every decision ask to the client-briefing register) | the output style (a pinned copy of the register core) |
 | Shell encoding, background-run markers, readiness waits, and the harness's isolation screen | doctrine (Environment and tooling discipline) | the active shell's tool description (the specifics) |
 

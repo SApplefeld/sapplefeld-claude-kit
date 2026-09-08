@@ -923,12 +923,19 @@ function Get-MemorySyncDestinationLines {
 # ahead, so an in-sync or ahead-only store produces an empty diff by
 # construction and no lines here. Every string comes out of the store, so each
 # is sanitized like the installer's notes are.
+#
+# The classification is by path alone, so the pushing machine may be this one:
+# a commit this machine published, met by a local HEAD that has since moved
+# back (a reset during a repair, a store restored from backup or a snapshot, a
+# re-clone of an older state), reads exactly like a peer writing in. The remote
+# is correct in that case and the store is behind it, so the lines name both
+# repairs and leave the operator, who knows which state the box is in, to pick.
 function Get-MemorySyncInboundOwnLines {
     param([Parameter(Mandatory = $true)][hashtable]$Status)
     if (-not $Status.IsRepo -or -not $Status.IsOwnRepo -or $Status.Upstream -eq "") { return @() }
     $revUp = Invoke-MemorySyncGit -StoreRoot $Status.StoreRoot -Arguments @("rev-parse", "--verify", "@{upstream}")
     $upstreamSha = if ($revUp.Output.Count -gt 0) { ([string]$revUp.Output[-1]).Trim() } else { "" }
-    if ($revUp.Code -ne 0 -or $upstreamSha -notmatch '^[0-9a-f]{40,64}$') { return @() }
+    if ($revUp.Code -ne 0 -or $upstreamSha -cnotmatch $script:MemorySyncObjectIdPattern) { return @() }
     $machine = ""
     try { $machine = [string](Get-MemorySyncMachineName) } catch { $machine = "" }
     $found = Get-MemorySyncInboundForeignPaths -StoreRoot $Status.StoreRoot -Ref $upstreamSha -Machine $machine
@@ -939,7 +946,36 @@ function Get-MemorySyncInboundOwnLines {
     return @(
         ("The fetched commit " + (Get-SanitizedLine $upstreamSha 200) + " on " + (Get-SanitizedLine $Status.Upstream 200) +
             " writes " + $paths.Count + " path(s) inside this machine's own coordinator directory, which only this machine writes: " + $named),
-        "The sync refuses that intake rather than rebasing it, so the store stays gated until the remote is repaired: undo those paths on the machine that pushed them and push the correction."
+        ("The sync refuses that intake rather than rebasing it, so the store stays gated until one of two repairs is made, " +
+            "and which one depends on where those paths were written."),
+        ("If another machine wrote them, the correction is made on that machine by hand with git (commit the undo and push it directly): " +
+            "its own sync gate refuses to stage a write under this machine's coordinator directory, so the kit's channel cannot carry the fix."),
+        ("If this machine pushed them itself and its HEAD has since moved back (a reset, a restore from a backup or a snapshot, a re-clone of an older state), " +
+            "the remote is correct and the repair is local: bring HEAD back up to the upstream rather than changing the remote.")
+    )
+}
+
+# The report a machine name that reads blank earns, and the state it describes.
+# Neither direction of the sync can tell this machine's coordinator directory
+# from another's without the name, so the installer refuses every commit and the
+# runner refuses every intake, and the two states the runner can record (a
+# failed commit and an unproven read) name none of that.
+#
+# These lines carry a verdict rather than riding as detail. A store that commits
+# nothing and rebases nothing is a store not syncing at all, and the reports
+# below print detail under a summary line the operator reads as the verdict, so
+# a line saying so under a PASS would be the failure with a caption on it. The
+# reading is the installer's own (Get-MemorySyncMachineName), and it needs no
+# repository state, so it answers on a store with no upstream and no remote at
+# all: a blank name stops the sync whether or not the branch tracks anything.
+function Get-MemorySyncMachineNameLines {
+    $machine = ""
+    try { $machine = [string](Get-MemorySyncMachineName) } catch { $machine = "" }
+    if ($machine.Trim() -ne "") { return @() }
+    return @(
+        ("This machine's own name reads blank, so the sync can tell neither a staged nor an incoming coordinator path " +
+            "from another machine's: nothing is committed and nothing is rebased until the machine name resolves."),
+        "Fix: give this machine a host name the system resolves (the sync reads [System.Net.Dns]::GetHostName()), then re-run this check."
     )
 }
 
@@ -1011,10 +1047,17 @@ else {
                 # the one on disk now, not the one the attempt started from.
                 $syncStatus = Get-MemorySyncStatus -StoreRoot $claudeDir
                 $syncFailed = Get-MemorySyncReportLines $syncStatus
+                # A blank machine name is why the installer refuses every
+                # commit, so the remedy rides this refusal too. The reading is
+                # the installer's own and needs no repository state, and the
+                # function is called here rather than reading the tail variable
+                # the check-mode branches share, which is assigned further down
+                # and past this return path.
                 Report "FAIL" "Memory sync" (@($syncInstall.Notes | ForEach-Object { Get-SanitizedLine $_ 200 }) +
                     $syncFailed.Leaks +
                     $(if ($syncFailed.Leaks.Count -gt 0) { $syncFailed.Fixes } else { @() }) +
-                    $syncFailed.Unproven + $syncFailed.Context)
+                    $syncFailed.Unproven + $syncFailed.Context + (Get-MemorySyncMachineNameLines) +
+                    (Get-MemorySyncInboundOwnLines $syncStatus))
                 $syncReported = $true
             }
             else {
@@ -1048,7 +1091,14 @@ else {
         # runner's reason code alone cannot carry. An in-sync store produces no
         # lines, so nothing changes for a healthy report.
         $syncInboundOwn = Get-MemorySyncInboundOwnLines $syncStatus
-        $syncTail = $(if ($syncLeaks.Count -gt 0) { $syncReport.Fixes } else { @() }) + $syncReport.Unproven + $syncInboundOwn
+        # A blank machine name is the other finding this section carries, and
+        # unlike the inbound lines it sets a verdict: it rides the tail here so
+        # the FAIL branches below name it beside their own finding, and it has
+        # its own branch further down for the store that is otherwise healthy.
+        # A box whose name resolves produces no lines either way.
+        $syncMachineBlank = Get-MemorySyncMachineNameLines
+        $syncTail = $(if ($syncLeaks.Count -gt 0) { $syncReport.Fixes } else { @() }) + $syncReport.Unproven +
+            $syncInboundOwn + $syncMachineBlank
         # Notes from the installer quote paths and git output, so they carry
         # the same sanitization every other store-derived string does.
         $syncFixLines = @($syncFixNotes | ForEach-Object { Get-SanitizedLine $_ 200 })
@@ -1080,10 +1130,16 @@ else {
             ) + $syncLeaks + $syncTail)
         }
         elseif (-not $syncStatus.IsRepo) {
+            # The machine lines ride here because this branch's only advice is
+            # to re-run with -Fix, and a blank machine name is exactly what the
+            # installer that recipe invokes refuses on, so without them the
+            # operator is sent to a repair that cannot run. The reading needs
+            # no repository state, which is what lets it answer on a store root
+            # that is not a repository at all.
             Report "WARN" "Memory sync" (@(
                 "$claudeDir is not a git repository, so the memory store does not sync across machines.",
                 "Fix: re-run doctor with -Fix (initializes the repo with the gated allowlist and commits the memory tiers and the coordinator directory)."
-            ) + $syncReport.Context)
+            ) + $syncReport.Context + $syncMachineBlank)
         }
         elseif ($syncGaps.Count -gt 0) {
             # A missing or drifted allowlist is the other state in which the
@@ -1105,9 +1161,26 @@ else {
             # the operator reads before giving the store a remote, so an
             # unanswerable probe is a failure rather than a warning: a warning
             # exits 0 under a "healthy" summary line.
+            # The inbound lines and a blank machine name ride here too: an
+            # unanswerable probe is about the allowlist, an upstream writing
+            # this machine's own coordinator directory is about the remote, and
+            # a name that reads blank is about the box, so an operator hitting
+            # more than one needs each of them. The first is read from the
+            # repo's refs and HEAD and the second from the machine, neither of
+            # which the leak probes' failure disturbs.
             Report "FAIL" "Memory sync" (@(
                 "The allowlist matches on disk, but what this repository would actually publish is unverified."
-            ) + $syncReport.Unproven)
+            ) + $syncReport.Unproven + $syncInboundOwn + $syncMachineBlank)
+        }
+        elseif ($syncMachineBlank.Count -gt 0) {
+            # Everything about the allowlist reads clean, and the store still
+            # syncs nothing in either direction, so this is the last branch that
+            # can hold a finding before the healthy reports begin. It fails
+            # rather than warns for the reason the unproven branch above does: a
+            # warning exits 0 under a summary line, and the reports below this
+            # one end by handing the operator a push recipe for a store that
+            # cannot commit.
+            Report "FAIL" "Memory sync" ($syncFixLines + $syncMachineBlank + $syncInboundOwn)
         }
         else {
             $syncDetail = @(

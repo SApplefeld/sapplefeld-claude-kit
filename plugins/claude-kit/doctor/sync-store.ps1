@@ -64,13 +64,14 @@
 # Any entry there refuses the intake as inbound-foreign-write, since the whole-
 # tree screen cannot see which admitted paths a commit rewrites. Outbound the
 # same axis runs inside the installer, over the paths its add staged, and its
-# refusal is recorded here as outbound-foreign-write. The upstream is resolved to a fixed commit once, and that commit is what
-# the screen reads and the rebase replays onto, so a concurrent fetch cannot
-# advance the ref between the two. Only when every incoming entry is admitted
-# does the rebase run, and after it the whole bar is re-derived before the push,
-# so nothing that fails the re-check is published onward. A paused merge,
-# cherry-pick, revert, rebase, or `git am` in the store defers the whole run, so
-# no conflict markers are ever committed.
+# refusal is recorded here as outbound-foreign-write. The upstream is resolved
+# to a fixed commit once, and that commit is what the screen reads and the
+# rebase replays onto, so a concurrent fetch cannot advance the ref between the
+# two. Only when every incoming entry is admitted does the rebase run, and after
+# it the whole bar is re-derived before the push, so nothing that fails the
+# re-check is published onward. A paused merge, cherry-pick, revert, rebase, or
+# `git am` in the store defers the whole run, so no conflict markers are ever
+# committed.
 #
 # Single-flight: kit-sync.lock in the store root, created exclusively and
 # carrying the owner's process id and an ISO timestamp. A live lock is a
@@ -489,7 +490,7 @@ try {
         # Fail closed on anything that is not a real object id: a nonzero exit, a
         # blank line, or a git warning on the merged stream would otherwise let
         # a later `<value>...HEAD` read as 0/0 and a false converged 'ok'.
-        if ($upstreamSha -notmatch '^[0-9a-f]{40,64}$') {
+        if ($upstreamSha -cnotmatch $script:MemorySyncObjectIdPattern) {
             Write-SyncState -StoreRoot $StoreRoot -Result 'transient' -Reason 'unproven'
             exit 0
         }

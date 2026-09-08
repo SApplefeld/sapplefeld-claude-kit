@@ -45,6 +45,17 @@ $script:MemorySyncMarker = "# claude-kit memory sync allowlist."
 $script:MemorySyncOwnKey = "claudekit.memorysync"
 $script:MemorySyncOwnValue = "true"
 
+# What a real git object id looks like, in the two widths git writes (SHA-1 at
+# 40 hex characters, SHA-256 at 64) and in no width between them. Every
+# revision this script hands to git as an argument is matched against it first,
+# so a nonzero exit, an empty line, or git noise on the merged output stream
+# cannot become a revision argument.
+#
+# The anchor is \z rather than $, which in .NET also matches before a trailing
+# newline, and every match against this pattern is a -cmatch: git renders object
+# ids in lowercase hex, and PowerShell's default -match is case-insensitive.
+$script:MemorySyncObjectIdPattern = '^(?:[0-9a-f]{40}|[0-9a-f]{64})\z'
+
 # The file forms an admitted root holds, keyed on the prefix that root's block
 # in the ignore file takes. One set is defined per root and every surface that
 # needs one reads it from here, so git, the probes, and the merge attributes
@@ -368,9 +379,16 @@ function Test-MemorySyncPathAllowed {
 # os.hostname() returns on the platforms the kit runs, and the coordinator
 # directory contract names a machine's directory by that Node reading, so the
 # two runtimes must agree or a machine reads its own directory as another's.
-# $env:COMPUTERNAME is not the reading: it is Windows-only, it is an ordinary
-# environment variable a caller can set to any string, and a sync channel whose
-# machine axis a variable can redirect is no axis at all.
+# $env:COMPUTERNAME is not the reading: it is Windows-only, and every process
+# in a tree inherits whatever a parent set it to. GetHostName() is the narrower
+# reading rather than an unredirectable one: on Windows it returns
+# $env:_CLUSTER_NETWORK_NAME_ wherever that variable is set, and Node's
+# os.hostname() honours the same variable, so the two runtimes agree under it
+# and the parity this axis rests on holds either way. What the axis does not do
+# is authenticate a writer, which the plan's Approach states outright: a process
+# that controls this one's environment already has write access to the store
+# root and can write any coordinator file directly, so the axis narrows the sync
+# channel and never resists that actor.
 function Get-MemorySyncMachineName {
     return [System.Net.Dns]::GetHostName()
 }
@@ -549,6 +567,14 @@ function Invoke-MemorySyncGit {
 # deletion of this machine's board is a write to it), leaving out only the
 # unmerged and unknown states a two-commit diff does not produce.
 #
+# --no-renames is what makes that promise hold for a move. With git's default
+# rename detection on, a rename is one entry and --name-only prints its
+# destination alone, so an upstream commit moving this machine's board out to
+# any other path, which is a deletion of the board, would be read as a write to
+# the destination and nothing else. The R in the filter admits that single
+# entry rather than restoring the source path. Turned off, the move is a
+# deletion and an addition, and the deletion names the path this machine owns.
+#
 # The filtering happens here in PowerShell rather than through a git pathspec
 # on purpose: git folds a pathspec's case wherever core.ignorecase is set, so a
 # pathspec would make the machine comparison git's configuration rather than
@@ -568,18 +594,24 @@ function Get-MemorySyncInboundForeignPaths {
     )
     $answer = @{ Ok = $false; Paths = @() }
     if ($Machine.Trim() -eq "") { return $answer }
+    # The incoming ref is a caller's string reaching a git argument list, so it
+    # is held to the same object-id shape as the merge base this function
+    # resolves below, at the boundary rather than at the call sites: this is the
+    # one read both the runner and the doctor share, and a ref shaped like an
+    # option or a revision expression is not an answerable question here.
+    if ($Ref -cnotmatch $script:MemorySyncObjectIdPattern) { return $answer }
     $baseRes = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("merge-base", "HEAD", $Ref) -GitExe $GitExe
     $base = if ($baseRes.Output.Count -gt 0) { ([string]$baseRes.Output[-1]).Trim() } else { "" }
     # Fail closed on anything that is not a real object id, the same reading the
     # runner makes of the upstream sha: a nonzero exit, an empty line, or git
     # noise on the merged stream would otherwise become a revision argument.
-    if ($baseRes.Code -ne 0 -or $base -notmatch '^[0-9a-f]{40,64}$') { return $answer }
+    if ($baseRes.Code -ne 0 -or $base -cnotmatch $script:MemorySyncObjectIdPattern) { return $answer }
     # core.quotePath=false for the same reason every other path-reading probe
     # here asks for it: a path holding non-ASCII bytes arrives as itself rather
     # than octal-escaped inside double quotes, so an ordinary accented memory
     # file is read as the path it is.
     $diff = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @(
-        "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=ACDMRT", $base, $Ref, "--") -GitExe $GitExe
+        "-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "--diff-filter=ACDMRT", $base, $Ref, "--") -GitExe $GitExe
     if ($diff.Code -ne 0) { return $answer }
     $paths = @()
     foreach ($line in $diff.Output) {
@@ -1039,9 +1071,43 @@ function Install-MemorySyncRepo {
     # is what makes a fresh initialization no special case. Only the index is
     # ever restored: read-tree writes no working file, so nothing on disk is
     # touched by a refusal.
+    #
+    # The last line of the output, not the first: Invoke-MemorySyncGit returns
+    # stdout and stderr merged, so a git warning printed ahead of the tree id
+    # is the first line and the id is the last. The value is then held to the
+    # object-id shape, the same reading every other revision argument here
+    # takes, so noise that reached the last line cannot become a read-tree
+    # argument. A value that fails either test leaves $savedTree empty, which
+    # makes the closure below report that the staging could not be restored
+    # rather than claim a restore that did not happen.
     $savedTree = ""
     $writeTree = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("write-tree") -GitExe $GitExe
-    if ($writeTree.Code -eq 0 -and $writeTree.Output.Count -gt 0) { $savedTree = $writeTree.Output[0].Trim() }
+    if ($writeTree.Code -eq 0 -and $writeTree.Output.Count -gt 0) {
+        $written = ([string]$writeTree.Output[-1]).Trim()
+        if ($written -cmatch $script:MemorySyncObjectIdPattern) { $savedTree = $written }
+    }
+
+    # The restore itself, and the sentence that reports it. Every refusal from
+    # the post-add gate below down to the commit returns through this, so none
+    # of them leaves the add's staging behind for the operator to find and
+    # unstage: one path back to the saved tree means a refusal added among them
+    # later inherits it rather than reimplementing it.
+    #
+    # The two returns outside that stretch keep their staging deliberately. A
+    # failed `git add` is a git failure rather than a judgment about the
+    # content, and what it staged before failing is the operator's to inspect.
+    # A failed `git commit` is reached only after every gate has admitted the
+    # index, so what sits staged there has cleared the allowlist and the machine
+    # axis and is genuine pending work the next run re-adds and commits.
+    $restoreIndex = {
+        $restored = "The staged paths could not be restored, so the index still holds what the add staged; nothing was committed."
+        if ($savedTree -ne "") {
+            $readTree = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("read-tree", $savedTree) -GitExe $GitExe
+            if ($readTree.Code -eq 0) { $restored = "The index was returned to what it held before this run; no file on disk was changed and nothing was committed." }
+            else { $restored += " (git read-tree: " + ($readTree.Output -join " ") + ")" }
+        }
+        return $restored
+    }
 
     $add = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("add", "-A") -GitExe $GitExe
     if ($add.Code -ne 0) {
@@ -1053,13 +1119,7 @@ function Install-MemorySyncRepo {
     # held before rather than being left for the operator to unstage.
     $postAdd = & $indexGate
     if ($postAdd.Count -gt 0) {
-        $restored = "The staged paths could not be restored, so the index still holds what the add staged; nothing was committed."
-        if ($savedTree -ne "") {
-            $readTree = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("read-tree", $savedTree) -GitExe $GitExe
-            if ($readTree.Code -eq 0) { $restored = "The index was returned to what it held before this run; no file on disk was changed and nothing was committed." }
-            else { $restored += " (git read-tree: " + ($readTree.Output -join " ") + ")" }
-        }
-        return @{ Ok = $false; Notes = ($notes + $postAdd + @($restored)) }
+        return @{ Ok = $false; Notes = ($notes + $postAdd + @((& $restoreIndex))) }
     }
 
     # --name-only rather than --quiet's bare exit code, so the same call
@@ -1075,9 +1135,22 @@ function Install-MemorySyncRepo {
     # itself rather than octal-escaped inside double quotes, which is what lets
     # the machine axis below classify an accented coordinator file by its real
     # segments instead of refusing this machine's own file as another's.
-    $stagedNames = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("-c", "core.quotePath=false", "diff", "--cached", "--name-only") -GitExe $GitExe
+    #
+    # --no-renames so a staged move is two entries, its deletion and its
+    # addition, rather than the one entry rename detection produces, whose
+    # --name-only rendering names the destination alone. A deletion under a
+    # peer machine's coordinator directory paired with a similar-content
+    # addition under this machine's own is exactly the shape that pairs, and
+    # the machine axis below has to see the deleted path to refuse it.
+    $stagedNames = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("-c", "core.quotePath=false", "diff", "--cached", "--name-only", "--no-renames") -GitExe $GitExe
     if ($stagedNames.Code -ne 0) {
-        return @{ Ok = $false; Notes = ($notes + @("git diff --cached --name-only failed, so what would be committed could not be counted: " + ($stagedNames.Output -join " "))) }
+        # The first element is parenthesized whole: a comma binds tighter than
+        # the + that builds it, so an unparenthesized concatenation would take
+        # the element after it as the right operand and the two notes would
+        # reach the caller as one line, which the doctor then truncates.
+        return @{ Ok = $false; Notes = ($notes + @(
+            ("git diff --cached --name-only failed, so what would be committed could not be counted: " + ($stagedNames.Output -join " ")),
+            (& $restoreIndex))) }
     }
     $staged = @($stagedNames.Output | ForEach-Object { ([string]$_).TrimEnd("`r", "`n") } | Where-Object { $_.Trim() -ne "" })
     $stagedCount = $staged.Count
@@ -1104,7 +1177,8 @@ function Install-MemorySyncRepo {
     try { $machine = [string](Get-MemorySyncMachineName) } catch { $machine = "" }
     if ($machine.Trim() -eq "") {
         return @{ Ok = $false; Notes = ($notes + @(
-            "This machine's own name could not be read, so a staged coordinator path could not be told from another machine's and nothing was committed.")) }
+            "This machine's own name could not be read, so a staged coordinator path could not be told from another machine's and nothing was committed.",
+            (& $restoreIndex))) }
     }
     $foreign = @()
     foreach ($candidate in $staged) {
@@ -1113,7 +1187,8 @@ function Install-MemorySyncRepo {
             # it names cannot be read, and a path this check cannot classify is
             # never assumed to be this machine's own.
             return @{ Ok = $false; Notes = ($notes + @(
-                "git diff --cached returned a staged path this check cannot read ($candidate), so nothing was committed.")) }
+                "git diff --cached returned a staged path this check cannot read ($candidate), so nothing was committed.",
+                (& $restoreIndex))) }
         }
         # A path is foreign only where it carries a machine segment to judge:
         # coordinator/<machine>/<something>, three segments or more. A file
@@ -1142,17 +1217,12 @@ function Install-MemorySyncRepo {
         $machines = @($foreign | ForEach-Object { (($_ -replace '\\', '/') -split '/')[1] } | Select-Object -Unique)
         $named = ($foreign | Select-Object -First 5) -join ", "
         if ($foreign.Count -gt 5) { $named += " (and $($foreign.Count - 5) more)" }
-        $restored = "The staged paths could not be restored, so the index still holds what the add staged; nothing was committed."
-        if ($savedTree -ne "") {
-            $readTree = Invoke-MemorySyncGit -StoreRoot $StoreRoot -Arguments @("read-tree", $savedTree) -GitExe $GitExe
-            if ($readTree.Code -eq 0) { $restored = "The index was returned to what it held before this run; no file on disk was changed and nothing was committed." }
-            else { $restored += " (git read-tree: " + ($readTree.Output -join " ") + ")" }
-        }
+        $restored = & $restoreIndex
         return @{
             Ok     = $false
             Reason = 'outbound-foreign-write'
             Notes  = ($notes + @(
-                "The add staged $($foreign.Count) path(s) under a foreign coordinator directory (" + ($machines -join ", ") + "), which only that machine writes: $named",
+                ("The add staged $($foreign.Count) path(s) under a foreign coordinator directory (" + ($machines -join ", ") + "), which only that machine writes: $named"),
                 "This machine syncs its own coordinator directory alone. Revert those paths on this machine, or make the change on the machine that owns them.",
                 $restored))
         }

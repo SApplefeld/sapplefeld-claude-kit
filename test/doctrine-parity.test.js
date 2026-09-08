@@ -824,7 +824,7 @@ test('the document-length bullet routes its sentence-shape bars to writing-skill
     // leaves the heading standing while the doctrine promises what the skill
     // no longer carries.
     for (const [bar, promised] of [
-        ['- **One idea.**', 'the one-idea bar with its forty-word diagnostic'],
+        ['- **One idea.**', 'the one-idea bar with its twenty-word diagnostic'],
         ['- **The literal phrase.**', 'the literal-phrase bar and its '
             + 'definition of mannered prose'],
         ['- **A pointer where another site owns the rule.**', 'the pointing bar'],

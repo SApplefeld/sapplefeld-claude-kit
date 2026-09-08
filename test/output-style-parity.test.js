@@ -38,13 +38,14 @@ const STYLE = path.join(__dirname, '..', 'plugins', 'claude-kit', 'output-styles
 const BEGIN = 'KIT-REGISTER-CORE:BEGIN';
 const END = 'KIT-REGISTER-CORE:END';
 
-// The core's seven bullets, in the order the style's region must carry them.
+// The core's eight bullets, in the order the style's region must carry them.
 // Each is a single physical line in the doctrine, so the lead identifies it.
 const CORE_LEADS = [
     '- **Skip the preamble.**',
     '- **Disagree up front.**',
     '- **No false certainty, no flattery.**',
     '- **Teach the why; treat design as a dialog.**',
+    '- **Plain prose, never mannered prose.**',
     '- **Write every decision ask to the client-briefing register.**',
     '- **Narrate the cadence, and close with the state.**',
     '- **Close with the board when plans are pending, and never assume I remember a plan.**',

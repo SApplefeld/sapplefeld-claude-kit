@@ -77,10 +77,11 @@
 //
 // That reach is also why one class of dispatch receives nothing. The kit's
 // read-only judgment seats, the blind and adversarial and security reviewers,
-// the consultant, the blind reader, the prose reviewer, the council member and
-// the design facilitator, are dispatched precisely to hold a context that
-// inherited nothing, and a pointer the store authored is exactly the intent
-// story a blind review is dispatched without. The policy class is
+// the consultant, the blind reader, the prose reviewer, the council member,
+// the design facilitator and the scope adjudicator, are dispatched precisely
+// to hold a context that inherited nothing, and a pointer the store authored
+// is exactly the intent story a blind review is dispatched without. The
+// policy class is
 // kit-agent-identity-lib.js's reviewAgentClass, shared with the guard that
 // refuses those seats a tree-mutating command; its `gate` class and every type
 // nothing governs still receive pointers, a QA verifier and an implementer both

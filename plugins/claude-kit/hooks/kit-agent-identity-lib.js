@@ -122,7 +122,7 @@ function dispatchedAgentId(payload) {
 function reviewAgentClass(type) {
     if (typeof type !== 'string' || type === '') return null;
     if (/(^|[:/])qa-verifier$/i.test(type)) return 'gate';
-    if (/(^|[:/])(?:adversarial-reviewer|blind-reviewer|security-reviewer|council-member|design-facilitator|consultant|blind-reader|prose-reviewer|plan-reviewer)$/i.test(type)) return 'strict';
+    if (/(^|[:/])(?:adversarial-reviewer|blind-reviewer|security-reviewer|council-member|design-facilitator|consultant|blind-reader|prose-reviewer|plan-reviewer|scope-adjudicator)$/i.test(type)) return 'strict';
     return null;
 }
 

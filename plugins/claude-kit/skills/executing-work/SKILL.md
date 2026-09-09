@@ -401,7 +401,8 @@ For each Section of Work, in order (sections run concurrently only where the dis
    Reviewer Dispatch (all REQUIRED):
    - agentType: the agent's scoped name (claude-kit:adversarial-reviewer,
      claude-kit:blind-reviewer, claude-kit:blind-reader, claude-kit:prose-reviewer,
-     claude-kit:security-reviewer, claude-kit:consultant, claude-kit:plan-reviewer).
+     claude-kit:security-reviewer, claude-kit:consultant, claude-kit:plan-reviewer,
+     claude-kit:scope-adjudicator).
      Omitting it yields a workflow-subagent, a type readonly-agent-guard does not
      govern, which hands the tree under review to an agent free to rewrite it
    - model: named explicitly, never left to inherit. A call carrying an effort but no

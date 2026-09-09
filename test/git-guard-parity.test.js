@@ -860,22 +860,51 @@ test('changing a PS literal value turns the pin red, naming the key and both val
 // What no run here closes, stated rather than swept. The wrapper's own name
 // still resolves from the caller's directory ahead of PATH, which is a property
 // of how cmd.exe finds this file in the first place rather than of anything a
-// launch line inside it can set. And the behaviour these runs establish is that
-// of the path a wrapper takes with no arguments: every wrapper here ends its
-// launch line with %*, and percent expansion happens before cmd.exe parses the
-// line, so an argument can create command positions at runtime that neither the
-// static allowlist nor an argument-free run reads.
-const CMD_GUARD_RE = /^@?set\s+"?NoDefaultCurrentDirectoryInExePath=1"?\s*$/i;
+// launch line inside it can set. And the shape rules below read a wrapper's
+// static text alone: the enrolled lines themselves carry percent expansions
+// (%~dp0 and %*), and percent expansion happens before cmd.exe parses the line,
+// so any value the caller's environment or its arguments supply through one of
+// them creates command positions at runtime that neither the static text nor an
+// argument-free run reads.
 
 // Recipes are keyed by repo-relative path for a tracked wrapper, matching
 // what `git ls-files` reports, and by a synthetic key for the generated
 // memq.cmd, which exists nowhere on disk in this tree and so cannot collide
 // with anything git discovers.
+//
+// The three lines that carry a wrapper's whole meaning are enrolled as exact
+// literals rather than described by a pattern: the guard, the launch, and the
+// exit line (null for the generated wrapper, which reports its exit code by
+// falling off its own end). A pattern over these lines has a reach wider than
+// the property it is written for, and everything inside that gap rides through
+// unread; equality has no reach to get wrong, so every spelling but the
+// enrolled one is refused whether or not anyone thought of it. Editing a
+// wrapper therefore means editing its literal here, which is where the change
+// is read.
 const GENERATED_MEMQ_CMD_KEY = '<generated:memq.cmd>';
+const CMD_GUARD_LINE = 'set "NoDefaultCurrentDirectoryInExePath=1"';
 const WRAPPER_RECIPES = {
-    'doctor.cmd': { launches: 'powershell', script: 'doctor.ps1' },
-    'plugins/claude-kit/doctor/doctor.cmd': { launches: 'powershell', script: 'doctor.ps1' },
-    [GENERATED_MEMQ_CMD_KEY]: { launches: 'node', script: 'memq-shim.js' }
+    'doctor.cmd': {
+        launches: 'powershell',
+        script: 'doctor.ps1',
+        guardLine: CMD_GUARD_LINE,
+        launchLine: 'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*',
+        exitLine: 'exit /b %ERRORLEVEL%'
+    },
+    'plugins/claude-kit/doctor/doctor.cmd': {
+        launches: 'powershell',
+        script: 'doctor.ps1',
+        guardLine: CMD_GUARD_LINE,
+        launchLine: 'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*',
+        exitLine: 'exit /b %ERRORLEVEL%'
+    },
+    [GENERATED_MEMQ_CMD_KEY]: {
+        launches: 'node',
+        script: 'memq-shim.js',
+        guardLine: CMD_GUARD_LINE,
+        launchLine: 'node "%~dp0memq-shim.js" %*',
+        exitLine: null
+    }
 };
 
 const MEMQ_INSTALLER_PATH = path.join(REPO, 'plugins', 'claude-kit', 'doctor', 'install-memq-shim.ps1');
@@ -906,102 +935,42 @@ function enrollmentGaps(discovered, recipeKeys) {
     return { unenrolled, stale };
 }
 
-// Split on the separators cmd.exe reads outside double quotes. Used only to
-// count segments below: a launch line may carry none but its own. The model is
-// a plain double-quote toggle, which is what cmd.exe does only for a line
-// carrying no caret and an even number of quotes; a line outside that is
-// refused by launchLineProblem before it reaches here rather than modelled.
-function splitOnSeparators(line) {
-    const segments = [];
-    let current = '';
-    let quoted = false;
-    for (let i = 0; i < line.length; i += 1) {
-        const ch = line[i];
-        if (ch === '"') { quoted = !quoted; current += ch; continue; }
-        if (!quoted && (ch === '&' || ch === '|')) {
-            segments.push(current);
-            current = '';
-            if (line[i + 1] === ch) { i += 1; }
-            continue;
-        }
-        current += ch;
-    }
-    segments.push(current);
-    return segments;
+// A wrapper's line as the shape rules read it: cmd.exe ignores surrounding
+// whitespace and a leading @ suppresses echo without changing what the line
+// does, so both are stripped before any comparison.
+function normalizeWrapperLine(rawLine) {
+    return rawLine.trim().replace(/^@+/, '');
 }
 
-// Why each refusal reason exists, since a control that reds on the wrong rule
-// proves nothing about the rule it was written for:
-//
-// not-launch-token    the line's first whitespace-delimited token must be the
-//                     recipe's launches token whole, not a token that merely
-//                     starts with it. A word-boundary match accepts
-//                     powershell.exe, which cmd.exe resolves without consulting
-//                     PATHEXT, so no decoy named for the bare token is ever
-//                     reached and the decoy leg goes vacuous while reading
-//                     green.
-// script-not-named    the script must be named through the wrapper-directory
-//                     expansion, so the script the real interpreter runs is
-//                     always this run's own stub rather than the real doctor.
-// caret               cmd.exe reads ^ as an escape, so a caret can hide a quote
-//                     and let a second command ride on a line that reads as
-//                     one. No wrapper here needs a caret, so carrying one is
-//                     refused outright rather than modelled.
-// unbalanced-quotes   an odd number of double quotes leaves the rest of the
-//                     line inside a quoted run for the segment counter and
-//                     outside one for cmd.exe, which is the same second-command
-//                     hole by another route.
-// redirection         an unquoted < or > opens a file the run never observes.
-// multiple-segments   an unquoted & or | carries a second command outright.
-//
-// The direction that is safe here is refusal: this is a fail-closed allowlist,
-// so refusing a launch line that would in fact have been harmless reds loudly
-// and gets read, while accepting one that would not have been passes silently.
-const LAUNCH_NOT_TOKEN = 'not-launch-token';
-const LAUNCH_SCRIPT_NOT_NAMED = 'script-not-named';
-const LAUNCH_CARET = 'caret';
-const LAUNCH_UNBALANCED_QUOTES = 'unbalanced-quotes';
-const LAUNCH_REDIRECTION = 'redirection';
-const LAUNCH_MULTIPLE_SEGMENTS = 'multiple-segments';
-
-// The reason the recipe's one launch line is refused, or null when it is
-// allowed. A reason code rather than a boolean, so a control can assert which
-// rule refused its line: a control that reds because some other rule got there
-// first says nothing about the rule it was written for.
-function launchLineProblem(line, recipe) {
-    const escaped = recipe.launches.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (!new RegExp('^' + escaped + '(\\s|$)', 'i').test(line)) return LAUNCH_NOT_TOKEN;
-    if (!line.includes('"%~dp0' + recipe.script + '"')) return LAUNCH_SCRIPT_NOT_NAMED;
-    if (line.includes('^')) return LAUNCH_CARET;
-    if ((line.match(/"/g) || []).length % 2 !== 0) return LAUNCH_UNBALANCED_QUOTES;
-    for (const segment of splitOnSeparators(line)) {
-        const outsideQuotes = segment.replace(/"[^"]*"/g, '');
-        if (/[<>]/.test(outsideQuotes)) return LAUNCH_REDIRECTION;
-    }
-    if (splitOnSeparators(line).length !== 1) return LAUNCH_MULTIPLE_SEGMENTS;
-    return null;
+// The three security-critical rules, each exact equality against the literal
+// its recipe enrolls. A line that differs by one character is a line nobody
+// reviewed, so it is refused and the recipe is where the review happens.
+function isGuardLine(rawLine, recipe) {
+    return normalizeWrapperLine(rawLine) === recipe.guardLine;
 }
 
-function isLaunchLine(line, recipe) {
-    return launchLineProblem(line, recipe) === null;
+function isLaunchLine(rawLine, recipe) {
+    return normalizeWrapperLine(rawLine) === recipe.launchLine;
 }
 
-// Every line of an enrolled wrapper, trimmed and stripped of a leading @,
-// must be one of a fixed set of shapes: empty, a rem comment (which consumes
-// its own line, separators included, so anything after it is prose rather
-// than a second command), `echo off`, `setlocal` exactly, the guard line, an
-// `exit /b` with at most one trailing token, or the recipe's one launch
-// line. Refusing anything else is what makes the run below judge the
-// wrapper's only path rather than one traversal of several.
+function isExitLine(rawLine, recipe) {
+    return recipe.exitLine !== null && normalizeWrapperLine(rawLine) === recipe.exitLine;
+}
+
+// Every line of an enrolled wrapper must be one of a fixed set: empty, a rem
+// comment (which consumes its own line, separators included, so anything after
+// it is prose rather than a second command), `echo off`, `setlocal`, or one of
+// the recipe's three enrolled literals. The first four are shapes because their
+// text varies legitimately and none of them launches anything or writes state;
+// the last three are equalities. Refusing everything else is what makes the run
+// below judge the wrapper's only path rather than one traversal of several.
 function isAllowedShapeLine(rawLine, recipe) {
-    const line = rawLine.trim().replace(/^@+/, '');
+    const line = normalizeWrapperLine(rawLine);
     if (line === '') return true;
     if (/^rem\b/i.test(line)) return true;
     if (/^echo\s+off$/i.test(line)) return true;
     if (/^setlocal$/i.test(line)) return true;
-    if (CMD_GUARD_RE.test(line)) return true;
-    if (/^exit\s*\/b(\s+\S+)?$/i.test(line)) return true;
-    return isLaunchLine(line, recipe);
+    return isGuardLine(line, recipe) || isLaunchLine(line, recipe) || isExitLine(line, recipe);
 }
 
 // Every line outside the allowlist, named with its 1-based line number, so a
@@ -1028,8 +997,8 @@ function wrapperStructure(text, recipe) {
     const launch = [];
     const setlocal = [];
     text.split(/\r?\n/).forEach((rawLine, i) => {
-        const line = rawLine.trim().replace(/^@+/, '');
-        if (CMD_GUARD_RE.test(line)) guard.push(i + 1);
+        const line = normalizeWrapperLine(rawLine);
+        if (isGuardLine(line, recipe)) guard.push(i + 1);
         else if (isLaunchLine(line, recipe)) launch.push(i + 1);
         else if (/^setlocal$/i.test(line)) setlocal.push(i + 1);
     });
@@ -1096,10 +1065,11 @@ function decoyScriptText() {
 // and reaches that leg through a line the allowlist refuses by design.
 //
 // What the run establishes, exactly: the behaviour of the path the wrapper
-// takes with no arguments. Every wrapper here ends its launch line with %*, and
-// percent expansion happens before cmd.exe parses the line, so an argument can
-// create command positions at runtime that neither this argument-free run nor
-// the static allowlist reads. That path is stated, not swept.
+// takes with no arguments. The enrolled launch lines carry percent expansions
+// (%~dp0 and %*), and percent expansion happens before cmd.exe parses the line,
+// so any value the caller's environment or its arguments supply through one of
+// them can create command positions at runtime that neither this argument-free
+// run nor the static text reads. That residual is stated, not swept.
 function runWrapper(wrapperSourcePath, recipe, options) {
     assert.ok(options && typeof options.gateOnShape === 'boolean',
         'runWrapper must be told whether the shape gate applies, since an ungated run of an enrolled wrapper judges one path of several');
@@ -1361,7 +1331,7 @@ test('every tracked cmd/bat wrapper carries exactly one scoped guard ahead of ex
 // absent. The allowlist accepts it, which is the gap this predicate closes.
 test('the structure check refuses an allowlisted wrapper whose guard line is absent', () => {
     const recipe = WRAPPER_RECIPES['doctor.cmd'];
-    const unguarded = '@echo off\r\nsetlocal\r\npowershell -NoProfile -File "%~dp0doctor.ps1" %*\r\nexit /b %ERRORLEVEL%\r\n';
+    const unguarded = '@echo off\r\nsetlocal\r\n' + recipe.launchLine + '\r\n' + recipe.exitLine + '\r\n';
     assert.deepStrictEqual(shapeViolations(unguarded, recipe), [],
         'control: this wrapper must be inside the shape allowlist, or it is not showing that the allowlist alone lets a guard go missing');
     assert.throws(() => assertWrapperStructure('control', unguarded, recipe),
@@ -1386,64 +1356,65 @@ test('the shape allowlist refuses every line withheld from its own literals, nam
     }
 });
 
-// An allowlist refuses everything outside its list by construction, so a
-// refusal-side control says nothing about its reach: every case above would red
-// identically under a predicate that refused every line ever put to it. These
-// run the other way, over lines the launch rule ACCEPTS unless it is tight, and
-// each names the rule that must do the refusing, because a control that reds
-// because a different rule got there first proves nothing about the rule it was
-// written for.
-test('the launch rule refuses an accepted-shaped line by the rule that must refuse it', () => {
+// Under equality the reach question dissolves rather than being answered: every
+// spelling but the enrolled one is refused by construction, so no control can
+// find a shape the rule reaches too far into. The load-bearing direction is
+// acceptance, since a literal transcribed wrongly here refuses the line the tree
+// actually carries and reds on the real wrappers below.
+test('each recipe\'s enrolled literals accept the lines the wrappers actually carry', () => {
+    const doctor = WRAPPER_RECIPES['doctor.cmd'];
+    assert.ok(isLaunchLine('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*', doctor),
+        'the launch rule refuses the line the tracked doctor.cmd carries, so its enrolled literal is transcribed wrongly');
+    assert.ok(isGuardLine('set "NoDefaultCurrentDirectoryInExePath=1"', doctor),
+        'the guard rule refuses the line the tracked wrappers carry, so its enrolled literal is transcribed wrongly');
+    assert.ok(isExitLine('exit /b %ERRORLEVEL%', doctor),
+        'the exit rule refuses the line the tracked wrappers carry, so its enrolled literal is transcribed wrongly');
+
+    const memq = WRAPPER_RECIPES[GENERATED_MEMQ_CMD_KEY];
+    assert.ok(isLaunchLine('node "%~dp0memq-shim.js" %*', memq),
+        'the launch rule refuses the line Get-MemqCmdWrapperText emits, so its enrolled literal is transcribed wrongly');
+    assert.ok(!isExitLine('exit /b %ERRORLEVEL%', memq),
+        'the generated wrapper enrolls no exit line, since it reports its exit code by falling off its own end, so no exit line may be accepted for it');
+});
+
+// The refusal side, each case naming the class it stands for. None of these is
+// evidence of reach, which equality settles by construction; each is a record
+// of a spelling that rode past a pattern here, kept so the class is named where
+// a reader looking for it will find it.
+test('the enrolled literals refuse every other spelling, naming the class each stands for', () => {
     const recipe = WRAPPER_RECIPES['doctor.cmd'];
     const cases = [
+        ['an interpreter payload riding the launch line',
+            'powershell -NoProfile -Command "& \'%~dp0doctor.ps1\'; Write-Output \'PWNED\'" "%~dp0doctor.ps1"',
+            'the payload runs under the real interpreter beside the stub, changing neither the environment nor the working directory, '
+            + 'so no assertion in the run below would see it'],
+        ['a caller-supplied percent expansion on the launch line',
+            'powershell %KIT_PROBE_FLAGS% -NoProfile -File "%~dp0doctor.ps1"',
+            'percent expansion happens before cmd.exe parses the line, so a caller who sets the variable inserts commands the run cannot '
+            + 'see, and a run with it unset reads green'],
         ['an extension-bearing interpreter spelling',
             'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*',
-            LAUNCH_NOT_TOKEN,
             'cmd.exe runs powershell.exe without consulting PATHEXT, so a decoy named for the bare token can never be reached and the '
             + 'decoy leg of every run below would read green while measuring nothing'],
-        ['a hyphen-suffixed interpreter spelling',
-            'powershell-preview -NoProfile -File "%~dp0doctor.ps1" %*',
-            LAUNCH_NOT_TOKEN,
-            'a different interpreter is launched than the one this recipe plants a decoy for'],
-        ['a caret-escaped quote carrying a second command',
-            'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" ^" & echo PWNED',
-            LAUNCH_CARET,
-            'cmd.exe reads the caret as an escape and runs the second command, which changes neither the environment nor the working '
-            + 'directory, so no assertion in the run below would see it'],
-        ['an odd double-quote count carrying a second command',
-            'powershell -NoProfile -File "%~dp0doctor.ps1" " & echo PWNED',
-            LAUNCH_UNBALANCED_QUOTES,
-            'the segment counter reads the rest of the line as quoted and cmd.exe does not, so a second command rides on a line counted as one'],
-        ['an unquoted redirection',
-            'powershell -NoProfile -File "%~dp0doctor.ps1" > out.txt',
-            LAUNCH_REDIRECTION,
-            'the launch writes a file the run never observes'],
-        ['an unquoted ampersand carrying a second command',
-            'powershell -NoProfile -File "%~dp0doctor.ps1" & echo second',
-            LAUNCH_MULTIPLE_SEGMENTS,
-            'a second command runs on the launch line']
+        ['a single-character near miss of the enrolled launch line',
+            'powershell -NoProfile -ExecutionPolicy bypass -File "%~dp0doctor.ps1" %*',
+            'a launch line nobody reviewed is accepted on its resemblance to one somebody did'],
+        ['a guard line closed by one quote rather than two',
+            'set "NoDefaultCurrentDirectoryInExePath=1',
+            'an unreviewed spelling counts as the guard the launch runs under, and no static check can say whether cmd.exe stores from it '
+            + 'the value the guard needs']
     ];
-    for (const [name, line, expectedReason, consequence] of cases) {
-        const reason = launchLineProblem(line, recipe);
-        assert.strictEqual(reason, expectedReason,
-            'the launch rule must refuse ' + name + ' by the ' + expectedReason + ' rule (it answered ' + JSON.stringify(reason)
-            + '): otherwise ' + consequence);
+    for (const [name, line, consequence] of cases) {
         assert.ok(!isAllowedShapeLine(line, recipe),
-            'the shape allowlist must refuse ' + name + ' outright: otherwise ' + consequence);
+            'the shape allowlist must refuse ' + name + ', ' + JSON.stringify(line) + ': otherwise ' + consequence);
     }
-
-    // The other half of the same instrument: the real launch line each tracked
-    // wrapper carries is still accepted, so the tightening above is a rule
-    // about spelling rather than a predicate that has stopped saying yes.
-    assert.strictEqual(launchLineProblem('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*', recipe), null,
-        'the launch rule refuses the spelling the tracked wrappers actually carry, so it has been tightened past the shape it exists to admit');
 });
 
 // The violation record's own numbering, which the shape test's messages name
 // and nothing else exercises: isAllowedShapeLine alone says only yes or no.
 test('shapeViolations names the offending line by its 1-based number', () => {
     const recipe = WRAPPER_RECIPES['doctor.cmd'];
-    const text = '@echo off\r\nsetlocal\r\ngoto :end\r\nexit /b 0\r\n';
+    const text = '@echo off\r\nsetlocal\r\ngoto :end\r\n' + recipe.exitLine + '\r\n';
     const violations = shapeViolations(text, recipe);
     assert.deepStrictEqual(violations, [{ lineNumber: 3, line: 'goto :end' }],
         'the violation must name the third line by number, or a wrapper that grows a branch reds without saying where');

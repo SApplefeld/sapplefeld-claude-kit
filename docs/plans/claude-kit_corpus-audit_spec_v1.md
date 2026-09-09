@@ -1,6 +1,6 @@
 # The kit is audited by readers who never loaded it, and judged by one who holds its history
 
-Status: Ready
+Status: In Progress
 Commit Model: Commit-and-Push
 Created: 2026-08-29
 
@@ -165,3 +165,15 @@ Files in scope: the rewrite spec under `docs/plans/` where any finding is approv
 - `docs/archive/claude-kit_review-loop-exit_spec_v1.md`: the class-keyed exit for the review loop, so a cut here that draws only claim findings closes in one fix round; its section 4 made the size budget a ledger, so a cap a cut here shrinks is lowered through `kit-size.js sync`.
 
 ## Chapters
+
+### Interim board 1 - 2026-09-09
+
+Written at run start, before Section 1's first dispatch, because the compaction gate was already holding an offer and the chunk plan below existed only in context.
+
+- Run: `KIT: Corpus Worker`, session `418ff8ff`, on the linked worktree `.kit/scratch/audit`, branch `corpus-audit`, armed by the operator's typed `/kit-goal` at 2026-09-09T02:46:35Z, extraction commit `6bc07fb` (HEAD, equal to `origin/main` at arming). The `Status:` header was normalized from `Ready` to `In Progress` at run start.
+- In-flight sections: none dispatched yet. Section 1 is next.
+- Live dispatches: none.
+- Gate baseline: none taken; Sections 1 through 4 carry no mechanical tests, and the whole-gate baseline is taken at Section 5's merge point.
+- Rulings adopted since the last boundary: none.
+- Section 1 declared assumptions (route b unless cited): (1) readers are `general-purpose` agents with the `opus` model override, told to use only Read and Write, each bracketed by a `git status --porcelain` capture, since the readonly guard does not govern that type; (2) each reader writes one file under `.kit/audit/s1/`, named from the document path with a `.cN` suffix for a chunk, in a fixed record format (id, class, claim, bound, source, note), with the inventory paragraph written by the whole-document reader or the first chunk's reader only; (3) chunking at the 8,000-word bound per the plan's Assumptions, at `##` headings grouped into consecutive runs under the bound, and where a `##` chunk over the bound carries no `###` heading (executing-work's Section loop, finishing-work's Steps, coordinator's The ledger), at its numbered-step or bold-lead paragraph boundary nearest the midpoint; (4) the chunk plan: executing-work L1-96, L97-358, L359-445, L446-529; memory-system L1-39, L40-146, L147-208, L209-255, L256-316; coordinator L1-38, L39-66, L67-84, L85-103; finishing-work L1-41, L42-65, L66-110; role L1-47, L48-65, L66-99; peer-sessions L1-73, L74-155; operating-instructions L1-109, L110-205; every other document whole; (5) the pinned `KIT-REGISTER-CORE` region of `output-styles/kit.md` is skipped by that document's reader and recorded in its list header as a copy of the doctrine's core, per Section 1's own text; (6) the doctrine mirror `home/claude-kit-doctrine.md` is not read separately, per Section 1's own text; (7) the extraction commit is `6bc07fb`, and the plan's two merge points stand, so no merge before Section 5.
+- Next action per section: Section 1, dispatch the 65 readers (42 whole documents, 23 chunks) in batches with the first-turn reading taken at five minutes per finishing-work's unavailability rule; then one sonnet critic per list with one claim withheld as the control; accept lists only after their critic ran and named the withheld claim; write Chapter 1 with the per-document counts by class.

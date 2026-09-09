@@ -68,5 +68,6 @@ Acceptance: the pin green, or a Chapter naming the failing case with the listing
 ## Related
 
 - Kaizen triage record `kaizen/archive/2026-09-02-pass-triage.md`.
+- `claude-kit_kaizen-code-batch_spec_v1.md` section 10: adds `board:` to the same frontmatter grammar (`MEMQ_FIELDS`, the `add-operator` parse, and the memory-system field list) ahead of this plan in the queue, by the operator's 2026-09-08 decision, so the "exactly three keys" reading in this plan's Evidence is four by the time this plan runs and the anchors are re-derived at dispatch.
 - `claude-kit_liveness-by-session-identity_spec_v1.md`: the same "narrows an honest writer" ceiling applied to the coordinator directory.
 - `../archive/claude-kit_write-time-neighbours_spec_v1.md`: the pre-lock neighbours block on the same two creation paths this plan's `author:` field is written on.

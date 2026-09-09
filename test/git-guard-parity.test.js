@@ -8,10 +8,15 @@
 //
 // Both sides of that pair are run for real against the real code rather than
 // the guards' source text being pattern-matched. That claim is about the git
-// guards alone. The cmd-wrapper pins at the end of this file are source-text
-// pins on purpose: what they assert is a property of the wrapper text itself,
-// which is the artifact cmd.exe reads, and one of the two wrappers exists in
-// the tree only as a string its generator returns.
+// guards alone. The cmd-wrapper pins at the end of this file carry two claims
+// on two mechanisms, because neither is honestly established by the other's
+// evidence: a class claim, that every tracked .cmd and .bat git discovers is
+// enrolled with a run recipe here and an unenrolled one reds rather than
+// passing unswept; and a behaviour claim, that an enrolled wrapper is judged
+// by running it under a real cmd.exe with a decoy of its interpreter planted
+// in the calling directory. The generated memq.cmd is obtained by
+// dot-sourcing its installer and calling the generator, so the bytes those
+// pins read are the bytes the installer writes.
 // The JS side calls gitChildEnv()
 // directly with node's own require and reads the object it returns;
 // gitRun's own use of that same object as its spawn's env
@@ -122,7 +127,7 @@ const isWin = process.platform === 'win32';
 // answer. It is the boundary every hook's git call already runs through, and
 // reusing it is what keeps this file from being a second producer that
 // reimplements the protections it can see and drops the ones it cannot.
-const { gitOutput } = require(JS_PATH);
+const { gitRun, gitOutput } = require(JS_PATH);
 
 // Single-quoted PowerShell literal, any embedded quote doubled.
 const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
@@ -139,6 +144,29 @@ function rmDir(dir) {
     } catch {
         // Best-effort cleanup; leaving a temp dir behind never fails the test.
     }
+}
+
+// A child environment built from this process's own, with every ambient
+// spelling of each named variable removed. Windows environment names are
+// case-insensitive while a plain object is not, so { ...process.env } can hold
+// two differently cased keys for one logical name (an ambient "Path" beside a
+// "PATH", say) sitting side by side in the object handed to spawnSync, which is
+// free to pass both through to the child's real (case-insensitive, single-slot)
+// environment block in either order. Dropping every key that matches a named
+// variable, in any casing, is what closes that ambiguity: the child never sees
+// two spellings of one name, and never sees a name this call meant to withhold
+// under a casing the caller did not think to type. Both spawn paths in this
+// file build their child environment here rather than each deleting the
+// spellings it can see, since the protection is a property of the spawn channel
+// rather than of the caller that first needed it. process.env itself is never
+// mutated: the copy is what is handed to the child.
+function childEnvWithout(names) {
+    const env = { ...process.env };
+    const targets = new Set(names.map((n) => n.toUpperCase()));
+    for (const k of Object.keys(env)) {
+        if (targets.has(k.toUpperCase())) delete env[k];
+    }
+    return env;
 }
 
 // Noise: never a guard name, so its survival means the strip missed it.
@@ -301,22 +329,10 @@ function buildPsEnvMap(psPath) {
             + 'foreach ($line in $result.Output) { [Console]::Out.WriteLine([string]$line) }; '
             + '[Console]::Out.WriteLine("KITPARITY_POST_END")';
 
-        // Windows environment names are case-insensitive, but a plain object
-        // is not: { ...process.env, ...PLANTED } can leave two differently
-        // cased keys for the same logical name (an ambient "Path" beside a
-        // planted "PATH", say) sitting side by side in the object handed to
-        // spawnSync, which is free to pass both through to the child's real
-        // (case-insensitive, single-slot) environment block in either order.
-        // Dropping any ambient key that matches a planted name, in any
-        // casing, before adding the planted names back closes that
-        // ambiguity: the child never sees two spellings of one name.
-        const spawnEnv = { ...process.env };
-        for (const name of Object.keys(PLANTED)) {
-            const upper = name.toUpperCase();
-            for (const k of Object.keys(spawnEnv)) {
-                if (k.toUpperCase() === upper) delete spawnEnv[k];
-            }
-        }
+        // Every planted name is dropped in every ambient casing before the
+        // planted spelling is added back, so the child sees exactly one
+        // spelling of each planted name and it is this test's own.
+        const spawnEnv = childEnvWithout(Object.keys(PLANTED));
         Object.assign(spawnEnv, PLANTED);
 
         const res = spawnSync(POWERSHELL_EXE,
@@ -841,10 +857,14 @@ test('changing a PS literal value turns the pin red, naming the key and both val
 // needs powershell.exe) skip by name below; enrollment, shape and the
 // line-ending delivery pin at the end of this file are checked there.
 //
-// What no run here closes: the wrapper's own name still resolves from the
-// caller's directory ahead of PATH, which is a property of how cmd.exe
-// finds this file in the first place rather than of anything a launch line
-// inside it can set.
+// What no run here closes, stated rather than swept. The wrapper's own name
+// still resolves from the caller's directory ahead of PATH, which is a property
+// of how cmd.exe finds this file in the first place rather than of anything a
+// launch line inside it can set. And the behaviour these runs establish is that
+// of the path a wrapper takes with no arguments: every wrapper here ends its
+// launch line with %*, and percent expansion happens before cmd.exe parses the
+// line, so an argument can create command positions at runtime that neither the
+// static allowlist nor an argument-free run reads.
 const CMD_GUARD_RE = /^@?set\s+"?NoDefaultCurrentDirectoryInExePath=1"?\s*$/i;
 
 // Recipes are keyed by repo-relative path for a tracked wrapper, matching
@@ -859,6 +879,16 @@ const WRAPPER_RECIPES = {
 };
 
 const MEMQ_INSTALLER_PATH = path.join(REPO, 'plugins', 'claude-kit', 'doctor', 'install-memq-shim.ps1');
+
+// The one pathspec both wrapper sweeps discover through, so enrollment and the
+// line-ending pin cannot come to disagree about what a wrapper is. Git's
+// pathspec matching is case-sensitive even on a core.ignorecase checkout, while
+// cmd.exe runs Foo.CMD and foo.Bat exactly as it runs foo.cmd, so a plain
+// '*.cmd' would leave an extension spelled in any other casing discovered by
+// neither sweep: unenrolled, unrun and unswept, with both tests still green.
+// The :(icase) magic prefix is what makes the discovered set the set cmd.exe
+// would execute.
+const WRAPPER_PATHSPEC = [':(icase)*.cmd', ':(icase)*.bat'];
 
 // Compares what git discovers against what this file's recipe table names,
 // in both directions, so it can be driven with plain arrays as its own
@@ -877,7 +907,10 @@ function enrollmentGaps(discovered, recipeKeys) {
 }
 
 // Split on the separators cmd.exe reads outside double quotes. Used only to
-// count segments below: a launch line may carry none but its own.
+// count segments below: a launch line may carry none but its own. The model is
+// a plain double-quote toggle, which is what cmd.exe does only for a line
+// carrying no caret and an even number of quotes; a line outside that is
+// refused by launchLineProblem before it reaches here rather than modelled.
 function splitOnSeparators(line) {
     const segments = [];
     let current = '';
@@ -897,16 +930,60 @@ function splitOnSeparators(line) {
     return segments;
 }
 
-// The one launch line a recipe allows: it starts with the recipe's launches
-// token, names the recipe's script through the wrapper-directory expansion
-// (so the script the real interpreter runs is always this run's own stub,
-// never the real doctor or shim), and carries no unquoted `&` or `|`, so
-// nothing rides in as a second command on the same line.
-function isLaunchLine(line, recipe) {
+// Why each refusal reason exists, since a control that reds on the wrong rule
+// proves nothing about the rule it was written for:
+//
+// not-launch-token    the line's first whitespace-delimited token must be the
+//                     recipe's launches token whole, not a token that merely
+//                     starts with it. A word-boundary match accepts
+//                     powershell.exe, which cmd.exe resolves without consulting
+//                     PATHEXT, so no decoy named for the bare token is ever
+//                     reached and the decoy leg goes vacuous while reading
+//                     green.
+// script-not-named    the script must be named through the wrapper-directory
+//                     expansion, so the script the real interpreter runs is
+//                     always this run's own stub rather than the real doctor.
+// caret               cmd.exe reads ^ as an escape, so a caret can hide a quote
+//                     and let a second command ride on a line that reads as
+//                     one. No wrapper here needs a caret, so carrying one is
+//                     refused outright rather than modelled.
+// unbalanced-quotes   an odd number of double quotes leaves the rest of the
+//                     line inside a quoted run for the segment counter and
+//                     outside one for cmd.exe, which is the same second-command
+//                     hole by another route.
+// redirection         an unquoted < or > opens a file the run never observes.
+// multiple-segments   an unquoted & or | carries a second command outright.
+//
+// The direction that is safe here is refusal: this is a fail-closed allowlist,
+// so refusing a launch line that would in fact have been harmless reds loudly
+// and gets read, while accepting one that would not have been passes silently.
+const LAUNCH_NOT_TOKEN = 'not-launch-token';
+const LAUNCH_SCRIPT_NOT_NAMED = 'script-not-named';
+const LAUNCH_CARET = 'caret';
+const LAUNCH_UNBALANCED_QUOTES = 'unbalanced-quotes';
+const LAUNCH_REDIRECTION = 'redirection';
+const LAUNCH_MULTIPLE_SEGMENTS = 'multiple-segments';
+
+// The reason the recipe's one launch line is refused, or null when it is
+// allowed. A reason code rather than a boolean, so a control can assert which
+// rule refused its line: a control that reds because some other rule got there
+// first says nothing about the rule it was written for.
+function launchLineProblem(line, recipe) {
     const escaped = recipe.launches.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (!new RegExp('^' + escaped + '\\b', 'i').test(line)) return false;
-    if (!line.includes('"%~dp0' + recipe.script + '"')) return false;
-    return splitOnSeparators(line).length === 1;
+    if (!new RegExp('^' + escaped + '(\\s|$)', 'i').test(line)) return LAUNCH_NOT_TOKEN;
+    if (!line.includes('"%~dp0' + recipe.script + '"')) return LAUNCH_SCRIPT_NOT_NAMED;
+    if (line.includes('^')) return LAUNCH_CARET;
+    if ((line.match(/"/g) || []).length % 2 !== 0) return LAUNCH_UNBALANCED_QUOTES;
+    for (const segment of splitOnSeparators(line)) {
+        const outsideQuotes = segment.replace(/"[^"]*"/g, '');
+        if (/[<>]/.test(outsideQuotes)) return LAUNCH_REDIRECTION;
+    }
+    if (splitOnSeparators(line).length !== 1) return LAUNCH_MULTIPLE_SEGMENTS;
+    return null;
+}
+
+function isLaunchLine(line, recipe) {
+    return launchLineProblem(line, recipe) === null;
 }
 
 // Every line of an enrolled wrapper, trimmed and stripped of a leading @,
@@ -941,6 +1018,24 @@ function describeViolations(violations) {
     return violations.map((v) => 'line ' + v.lineNumber + ': ' + JSON.stringify(v.line)).join('; ');
 }
 
+// Where the three lines that carry a wrapper's whole meaning sit, by 1-based
+// line number. The allowlist above PERMITS a guard line and a launch line; it
+// does not REQUIRE either, so on its own it reads a wrapper with the guard line
+// deleted as perfectly in shape. This is what requires them, and it is text, so
+// it holds on every platform rather than resting on the Windows-only run.
+function wrapperStructure(text, recipe) {
+    const guard = [];
+    const launch = [];
+    const setlocal = [];
+    text.split(/\r?\n/).forEach((rawLine, i) => {
+        const line = rawLine.trim().replace(/^@+/, '');
+        if (CMD_GUARD_RE.test(line)) guard.push(i + 1);
+        else if (isLaunchLine(line, recipe)) launch.push(i + 1);
+        else if (/^setlocal$/i.test(line)) setlocal.push(i + 1);
+    });
+    return { guard, launch, setlocal };
+}
+
 // Sentinels this run's own instrumentation writes and reads. None collides
 // with a real environment variable or with anything a wrapper's real script
 // could print, so parsing never mistakes real output for the harness's own
@@ -953,12 +1048,17 @@ const PIN_CWD_BEGIN = '__KIT_PIN_CWD_BEGIN__';
 const PIN_CWD_END = '__KIT_PIN_CWD_END__';
 const PIN_END = '__KIT_PIN_END__';
 
-// cmd.exe by absolute path, never a bare name: this run exists to observe
-// what a bare interpreter name resolves to, so the harness's own interpreter
-// must not depend on the same search it is measuring.
-const CMD_EXE = process.env.SystemRoot
-    ? path.join(process.env.SystemRoot, 'System32', 'cmd.exe')
-    : 'cmd.exe';
+// cmd.exe by absolute path, never a bare name: this run exists to observe what
+// a bare interpreter name resolves to, so the harness's own interpreter must
+// not depend on the same search it is measuring. There is no bare-name
+// fallback, which would be resolved by exactly that search: an unset SystemRoot
+// reds instead, which on the Windows-only path these runs take means the box is
+// not in a state this instrument can measure anything in.
+function cmdExePath() {
+    assert.ok(process.env.SystemRoot,
+        'SystemRoot is unset, so cmd.exe can only be reached by the same current-directory-then-PATH search this run exists to measure');
+    return path.join(process.env.SystemRoot, 'System32', 'cmd.exe');
+}
 
 // The stub a recipe's script name resolves to, written beside wrapper.cmd so
 // %~dp0<script> reaches it rather than the real doctor.ps1 or memq-shim.js.
@@ -986,7 +1086,29 @@ function decoyScriptText() {
 // call, so the environment and directory comparison is against a call-free
 // run of the same command rather than an assumption about cmd.exe's own
 // footprint.
-function runWrapper(wrapperSourcePath, recipe) {
+//
+// options.gateOnShape says which of the two kinds of wrapper this is, and it is
+// required rather than defaulted, so every call site states which it is. An
+// enrolled wrapper is gated: its shape is asserted BEFORE the spawn, so a
+// wrapper carrying a line outside the allowlist is refused rather than run and
+// judged on whichever of its several paths this one traversal happened to take.
+// A control wrapper is ungated, since a control exists to make one leg speak
+// and reaches that leg through a line the allowlist refuses by design.
+//
+// What the run establishes, exactly: the behaviour of the path the wrapper
+// takes with no arguments. Every wrapper here ends its launch line with %*, and
+// percent expansion happens before cmd.exe parses the line, so an argument can
+// create command positions at runtime that neither this argument-free run nor
+// the static allowlist reads. That path is stated, not swept.
+function runWrapper(wrapperSourcePath, recipe, options) {
+    assert.ok(options && typeof options.gateOnShape === 'boolean',
+        'runWrapper must be told whether the shape gate applies, since an ungated run of an enrolled wrapper judges one path of several');
+    if (options.gateOnShape) {
+        const violations = shapeViolations(fs.readFileSync(wrapperSourcePath, 'utf8'), recipe);
+        assert.deepStrictEqual(violations, [],
+            wrapperSourcePath + ' carries a line outside its recipe\'s allowlist, so this run would cover one of several paths and is refused '
+            + 'rather than taken: ' + describeViolations(violations));
+    }
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-run-'));
     try {
         const workDir = path.join(root, 'work');
@@ -999,8 +1121,14 @@ function runWrapper(wrapperSourcePath, recipe) {
         fs.writeFileSync(path.join(workDir, recipe.script), stubScriptText(recipe.script), 'utf8');
         fs.writeFileSync(path.join(cwdDir, recipe.launches + '.cmd'), decoyScriptText(), 'utf8');
 
-        const env = { ...process.env };
-        delete env.NoDefaultCurrentDirectoryInExePath;
+        // The guard variable is withheld from the child in every casing.
+        // Windows environment names are case-insensitive, so an ambient copy
+        // spelled any other way would close cmd.exe's current-directory search
+        // on its own, silence every decoy, and leave each wrapper's !decoyRan
+        // reading green on evidence the caller supplied rather than on the
+        // wrapper's own guard. The parent may well carry it: an MSYS2 shell
+        // such as Git Bash sets it (see the comment in kit-git-lib.js).
+        const env = childEnvWithout(['NoDefaultCurrentDirectoryInExePath']);
 
         const tail = 'echo ' + PIN_ENV_BEGIN + ' & set & echo ' + PIN_ENV_END
             + ' & echo ' + PIN_CWD_BEGIN + ' & cd & echo ' + PIN_CWD_END
@@ -1008,7 +1136,7 @@ function runWrapper(wrapperSourcePath, recipe) {
 
         function spawnOnce(withCall) {
             const cmdLine = withCall ? ('"' + wrapperPath + '" & ' + tail) : tail;
-            return spawnSync(CMD_EXE, ['/d', '/c', cmdLine], {
+            return spawnSync(cmdExePath(), ['/d', '/c', cmdLine], {
                 encoding: 'utf8',
                 cwd: cwdDir,
                 env,
@@ -1096,15 +1224,19 @@ function withSyntheticWrapper(text, fn) {
 // The text Get-MemqCmdWrapperText actually emits, read by dot-sourcing the
 // installer and calling the function rather than re-parsing its source, so
 // the text under test is what the installer writes rather than a second
-// hand parse of the generator. Asserts CRLF on those real bytes, since
-// cmd.exe parses a batch file by CRLF lines.
+// hand parse of the generator. The readback writer is the installer's own,
+// UTF8Encoding($false) (install-memq-shim.ps1:150), so the bytes read here are
+// the bytes the installer writes: a narrower encoding would replace any
+// non-ASCII byte the generator emits with a question mark before the shape and
+// run legs ever saw it. Asserts CRLF on those real bytes, since cmd.exe parses
+// a batch file by CRLF lines.
 function withGeneratedMemqCmdFile(fn) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-gen-'));
     try {
         const outFile = path.join(dir, 'memq.cmd');
         const script = '. ' + q(MEMQ_INSTALLER_PATH) + '; '
             + '$t = Get-MemqCmdWrapperText; '
-            + '[System.IO.File]::WriteAllText(' + q(outFile) + ', $t, (New-Object System.Text.ASCIIEncoding))';
+            + '[System.IO.File]::WriteAllText(' + q(outFile) + ', $t, (New-Object System.Text.UTF8Encoding($false)))';
         const res = spawnSync(POWERSHELL_EXE,
             ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
             { encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
@@ -1135,8 +1267,47 @@ test('enrollmentGaps flags an unenrolled discovery and a stale recipe independen
     assert.deepStrictEqual(staleGap.stale, ['z.cmd'], 'control: a recipe naming a path git no longer discovers must be named as stale');
 });
 
+// enrollmentGaps is driven above on plain arrays, which says nothing about what
+// the discovery predicate ahead of it actually reaches. This drives the real
+// pathspec against a throwaway repository holding two wrappers spelled in
+// casings the pathspec's own literals never name, so what is measured is reach
+// rather than the plumbing: the lowercase-only pathspec these literals read as
+// finds neither, which is what makes finding both evidence of anything.
+test('the wrapper discovery pathspec finds a wrapper whose extension casing its own literals do not name', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-discovery-'));
+    try {
+        fs.writeFileSync(path.join(dir, 'Foo.CMD'), '@echo off\r\n', 'utf8');
+        fs.writeFileSync(path.join(dir, 'bar.Bat'), '@echo off\r\n', 'utf8');
+        // gitRun returns a result object for any git that ran to completion,
+        // whatever its exit code, so the exit code is what says the setup
+        // worked: a failed init followed by a failed add leaves an empty
+        // listing, which reads exactly like a discovery predicate that misses.
+        const init = gitRun(dir, ['init']);
+        assert.ok(init && init.status === 0,
+            'the control repository could not be initialised (' + JSON.stringify(init) + '), so this control measured nothing');
+        const add = gitRun(dir, ['add', '-A']);
+        assert.ok(add && add.status === 0,
+            'the control wrappers could not be staged (' + JSON.stringify(add) + '), so this control measured nothing');
+
+        const listed = gitOutput(dir, ['-c', 'core.quotePath=false', 'ls-files', '--'].concat(WRAPPER_PATHSPEC));
+        assert.ok(listed !== null, 'the git call that discovers the wrappers did not succeed, so this control measured nothing');
+        const found = listed.split('\n').map((s) => s.trim()).filter(Boolean).sort();
+        assert.deepStrictEqual(found, ['Foo.CMD', 'bar.Bat'],
+            'the discovery pathspec misses a wrapper whose extension is spelled in another casing, which cmd.exe executes all the same, '
+            + 'so such a wrapper would be unenrolled, unrun and unswept with every test here still green: ' + JSON.stringify(found));
+
+        const caseSensitive = gitOutput(dir, ['-c', 'core.quotePath=false', 'ls-files', '--', '*.cmd', '*.bat']);
+        assert.ok(caseSensitive !== null, 'the case-sensitive git call did not succeed, so the half of this control that shows the reach is real measured nothing');
+        assert.deepStrictEqual(caseSensitive.split('\n').map((s) => s.trim()).filter(Boolean), [],
+            'git pathspec matching is case-insensitive on this checkout, so the :(icase) prefix carries no weight here and this control '
+            + 'does not show what the reach costs');
+    } finally {
+        rmDir(dir);
+    }
+});
+
 test('every tracked cmd/bat wrapper is enrolled with a run recipe, and no recipe names a stale path', () => {
-    const listed = gitOutput(REPO, ['-c', 'core.quotePath=false', 'ls-files', '--', '*.cmd', '*.bat']);
+    const listed = gitOutput(REPO, ['-c', 'core.quotePath=false', 'ls-files', '--'].concat(WRAPPER_PATHSPEC));
     assert.ok(listed !== null, 'the git call that discovers the wrappers did not succeed, so this pin swept nothing');
     const discovered = listed.split('\n').map((s) => s.trim()).filter(Boolean);
     assert.ok(discovered.length > 0, 'no tracked .cmd or .bat wrapper was discovered, so this pin swept nothing');
@@ -1157,6 +1328,47 @@ test('every tracked cmd/bat wrapper is a straight line in its recipe\'s allowlis
     }
 });
 
+// The allowlist permits the guard line without requiring it, and the run that
+// would notice a missing guard is Windows-only. This is text, so it runs
+// everywhere: off Windows it is the whole of what holds a wrapper to carrying a
+// scoped guard ahead of its launch.
+function assertWrapperStructure(label, text, recipe) {
+    const { guard, launch, setlocal } = wrapperStructure(text, recipe);
+    assert.strictEqual(guard.length, 1,
+        label + ' carries ' + guard.length + ' guard lines rather than one, so either nothing sets '
+        + 'NoDefaultCurrentDirectoryInExePath before the launch and the bare interpreter name resolves from the caller\'s directory, '
+        + 'or the setting is spelled more than once and this pin cannot say which one the launch runs under');
+    assert.strictEqual(launch.length, 1,
+        label + ' carries ' + launch.length + ' launch lines rather than one, so a run of it covers one launch of several');
+    assert.ok(setlocal.length >= 1 && setlocal[0] < guard[0],
+        label + ' sets the guard at line ' + guard[0] + ' with no setlocal above it (setlocal lines: '
+        + JSON.stringify(setlocal) + '), so the setting outlives the call and changes how every later command '
+        + 'the caller types resolves, for the life of that shell');
+    assert.ok(guard[0] < launch[0],
+        label + ' sets the guard at line ' + guard[0] + ' after its launch at line ' + launch[0]
+        + ', so cmd.exe resolves the interpreter name before anything closes the current-directory search');
+}
+
+test('every tracked cmd/bat wrapper carries exactly one scoped guard ahead of exactly one launch', () => {
+    for (const [rel, recipe] of Object.entries(WRAPPER_RECIPES)) {
+        if (rel === GENERATED_MEMQ_CMD_KEY) continue;
+        assertWrapperStructure(rel, fs.readFileSync(path.join(REPO, rel), 'utf8'), recipe);
+    }
+});
+
+// The structure predicate's own control, on a shape withheld from every literal
+// it reads: a wrapper in perfectly allowlisted shape whose guard line is simply
+// absent. The allowlist accepts it, which is the gap this predicate closes.
+test('the structure check refuses an allowlisted wrapper whose guard line is absent', () => {
+    const recipe = WRAPPER_RECIPES['doctor.cmd'];
+    const unguarded = '@echo off\r\nsetlocal\r\npowershell -NoProfile -File "%~dp0doctor.ps1" %*\r\nexit /b %ERRORLEVEL%\r\n';
+    assert.deepStrictEqual(shapeViolations(unguarded, recipe), [],
+        'control: this wrapper must be inside the shape allowlist, or it is not showing that the allowlist alone lets a guard go missing');
+    assert.throws(() => assertWrapperStructure('control', unguarded, recipe),
+        (err) => err instanceof assert.AssertionError && /carries 0 guard lines rather than one/.test(err.message),
+        'control: a wrapper the allowlist accepts with no guard line at all must be refused here, naming the missing guard');
+});
+
 test('the shape allowlist refuses every line withheld from its own literals, naming the line', () => {
     const recipe = WRAPPER_RECIPES['doctor.cmd'];
     const cases = [
@@ -1174,6 +1386,71 @@ test('the shape allowlist refuses every line withheld from its own literals, nam
     }
 });
 
+// An allowlist refuses everything outside its list by construction, so a
+// refusal-side control says nothing about its reach: every case above would red
+// identically under a predicate that refused every line ever put to it. These
+// run the other way, over lines the launch rule ACCEPTS unless it is tight, and
+// each names the rule that must do the refusing, because a control that reds
+// because a different rule got there first proves nothing about the rule it was
+// written for.
+test('the launch rule refuses an accepted-shaped line by the rule that must refuse it', () => {
+    const recipe = WRAPPER_RECIPES['doctor.cmd'];
+    const cases = [
+        ['an extension-bearing interpreter spelling',
+            'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*',
+            LAUNCH_NOT_TOKEN,
+            'cmd.exe runs powershell.exe without consulting PATHEXT, so a decoy named for the bare token can never be reached and the '
+            + 'decoy leg of every run below would read green while measuring nothing'],
+        ['a hyphen-suffixed interpreter spelling',
+            'powershell-preview -NoProfile -File "%~dp0doctor.ps1" %*',
+            LAUNCH_NOT_TOKEN,
+            'a different interpreter is launched than the one this recipe plants a decoy for'],
+        ['a caret-escaped quote carrying a second command',
+            'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" ^" & echo PWNED',
+            LAUNCH_CARET,
+            'cmd.exe reads the caret as an escape and runs the second command, which changes neither the environment nor the working '
+            + 'directory, so no assertion in the run below would see it'],
+        ['an odd double-quote count carrying a second command',
+            'powershell -NoProfile -File "%~dp0doctor.ps1" " & echo PWNED',
+            LAUNCH_UNBALANCED_QUOTES,
+            'the segment counter reads the rest of the line as quoted and cmd.exe does not, so a second command rides on a line counted as one'],
+        ['an unquoted redirection',
+            'powershell -NoProfile -File "%~dp0doctor.ps1" > out.txt',
+            LAUNCH_REDIRECTION,
+            'the launch writes a file the run never observes'],
+        ['an unquoted ampersand carrying a second command',
+            'powershell -NoProfile -File "%~dp0doctor.ps1" & echo second',
+            LAUNCH_MULTIPLE_SEGMENTS,
+            'a second command runs on the launch line']
+    ];
+    for (const [name, line, expectedReason, consequence] of cases) {
+        const reason = launchLineProblem(line, recipe);
+        assert.strictEqual(reason, expectedReason,
+            'the launch rule must refuse ' + name + ' by the ' + expectedReason + ' rule (it answered ' + JSON.stringify(reason)
+            + '): otherwise ' + consequence);
+        assert.ok(!isAllowedShapeLine(line, recipe),
+            'the shape allowlist must refuse ' + name + ' outright: otherwise ' + consequence);
+    }
+
+    // The other half of the same instrument: the real launch line each tracked
+    // wrapper carries is still accepted, so the tightening above is a rule
+    // about spelling rather than a predicate that has stopped saying yes.
+    assert.strictEqual(launchLineProblem('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0doctor.ps1" %*', recipe), null,
+        'the launch rule refuses the spelling the tracked wrappers actually carry, so it has been tightened past the shape it exists to admit');
+});
+
+// The violation record's own numbering, which the shape test's messages name
+// and nothing else exercises: isAllowedShapeLine alone says only yes or no.
+test('shapeViolations names the offending line by its 1-based number', () => {
+    const recipe = WRAPPER_RECIPES['doctor.cmd'];
+    const text = '@echo off\r\nsetlocal\r\ngoto :end\r\nexit /b 0\r\n';
+    const violations = shapeViolations(text, recipe);
+    assert.deepStrictEqual(violations, [{ lineNumber: 3, line: 'goto :end' }],
+        'the violation must name the third line by number, or a wrapper that grows a branch reds without saying where');
+    assert.strictEqual(describeViolations(violations), 'line 3: "goto :end"',
+        'the failure message must carry the line number and the line itself, or a reader cannot find what the wrapper grew');
+});
+
 test('the generated memq.cmd text is a straight line in its recipe\'s allowlisted shape', { skip: !isWin }, () => {
     withGeneratedMemqCmdFile((outFile) => {
         const text = fs.readFileSync(outFile, 'utf8');
@@ -1181,13 +1458,14 @@ test('the generated memq.cmd text is a straight line in its recipe\'s allowliste
         const violations = shapeViolations(text, recipe);
         assert.deepStrictEqual(violations, [],
             'Get-MemqCmdWrapperText emits a line outside its recipe\'s allowlist, so the run below would cover only one of several paths: ' + describeViolations(violations));
+        assertWrapperStructure('the generated memq.cmd', text, recipe);
     });
 });
 
 test('every tracked cmd/bat wrapper passes all five run assertions under cmd.exe with a decoy of its interpreter planted in the calling directory', { skip: !isWin }, () => {
     for (const [rel, recipe] of Object.entries(WRAPPER_RECIPES)) {
         if (rel === GENERATED_MEMQ_CMD_KEY) continue;
-        const result = runWrapper(path.join(REPO, rel), recipe);
+        const result = runWrapper(path.join(REPO, rel), recipe, { gateOnShape: true });
         assertRunIsSafe(rel, recipe, result);
     }
 });
@@ -1195,7 +1473,7 @@ test('every tracked cmd/bat wrapper passes all five run assertions under cmd.exe
 test('the generated memq.cmd text passes all five run assertions under cmd.exe with a decoy of its interpreter planted in the calling directory', { skip: !isWin }, () => {
     withGeneratedMemqCmdFile((outFile) => {
         const recipe = WRAPPER_RECIPES[GENERATED_MEMQ_CMD_KEY];
-        const result = runWrapper(outFile, recipe);
+        const result = runWrapper(outFile, recipe, { gateOnShape: true });
         assertRunIsSafe('the generated memq.cmd', recipe, result);
     });
 });
@@ -1205,14 +1483,39 @@ test('the generated memq.cmd text passes all five run assertions under cmd.exe w
 // proves nothing about the guard.
 test('an unguarded straight-line wrapper lets the decoy run', { skip: !isWin }, () => {
     withSyntheticWrapper('@echo off\r\npowershell -File "%~dp0doctor.ps1"\r\n', (p) => {
-        const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+        const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
         assert.ok(result.decoyRan, 'control: with no guard at all, the decoy must run');
     });
 });
 
+// The same leg for the other recipe. Every other decoy control here plants a
+// powershell decoy, so nothing else shows a node decoy ever runs: without this,
+// the generated memq.cmd's !decoyRan would read exactly the same whether its
+// guard held or its decoy was simply inert.
+test('an unguarded straight-line node wrapper lets the node decoy run', { skip: !isWin }, () => {
+    withSyntheticWrapper('@echo off\r\nnode "%~dp0memq-shim.js"\r\n', (p) => {
+        const result = runWrapper(p, { launches: 'node', script: 'memq-shim.js' }, { gateOnShape: false });
+        assert.ok(result.decoyRan, 'control: with no guard at all, the node decoy must run, or the generated wrapper\'s decoy leg is measuring nothing');
+    });
+});
+
+// The shape gate's own control, on a wrapper carrying a line the allowlist
+// refuses. The gate reds before mkdtemp and before either spawn, so an enrolled
+// wrapper that grew a branch is refused rather than run and judged on whichever
+// of its paths this one traversal happened to take.
+test('the shape gate refuses a gated wrapper carrying a line outside the allowlist rather than running it', { skip: !isWin }, () => {
+    withSyntheticWrapper(
+        '@echo off\r\nsetlocal\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\ngoto :end\r\npowershell -File "%~dp0doctor.ps1"\r\n',
+        (p) => {
+            assert.throws(() => runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: true }),
+                (err) => err instanceof assert.AssertionError && /line 4: "goto :end"/.test(err.message),
+                'control: a gated wrapper carrying a branch must be refused by the shape gate, naming the line, rather than run down one of its paths');
+        });
+});
+
 test('a guard set with no setlocal leaks the guard variable into the caller\'s shell', { skip: !isWin }, () => {
     withSyntheticWrapper('@echo off\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\npowershell -File "%~dp0doctor.ps1"\r\n', (p) => {
-        const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+        const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
         assert.ok(!result.decoyRan, 'control: the guard was in force at the launch, so the decoy must not have run');
         assert.ok(result.launched, 'control: the real script must have run under the guard');
         assert.ok(result.envDelta.has('NODEFAULTCURRENTDIRECTORYINEXEPATH'),
@@ -1224,7 +1527,7 @@ test('a guard discarded by endlocal before a plain set leaks the set into the ca
     withSyntheticWrapper(
         '@echo off\r\nsetlocal\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\nendlocal & set KIT_PIN_LEAK=1\r\npowershell -File "%~dp0doctor.ps1"\r\n',
         (p) => {
-            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
             assert.ok(result.envDelta.has('KIT_PIN_LEAK'), 'control: a set chained onto endlocal runs outside the scope and must leak, naming KIT_PIN_LEAK');
         });
 });
@@ -1233,7 +1536,7 @@ test('a guard discarded by endlocal before a case-insensitive if-set leaks the a
     withSyntheticWrapper(
         '@echo off\r\nsetlocal\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\nendlocal & if /i "a"=="a" set KIT_PIN_LEAK=1\r\npowershell -File "%~dp0doctor.ps1"\r\n',
         (p) => {
-            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
             assert.ok(result.envDelta.has('KIT_PIN_LEAK'),
                 'control: an assignment reached through a case-insensitive if, chained onto endlocal, runs outside the scope and must leak, naming KIT_PIN_LEAK');
         });
@@ -1243,7 +1546,7 @@ test('a guard discarded by endlocal before the space-less arithmetic set form le
     withSyntheticWrapper(
         '@echo off\r\nsetlocal\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\nendlocal & set/a KIT_PIN_LEAK=5\r\npowershell -File "%~dp0doctor.ps1"\r\n',
         (p) => {
-            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
             assert.ok(result.envDelta.has('KIT_PIN_LEAK'),
                 'control: the space-less arithmetic set form, chained onto endlocal, runs outside the scope and must leak, naming KIT_PIN_LEAK');
         });
@@ -1253,7 +1556,7 @@ test('a guard set, then discarded by endlocal, before the launch lets the decoy 
     withSyntheticWrapper(
         '@echo off\r\nsetlocal\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\nendlocal\r\npowershell -File "%~dp0doctor.ps1"\r\n',
         (p) => {
-            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
             assert.ok(result.decoyRan, 'control: the guard was discarded by endlocal before the launch, so the decoy must run');
         });
 });
@@ -1262,13 +1565,13 @@ test('an unscoped directory change reaches the caller, and the same change under
     withSyntheticWrapper(
         '@echo off\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\ncd "%~dp0"\r\npowershell -File "%~dp0doctor.ps1"\r\n',
         (p) => {
-            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
             assert.ok(result.cwdChanged, 'control: an unscoped cd must change the caller\'s own working directory');
         });
     withSyntheticWrapper(
         '@echo off\r\nsetlocal\r\nset "NoDefaultCurrentDirectoryInExePath=1"\r\ncd "%~dp0"\r\npowershell -File "%~dp0doctor.ps1"\r\n',
         (p) => {
-            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' });
+            const result = runWrapper(p, { launches: 'powershell', script: 'doctor.ps1' }, { gateOnShape: false });
             assert.ok(!result.cwdChanged, 'control: setlocal saves and restores the working directory, so a scoped cd must not change it');
         });
 });
@@ -1280,7 +1583,7 @@ test('the real emitted memq.cmd wrapper, stripped of its scoping line, leaks the
         assert.notStrictEqual(withoutSetlocal, text, 'control: the emitted wrapper carries no setlocal line to remove');
         withSyntheticWrapper(withoutSetlocal, (p) => {
             const recipe = WRAPPER_RECIPES[GENERATED_MEMQ_CMD_KEY];
-            const result = runWrapper(p, recipe);
+            const result = runWrapper(p, recipe, { gateOnShape: false });
             assert.ok(result.envDelta.has('NODEFAULTCURRENTDIRECTORYINEXEPATH'),
                 'control: the emitted wrapper stripped of its setlocal must leak the guard variable into the caller\'s shell');
         });
@@ -1327,7 +1630,7 @@ test('every tracked cmd wrapper is delivered CRLF by attribute rather than by th
         'the tracked .gitattributes carries no eol=crlf text rule for *.bat, so a .bat wrapper added later is delivered by that machine\'s '
         + 'core.autocrlf rather than by the repository');
 
-    const listed = gitOutput(REPO, ['-c', 'core.quotePath=false', 'ls-files', '--eol', '--', '*.cmd', '*.bat']);
+    const listed = gitOutput(REPO, ['-c', 'core.quotePath=false', 'ls-files', '--eol', '--'].concat(WRAPPER_PATHSPEC));
     assert.ok(listed !== null, 'the git call that reports the wrappers\' line endings did not succeed');
     const rows = listed.split('\n').map((s) => s.trim()).filter(Boolean);
     assert.ok(rows.length > 0, 'no tracked wrapper was discovered, so this pin swept nothing');

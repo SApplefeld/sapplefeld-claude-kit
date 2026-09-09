@@ -57,9 +57,9 @@ Acceptance: tests green, watched red first; `node --test test/memory-sync.test.j
 
 One test asserts that the PowerShell reading `Get-MemorySyncMachineName` returns and Node's `os.hostname()` return the same string byte-exact on the running box, skipping with a named reason off Windows, which is the condition the test reads and the one that matters, since the doctor's installer runs on Windows alone, so a platform whose two readings diverge fails the suite on that platform rather than syncing every one of its own files as foreign. A second test plants a directory whose name differs from the machine's only by case and asserts it reads as this machine's own in both sync directions, refused inbound and staged as own outbound, the outbound half reachable only as a staged deletion because a case-folding filesystem cannot realize the variant spelling beside the real directory, with the variant planted through the git index (an `update-index` entry for the outbound case, an upstream fixture commit for the inbound one) rather than on disk, since a case-insensitive filesystem cannot hold both spellings beside each other. A third test guards the input the other two rest on, asserting that the running box's own name is a single directory segment rather than a traversal, since the byte-exact comparison above is satisfied by two empty readings and every fixture in the file builds a real directory from that same value.
 
-The section also carries the cmd-wrapper interpreter hardening its own review surfaced, since a security finding of that weight is fixed before the section closes rather than routed: the two `doctor.cmd` wrappers and the `memq.cmd` text `Get-MemqCmdWrapperText` generates each scope their environment with `setlocal` and set `NoDefaultCurrentDirectoryInExePath` before launching a bare interpreter, and `test/git-guard-parity.test.js` discovers every tracked `.cmd` and `.bat` wrapper from git rather than naming them, pinning the guard, its scoping, and the line endings the repository delivers them on. The predicates read a wrapper as the ordered command positions cmd.exe executes rather than as lines, since the leaks live at the positions a line's first token hides, and each carries a control drawn from a shape withheld from its own literals. A tracked `.gitattributes` fixes `*.cmd` and `*.bat` at `eol=crlf`, since cmd.exe is not reliable parsing an LF-only batch file and what a clone receives is otherwise the cloner's `core.autocrlf`; `docs/architecture.md` states what that file governs, the anchors paragraph there having stated the repository carried none. The sweeps ask git their question through the kit's own git runner rather than a hand-built spawn, that runner being the shared boundary whose working-directory pin is what closes a bare command name's search. The guard closes the interpreter hop alone; the wrapper's own name still resolves from the caller's directory first, which the wrappers state rather than imply.
+The section also carries the cmd-wrapper interpreter hardening its own review surfaced, since a security finding of that weight is fixed before the section closes rather than routed: the two `doctor.cmd` wrappers and the `memq.cmd` text `Get-MemqCmdWrapperText` generates each scope their environment with `setlocal` and set `NoDefaultCurrentDirectoryInExePath` before launching a bare interpreter. The pin over them splits at the seam between the two claims it carries, since neither is honestly established by the other's evidence. The class claim is enrollment: `test/git-guard-parity.test.js` discovers every tracked `.cmd` and `.bat` wrapper from git without regard to the case of its extension and requires each to carry a run recipe, so a wrapper the pin has not run reds rather than passing unswept, and a recipe naming nothing git discovers reds as stale so a rename cannot escape the sweep. The behaviour claim rests on running: each enrolled wrapper is executed under a real cmd.exe from a directory holding a decoy of the interpreter it launches, with the guard scrubbed from the calling environment, and passes only when its launch happened, the decoy did not, and the environment and working directory after the call match a call-free baseline of the same command. Because a run establishes the path it takes, each enrolled wrapper is also held to a straight-line shape allowlist that refuses every line outside a fixed set, which is what makes the run's single path the wrapper's own. The reach so established is every path reachable with no arguments, the wrappers' trailing `%*` creating argument-bearing positions no argument-free run visits, and the check states that rather than claiming the whole. The generated wrapper's text is read from the installer's own function rather than reconstructed from its source. A tracked `.gitattributes` fixes `*.cmd` and `*.bat` at `eol=crlf`, since cmd.exe is not reliable parsing an LF-only batch file and what a clone receives is otherwise the cloner's `core.autocrlf`; `docs/architecture.md` states what that file governs, the anchors paragraph there having stated the repository carried none. The sweeps ask git their question through the kit's own git runner rather than a hand-built spawn, that runner being the shared boundary whose `GIT_*` strip decides which tree the answer describes. The guard closes the interpreter hop alone; the wrapper's own name still resolves from the caller's directory first, which the wrappers state rather than imply.
 
-Acceptance: all three tests green, the parity test watched red against a deliberately wrong constant; every tracked cmd wrapper carrying the guard, its scoping and a tracked `eol=crlf` attribute, with each predicate watched red on a withheld shape rather than only on a spelling it already names; delta named.
+Acceptance: all three tests green, the parity test watched red against a deliberately wrong constant; every tracked cmd wrapper enrolled with a recipe, held to the shape allowlist, and passing all five run assertions under cmd.exe with a decoy of its interpreter planted, its guard's presence asserted on every platform and its tracked `eol=crlf` attribute read through one token predicate on both surfaces; each predicate watched red on a shape withheld from its own literals, the allowlist's controls including accepted-line shapes rather than only refused ones, since an allowlist refuses everything outside its list by construction and a refusal-side control alone says nothing about its reach; delta named.
 
 ### 3. The documents state the control. Model: sonnet
 
@@ -519,3 +519,98 @@ Next action per section: convene the consult on the wrapper pin's design, adopt 
 Standing Brief Amendments block, write the round 8 fix pass under it, re-review the fix delta, then
 steps 5 through 8 to close section 2, then section 3 (sonnet, `Locus: inline` because it writes
 under `docs/`).
+
+### Interim board 7 - 2026-09-08
+
+Written at the compaction gate's deferral signal (34 held offers over 35 minutes), with round 9
+adjudicated and its fix pass in flight. Times below are UTC, so the gate's moment falls on the
+following calendar day from this entry's own local date.
+
+In-flight sections: section 2 implemented and reviewed over nine rounds. The round 8 fix delta is
+committed and pushed at `f2b90fa`; the round 9 fix pass is dispatched and running. Section 3 not
+started; it rewrites documents this section does not touch, so it does not contend.
+
+Live dispatches: one `implementer-opus`, carrying the round 9 fix list at
+`.kit/scratch/consult-wrapper-pin/round9-fixes.md` (twelve items, two of them Critical). It is an
+escalation off the sonnet tier, and ruling 21 below records the class comparison the ladder requires
+before a bump. One consult (`consultant` at fable, effort high) and one `implementer-sonnet`
+completed earlier in this boundary; review round 9 ran three lenses at opus, effort high, through
+Workflow, 3 of 3 done and 0 errored.
+
+Gate, measured by this session on SCOTT-CLAUDE 2026-09-09T00:05:46Z-00:06:28Z while holding the
+heavy-process claim, taken after waiting for a live foreign claim (`AI-OS: Worker`, repo ai-os,
+aged by the claim file's own modification time) which cleared before the first poll of the wait:
+
+- `node --test test/git-guard-parity.test.js test/memq-shim.test.js test/kit-git-lib.test.js`:
+  tests 58, pass 58, fail 0, exit 0, duration 9.9s, against interim board 6's baseline on this same
+  lane of 47/47/0 exit 0 at 12.1s. Delta +11 tests, zero failures either side. The wall clock fell
+  despite the rewrite adding roughly twenty cmd.exe spawns and thirteen interpreter launches, which
+  answers the cost both review lenses flagged: the figure is measured here rather than carried
+  forward.
+- Whole-tree pins, one run: tests 108, pass 108, fail 0, exit 0 across doctrine-parity,
+  doctor-encoding, memory-sync-git-guard and doctor-goal-state. Identical to board 6's.
+- `node --test test/size-ratchet.test.js`: tests 101, pass 100, fail 1, exit 1, on the same routed
+  collateral ruling 6 records: `test/memory-session.test.js` at 3280 against a cap of 3240, the
+  run's own text naming the path as currently matching HEAD. Nothing of this section's is over cap;
+  `test/git-guard-parity.test.js` was synced by name from 1212 to 1340 with 119 entries left
+  untouched, confirmed by reading the file's own diff.
+
+Rulings adopted at this boundary:
+
+19. The consult ruled that the instrument's framing rather than its coverage was wrong, and the
+    ruling is adopted whole. One test was carrying two claims that need different evidence: that
+    these wrappers are correct is a claim about behaviour, honestly established only by running
+    them, and that a wrapper added later is covered is a claim about a class, honestly established
+    only by fail-closed enrollment. The hand-written cmd.exe parser served both from text and could
+    serve neither, which is why rounds 6, 7 and 8 were each a gap between the model and the shell.
+    The pin now runs each wrapper under a real cmd.exe with a decoy of its interpreter planted in
+    the calling directory, enrolls every wrapper git discovers, and holds each to a straight-line
+    shape allowlist so that the path the run takes is the only path the wrapper has. The querent's
+    own lean, to replace parsing with running and nothing more, was tested and found insufficient by
+    the consult: a run alone establishes one traversal, and the shape allowlist is what makes that
+    traversal the whole. Standing Brief Amendment 5 records the general form.
+
+20. Round 9 found two Criticals in the new instrument, both measured here rather than accepted from
+    the report. The launch-token match used a word boundary where a whole token was meant, so
+    `powershell.exe` was accepted; cmd.exe does not consult a `.cmd` decoy for a name already
+    carrying an extension, so with that spelling the decoy cannot fire. Measured: with the bare
+    token the decoy runs, with `.exe` it does not and the real stub does. A wrapper spelled that way
+    with its guard deleted outright therefore passes all five run assertions, which is a green over
+    an unguarded wrapper. Second, the segment splitter modelled quoting as a plain quote toggle with
+    no caret handling, so `powershell ... "%~dp0doctor.ps1" ^" & echo PWNED` is accepted, and cmd.exe
+    was measured really running that second command. Both are fixed in the round 9 pass, and both
+    become the allowlist's first acceptance-side controls, which is the reach evidence amendment 4
+    says a refusal-side control cannot supply.
+
+21. The tier is escalated to opus and no second consult is convened, and the class comparison the
+    ladder requires is this. Round 9's two Criticals and its first two Majors are one class, a
+    matcher looser than the property its own comment claims: a word boundary for a whole token, a
+    quote toggle for cmd.exe's quoting, a case-sensitive git pathspec for case-insensitive
+    filenames, and a case-sensitive environment delete for case-insensitive environment names, that
+    last one beside a correct case-insensitive sibling 690 lines earlier in the same file. A class
+    repeats against round 8's, so the ladder's escalation branch governs rather than its
+    consult branch, which is for the case where no class repeats and the spec's premise is the
+    generator. The framing the consult settled is holding, and the asymmetry is why this is not
+    another round 8: under the retired parser every fix widened an unenumerable model, so a fix
+    could introduce a new silent hole, while under a fail-closed allowlist every fix tightens, and a
+    tightening can only produce a loud false red.
+
+22. A peer session reported that origin/main advanced to `0ed386c`, recording three operator
+    decisions in three plans of this session's armed queue, none of them this plan. Confirmed on
+    this machine's own disk rather than left reported: `0ed386c` is origin/main's tip and its file
+    list is `docs/backlog.md` plus the code-batch, liveness and memory-record-provenance specs, at
+    queue positions 3, 4 and 6. The commit's author is `Claude Bot`, the identity every session here
+    writes under, so the commit attests the content and not the operator's authorship of the
+    decisions in it. Nothing is owed now; each of those plans is read at origin/main or later when
+    the queue reaches it, and the finishing merge takes the whole gate as usual.
+
+Approval drift recorded here: two edits landed inside the approval-scoped region above
+`## Chapters`. A fifth Standing Brief Amendment was added, requiring a check carrying both a
+behaviour claim and a class claim to split into two instruments. Section 2's requirement paragraph
+and its acceptance line were rewritten from the retired command-position instrument to the
+enrollment, shape and run split the section now delivers, the adversarial lens having correctly
+found that the paragraph still specified the mechanism the delta retired.
+
+Next action per section: adjudicate the round 9 fix pass, re-review the fix delta, then steps 5
+through 8 to close section 2, then section 3 (sonnet, `Locus: inline` because it writes under
+`docs/`).
